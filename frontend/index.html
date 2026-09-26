@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LearnAI</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">LearnAI</div>
+  <div class="tag">AI-Powered Adaptive Quiz Platform</div>
+</header>
+
+<main class="container">
+  <section id="setup" class="card hero-card">
+  
+    <h1>Choose a course and topic</h1>
+    <p>Select a course, choose a syllabus topic, and LearnAI will ask OpenAI to generate a fresh 10-question quiz.</p>
+
+    <label>Course</label>
+    <select id="course">
+      <option value="">Select a course</option>
+    </select>
+
+    <label>Topic</label>
+    <select id="topic" disabled>
+      <option value="">Select a course first</option>
+    </select>
+
+    <div class="pattern">
+      <span>4 Easy</span>
+      <span>4 Medium</span>
+      <span>2 Hard</span>
+    </div>
+
+    <button id="generateBtn">Generate Questions with AI</button>
+    <p id="setupMsg" class="message"></p>
+  </section>
+
+  <section id="quizSection" class="hidden">
+    <div class="quiz-head">
+      <div>
+        <div id="quizTitle" class="quiz-title"></div>
+        <div id="progressText" class="muted"></div>
+      </div>
+      <div id="difficultyBadge" class="difficulty"></div>
+    </div>
+
+    <div class="progress"><div id="progressBar"></div></div>
+
+    <div class="card">
+      <div id="concept" class="concept"></div>
+      <h2 id="question"></h2>
+      <div id="options" class="options"></div>
+      <div class="nav-row">
+        <button id="prevBtn" class="secondary">Previous</button>
+        <button id="nextBtn">Next</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="resultSection" class="hidden">
+    <div class="card result-card">
+      <div class="badge">Quiz Completed</div>
+      <h1 id="scoreText"></h1>
+      <h2 id="statusText"></h2>
+      <p id="percentageText" class="muted"></p>
+
+      <div class="analysis-grid">
+        <div>
+          <h3>Strong Concepts</h3>
+          <div id="strongConcepts"></div>
+        </div>
+        <div>
+          <h3>Weak Concepts</h3>
+          <div id="weakConcepts"></div>
+        </div>
+      </div>
+
+      <div class="ai-box">
+        <h3>AI Performance Analysis</h3>
+        <p id="analysisSummary"></p>
+        <h4>Revision</h4>
+        <p id="analysisRevision"></p>
+        <h4>Recommended Next Step</h4>
+        <p id="analysisRecommendation"></p>
+      </div>
+
+      <div id="review"></div>
+
+      <div class="nav-row">
+        <button id="retakeBtn">Retake with New AI Questions</button>
+        <button id="newTopicBtn" class="secondary">Choose Another Topic</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,357 @@
+{
+  "courses": [
+    {
+      "code": "22AM803",
+      "name": "Computer Vision",
+      "short": "CV",
+      "topics": [
+        {
+          "name": "Introduction and Goals of Computer Vision",
+          "context": "Introduction and goals of Computer Vision and Image Processing; Bio-Vision vs Computer-Vision; brief history of image formation concepts."
+        },
+        {
+          "name": "Radiometry",
+          "context": "Radiometry as a fundamental concept of image formation and transformation."
+        },
+        {
+          "name": "Geometric Transformations",
+          "context": "Geometric transformations in computer vision, including 2D and 3D transformations."
+        },
+        {
+          "name": "Geometric Camera Models",
+          "context": "Geometric camera models used for image formation."
+        },
+        {
+          "name": "Camera Calibration",
+          "context": "Camera calibration in computer vision."
+        },
+        {
+          "name": "2D and 3D Rotations and Projections",
+          "context": "2D and 3D rotations and projections."
+        },
+        {
+          "name": "Stereo Vision and Image Reconstruction",
+          "context": "Image formation in a stereo vision setup and image reconstruction from a series of projections."
+        },
+        {
+          "name": "Image Generation",
+          "context": "Basic image processing: image generation."
+        },
+        {
+          "name": "Image Enhancement",
+          "context": "Basic image processing: image enhancement."
+        },
+        {
+          "name": "Image Filtering",
+          "context": "Basic image processing: image filtering."
+        },
+        {
+          "name": "Colour Image Processing",
+          "context": "Basic image processing: colour image processing."
+        },
+        {
+          "name": "Image Segmentation",
+          "context": "Basic image segmentation techniques."
+        },
+        {
+          "name": "Image Descriptors and Features",
+          "context": "Texture descriptors, colour features, edges/boundaries, object boundary and shape representations."
+        },
+        {
+          "name": "Corner and Interest Point Detectors",
+          "context": "Interest or corner point detectors."
+        },
+        {
+          "name": "HOG, SIFT, LBP and SURF",
+          "context": "Histogram of Oriented Gradients (HOG), Scale Invariant Feature Transform (SIFT), Local Binary Patterns (LBP), blobs, scale space and scale selection, Speeded Up Robust Features (SURF)."
+        },
+        {
+          "name": "Bag of Words and VLAD",
+          "context": "Visual matching using Bag-of-Words and VLAD."
+        },
+        {
+          "name": "RANSAC and Hough Transform",
+          "context": "Visual matching using RANSAC and Hough transform."
+        },
+        {
+          "name": "Pyramid Matching",
+          "context": "Pyramid matching in visual matching."
+        },
+        {
+          "name": "Stereo Correspondence",
+          "context": "Stereo vision and the correspondence problem."
+        },
+        {
+          "name": "Motion and Optical Flow",
+          "context": "Motion and optical flow in visual matching."
+        },
+        {
+          "name": "ANN for Pattern Classification",
+          "context": "Artificial Neural Network for pattern classification as a real-time computer vision application."
+        },
+        {
+          "name": "Gesture Recognition",
+          "context": "Gesture recognition as a real-time computer vision application."
+        },
+        {
+          "name": "Motion Estimation",
+          "context": "Motion estimation as a real-time computer vision application."
+        },
+        {
+          "name": "Object Detection and Tracking",
+          "context": "Object detection and tracking in real-time computer vision."
+        },
+        {
+          "name": "Face Recognition",
+          "context": "Face recognition in computer vision."
+        },
+        {
+          "name": "Instance and Category Recognition",
+          "context": "Instance recognition, category recognition, context and scope understanding."
+        }
+      ]
+    },
+    {
+      "code": "22AM301",
+      "name": "Deep Learning",
+      "short": "DL",
+      "topics": [
+        {
+          "name": "History and Applications of Deep Learning",
+          "context": "History of Deep Learning, what is Deep Learning, and applications of Deep Learning."
+        },
+        {
+          "name": "McCulloch-Pitts Neuron",
+          "context": "McCulloch-Pitts neuron as a neural network basic."
+        },
+        {
+          "name": "Perceptron and Perceptron Learning Rule",
+          "context": "Perceptron learning rule and Perceptron convergence theorem."
+        },
+        {
+          "name": "Sigmoidal Neuron",
+          "context": "Sigmoidal neuron."
+        },
+        {
+          "name": "Multilayer Feedforward Neural Networks",
+          "context": "Multi-layer feed forward neural network; shallow and deep neural networks."
+        },
+        {
+          "name": "Backpropagation",
+          "context": "Back propagation algorithm for training neural networks."
+        },
+        {
+          "name": "Gradient Descent and SGD",
+          "context": "Gradient descent method and stochastic gradient descent method."
+        },
+        {
+          "name": "Optimization Methods",
+          "context": "Optimization methods: Adagrad, Adadelta, RMSProp and Adam."
+        },
+        {
+          "name": "Regularization Methods",
+          "context": "Regularization methods: Dropout, DropConnect and Batch Normalization."
+        },
+        {
+          "name": "Activation Functions",
+          "context": "Activation functions: Linear, Sigmoid, ReLU and variations of ReLU."
+        },
+        {
+          "name": "Loss Functions",
+          "context": "Loss functions used while training deep models."
+        },
+        {
+          "name": "Training Improvements",
+          "context": "Dataset augmentation, noise robustness, weight initialization methods, early stopping, parameter sharing and tying, bagging and other ensemble methods."
+        },
+        {
+          "name": "Convolutional Neural Networks",
+          "context": "Foundations of Convolutional Neural Networks."
+        },
+        {
+          "name": "LeNet",
+          "context": "LeNet as a popular deep CNN architecture."
+        },
+        {
+          "name": "AlexNet",
+          "context": "AlexNet as a popular deep CNN architecture."
+        },
+        {
+          "name": "VGGNet",
+          "context": "VGGNet/VGG16/VGG19 as deep CNN architectures."
+        },
+        {
+          "name": "ResNet",
+          "context": "ResNet as a popular deep CNN architecture."
+        },
+        {
+          "name": "GoogleNet",
+          "context": "GoogleNet as a popular deep CNN architecture."
+        },
+        {
+          "name": "Transfer Learning",
+          "context": "Transfer learning approaches using deep pre-trained architectures such as AlexNet, VGG16, VGG19 and ResNet; feature extraction and fine-tuning."
+        },
+        {
+          "name": "Autoencoders",
+          "context": "Autoencoders: under-complete autoencoders, regularized autoencoders, representation power, layer size and depth, stochastic encoders and decoders."
+        },
+        {
+          "name": "Denoising Autoencoders",
+          "context": "Denoising autoencoders."
+        },
+        {
+          "name": "Sparse Autoencoders",
+          "context": "Sparse autoencoders."
+        },
+        {
+          "name": "Contractive Autoencoders",
+          "context": "Contractive autoencoders."
+        },
+        {
+          "name": "Recurrent Neural Networks",
+          "context": "Architecture of an RNN and unfolding of an RNN."
+        },
+        {
+          "name": "Backpropagation Through Time",
+          "context": "Backpropagation through time for recurrent neural networks."
+        },
+        {
+          "name": "LSTM",
+          "context": "Long Short-Term Memory networks."
+        },
+        {
+          "name": "GRU",
+          "context": "Gated Recurrent Units."
+        },
+        {
+          "name": "Text Classification and Sentiment Analysis",
+          "context": "RNN applications: text classification and sentiment analysis."
+        }
+      ]
+    },
+    {
+      "code": "22CS303",
+      "name": "Web Technologies",
+      "short": "WT",
+      "topics": [
+        {
+          "name": "HTML Structured Documents",
+          "context": "HTML: creating structured documents, links and navigation."
+        },
+        {
+          "name": "HTML Tables",
+          "context": "HTML tables."
+        },
+        {
+          "name": "HTML Forms",
+          "context": "HTML forms and form elements."
+        },
+        {
+          "name": "HTML Frames",
+          "context": "HTML frames."
+        },
+        {
+          "name": "HTML5",
+          "context": "Introduction to HTML5."
+        },
+        {
+          "name": "HTML5 Canvas",
+          "context": "The HTML5 Canvas."
+        },
+        {
+          "name": "HTML5 Audio and Video",
+          "context": "HTML5 audio and video."
+        },
+        {
+          "name": "CSS",
+          "context": "Cascading Style Sheets and CSS properties."
+        },
+        {
+          "name": "JavaScript Basics",
+          "context": "How to add scripts to a page; variables, operators and functions."
+        },
+        {
+          "name": "JavaScript DOM",
+          "context": "Document Object Model (DOM) in JavaScript."
+        },
+        {
+          "name": "JavaScript Conditionals and Loops",
+          "context": "Conditional statements and looping in JavaScript."
+        },
+        {
+          "name": "JavaScript Events and Built-in Objects",
+          "context": "Events and built-in objects in JavaScript."
+        },
+        {
+          "name": "JavaScript Form Validation",
+          "context": "Form and regular expression validation using JavaScript."
+        },
+        {
+          "name": "JDBC Introduction and Drivers",
+          "context": "What is JDBC, system requirements and types of JDBC drivers."
+        },
+        {
+          "name": "JDBC Database Connectivity",
+          "context": "Creating database tables, connecting to a database, executing SQL statements, processing result sets and making changes to a result set."
+        },
+        {
+          "name": "JSP Processing",
+          "context": "JSP processing and generating dynamic content using scripting elements."
+        },
+        {
+          "name": "JSP Implicit Objects",
+          "context": "Implicit JSP objects."
+        },
+        {
+          "name": "JSP Data Sharing and JDBC",
+          "context": "Sharing data between JSP pages and JSP application design with JDBC."
+        },
+        {
+          "name": "PHP Basics",
+          "context": "Introduction to PHP, expressions, control flow, functions and objects."
+        },
+        {
+          "name": "PHP Arrays",
+          "context": "Arrays in PHP."
+        },
+        {
+          "name": "PHP with MySQL",
+          "context": "Accessing MySQL using PHP."
+        },
+        {
+          "name": "PHP Form Handling",
+          "context": "Form handling in PHP."
+        },
+        {
+          "name": "PHP Cookies, Sessions and Authentication",
+          "context": "Cookies, sessions and authentication in PHP."
+        },
+        {
+          "name": "AngularJS",
+          "context": "AngularJS: introduction, expressions, modules, directives, controllers, filters, events, forms and form validation."
+        },
+        {
+          "name": "Node.js Basics",
+          "context": "Node.js: introduction, setup development environment and modules."
+        },
+        {
+          "name": "Node Package Manager",
+          "context": "Node Package Manager (NPM)."
+        },
+        {
+          "name": "Node.js Web Server and File System",
+          "context": "Creating a web server, File System and Events in Node.js."
+        },
+        {
+          "name": "Express.js",
+          "context": "Express.js."
+        },
+        {
+          "name": "Node.js with MySQL",
+          "context": "Accessing MySQL from Node.js."
+        }
+      ]
+    }
+  ]
+}

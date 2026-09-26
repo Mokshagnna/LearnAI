@@ -1,0 +1,44 @@
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f5f7f6;color:#17221d}
+.topbar{padding:22px 6%;background:#103f2d;color:#fff;display:flex;align-items:center;justify-content:space-between}
+.brand{font-size:28px;font-weight:800}
+.tag{opacity:.82}
+.container{width:min(980px,92%);margin:40px auto}
+.card{background:#fff;border:1px solid #dfe7e2;border-radius:18px;padding:28px;box-shadow:0 10px 28px rgba(16,63,45,.07)}
+.hero-card{max-width:720px;margin:auto}
+h1{font-size:38px;margin:12px 0}
+h2{line-height:1.35}
+p{line-height:1.6}
+label{display:block;margin:20px 0 8px;font-weight:700}
+input{width:100%;padding:14px 16px;border:1px solid #cfdad3;border-radius:10px;font-size:16px}
+button{background:#136b49;color:#fff;border:none;padding:13px 20px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}
+button:hover{filter:brightness(.95)}
+button.secondary{background:#e9f0ec;color:#174b37}
+.pattern{display:flex;gap:10px;margin:18px 0}
+.pattern span,.badge,.difficulty,.concept{display:inline-block;background:#e7f4ed;color:#14553b;padding:7px 10px;border-radius:999px;font-size:13px;font-weight:800}
+.message{color:#9a3c2f}
+.hidden{display:none}
+.quiz-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.quiz-title{font-size:24px;font-weight:800}
+.muted{color:#66736c}
+.progress{height:10px;background:#e1e8e4;border-radius:999px;overflow:hidden;margin-bottom:18px}
+#progressBar{height:100%;background:#136b49;width:0}
+.options{display:grid;gap:12px;margin-top:20px}
+.option{border:1px solid #d9e3dd;padding:14px;border-radius:12px;cursor:pointer}
+.option.selected{border:2px solid #136b49;background:#edf7f1}
+.nav-row{display:flex;justify-content:space-between;gap:12px;margin-top:24px}
+.analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:22px 0}
+.analysis-grid>div,.ai-box{border:1px solid #dfe7e2;border-radius:14px;padding:18px;background:#fbfcfb}
+.tag-chip{display:inline-block;margin:5px 5px 5px 0;padding:7px 10px;background:#eef4f0;border-radius:999px}
+.review-item{border-top:1px solid #e5ebe7;padding:18px 0}
+.correct{color:#16794f;font-weight:800}
+.wrong{color:#b4493a;font-weight:800}
+@media(max-width:700px){
+  .topbar{display:block}
+  .tag{margin-top:5px}
+  h1{font-size:30px}
+  .analysis-grid{grid-template-columns:1fr}
+  .nav-row{flex-direction:column}
+}
+
+select{width:100%;padding:14px 16px;border:1px solid #cfdad3;border-radius:10px;font-size:16px;background:#fff}.course-meta{margin-top:8px}
