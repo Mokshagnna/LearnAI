@@ -7,23 +7,24 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">LearnAI</div>
-  <div class="tag">AI-Powered Adaptive Quiz Platform</div>
-</header>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+  <header class="topbar">
+    <div id="brandLogo" class="brand" style="cursor: pointer;" title="Back to Home">LearnAI</div>
+    <div class="tag">AI-Powered Adaptive Quiz Platform</div>
+  </header>
 
-<main class="container">
+  <main id="main-content" class="container">
+  <!-- 1. Home / Setup Screen -->
   <section id="setup" class="card hero-card">
-  
     <h1>Choose a course and topic</h1>
-    <p>Select a course, choose a syllabus topic, and LearnAI will ask OpenAI to generate a fresh 10-question quiz.</p>
+    <p>Select a course, choose a syllabus topic, and LearnAI will generate a fresh 10-question quiz.</p>
 
-    <label>Course</label>
+    <label for="course">Course</label>
     <select id="course">
       <option value="">Select a course</option>
     </select>
 
-    <label>Topic</label>
+    <label for="topic">Topic</label>
     <select id="topic" disabled>
       <option value="">Select a course first</option>
     </select>
@@ -38,34 +39,79 @@
     <p id="setupMsg" class="message"></p>
   </section>
 
-  <section id="quizSection" class="hidden">
-    <div class="quiz-head">
-      <div>
-        <div id="quizTitle" class="quiz-title"></div>
-        <div id="progressText" class="muted"></div>
-      </div>
-      <div id="difficultyBadge" class="difficulty"></div>
+  <!-- 2. Loading Screen (Calm, Minimal, Academic) -->
+  <section id="loadingSection" class="card loading-card hidden" role="status" aria-live="polite">
+    <div class="loading-spinner-wrap">
+      <div class="spinner" aria-hidden="true"></div>
     </div>
-
-    <div class="progress"><div id="progressBar"></div></div>
-
-    <div class="card">
-      <div id="concept" class="concept"></div>
-      <h2 id="question"></h2>
-      <div id="options" class="options"></div>
-      <div class="nav-row">
-        <button id="prevBtn" class="secondary">Previous</button>
-        <button id="nextBtn">Next</button>
+    <h2 class="loading-title">Preparing Your Quiz</h2>
+    <p class="loading-desc">We're creating 10 questions based on your selected syllabus topic.</p>
+    <div id="loadingTopicLabel" class="loading-topic-label">—</div>
+    <p class="loading-hint">This may take a few moments...</p>
+    <div class="loading-actions">
+      <button id="loadingCancelBtn" type="button" class="secondary cancel-btn">Cancel</button>
+    </div>
+    <div id="loadingErrorBox" class="hidden" style="margin-top: 20px;">
+      <div id="loadingErrorMsg" style="color: #b4493a; font-weight: 600; margin-bottom: 14px;"></div>
+      <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+        <button id="loadingRetryBtn" type="button">Retry</button>
+        <button id="loadingBackBtn" type="button" class="secondary">Choose Another Topic</button>
       </div>
     </div>
   </section>
 
+  <!-- 3. Active Quiz Screen -->
+  <section id="quizSection" class="hidden">
+    <header class="quiz-header">
+      <div class="quiz-header-main">
+        <div id="quizCourse" class="quiz-course-label"></div>
+        <h1 id="quizTitle" class="quiz-topic-title"></h1>
+      </div>
+      <div class="quiz-meta-subtle">
+        <span id="quizAttemptNumber" class="quiz-attempt-tag"></span>
+      </div>
+    </header>
+
+    <div class="quiz-progress-bar-wrap">
+      <div class="quiz-progress-meta">
+        <span id="progressText" class="progress-question-count">Question 1 of 10</span>
+        <span id="difficultyBadge" class="difficulty-tag">Easy</span>
+      </div>
+      <div class="progress" role="progressbar" aria-valuenow="10" aria-valuemin="0" aria-valuemax="100" aria-label="Quiz progress">
+        <div id="progressBar"></div>
+      </div>
+    </div>
+
+    <div class="card question-card">
+      <div id="concept" class="question-concept-subtle"></div>
+      <h2 id="question" class="question-heading"></h2>
+      <div id="options" class="options" role="radiogroup" aria-label="Answer options"></div>
+      <div id="quizAlert" class="message" style="margin-top: 12px; min-height: 20px; font-weight: 600;" aria-live="polite"></div>
+      <div class="nav-row">
+        <button id="prevBtn" class="secondary" aria-label="Previous question">Previous</button>
+        <button id="nextBtn" aria-label="Next question">Next</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Result Screen -->
   <section id="resultSection" class="hidden">
     <div class="card result-card">
       <div class="badge">Quiz Completed</div>
       <h1 id="scoreText"></h1>
       <h2 id="statusText"></h2>
       <p id="percentageText" class="muted"></p>
+
+      <div class="results-grid">
+        <div class="result-section">
+          <h3>Difficulty-wise Performance</h3>
+          <div id="difficultyPerformance"></div>
+        </div>
+        <div class="result-section">
+          <h3>Concept-wise Performance</h3>
+          <div id="conceptPerformance"></div>
+        </div>
+      </div>
 
       <div class="analysis-grid">
         <div>
@@ -89,9 +135,15 @@
 
       <div id="review"></div>
 
-      <div class="nav-row">
-        <button id="retakeBtn">Retake with New AI Questions</button>
-        <button id="newTopicBtn" class="secondary">Choose Another Topic</button>
+      <!-- Attempt History for this Topic -->
+      <div id="attemptHistorySection" class="hidden" style="margin-top: 26px; border-top: 1px solid #dfe7e2; padding-top: 20px;">
+        <h3>Attempt History for this Topic</h3>
+        <div id="attemptHistoryList"></div>
+      </div>
+
+      <div class="nav-row result-actions" style="margin-top: 30px;">
+        <button id="retakeBtn">🔄 Retake with New AI Questions</button>
+        <button id="newTopicBtn" class="secondary">📚 Choose Another Topic</button>
       </div>
     </div>
   </section>
