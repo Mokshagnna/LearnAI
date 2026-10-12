@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-google-genai
-groq
-openai
-python-dotenv
-sqlite-utils
-scikit-learn
