@@ -1,147 +1,616 @@
 import os
-import json
-import re
-from google import genai
+import time
+import uuid
+import logging
+from pathlib import Path
+from typing import Optional, Dict, Any, List
+
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+from services.providers.base import (
+    BaseAIProvider,
+    ProviderUnavailableError,
+    ProviderConfigError,
+    ProviderError,
+    extract_json_from_text,
+    validate_quiz_data,
+    get_quiz_prompt
+)
+from services.providers.gemini_provider import GeminiProvider
+from services.providers.groq_provider import GroqProvider
+from services.providers.nvidia_provider import NvidiaProvider
+from services.database import get_or_create_student, get_topic_history, get_concept_performance, get_question_fingerprints, get_question_concepts
+from services.adaptive import get_recommended_difficulty, get_difficulty_distribution, get_adaptive_prompt_additions, get_adaptive_explanation
+from services.novelty import (
+    extract_fingerprints_from_history,
+    extract_concepts_from_history,
+    evaluate_quiz_novelty,
+    build_exclusion_prompt_block,
+    is_question_near_duplicate
+)
 
-def _get_client():
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is missing from .env")
-    return genai.Client(api_key=api_key)
+# Ensure backend/.env is reliably loaded regardless of working directory
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_ENV_FILE = _BACKEND_DIR / ".env"
+if _ENV_FILE.is_file():
+    load_dotenv(_ENV_FILE, override=True)
+else:
+    load_dotenv(override=True)
 
-def _extract_json(text):
-    text = text.strip()
+logger = logging.getLogger("learnai.orchestrator")
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
 
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text).strip()
-        text = re.sub(r"```$", "", text).strip()
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DEMO_QUESTIONS_FILE = DATA_DIR / "demo_questions.json"
 
-    return json.loads(text)
+MAX_NOVELTY_REPAIR_ATTEMPTS = int(os.getenv("MAX_NOVELTY_REPAIR_ATTEMPTS", "2"))
 
-def generate_quiz(course_code, course_name, topic_name, syllabus_context):
-    client = _get_client()
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
-    prompt = f"""
-You are an educational AI quiz generator for B.Tech CSE-AI&ML students.
+class AIError(Exception):
+    """Base exception for AI operations."""
+    pass
 
-Course Code: {course_code}
-Course Name: {course_name}
+
+class AIServiceUnavailableError(AIError):
+    """Raised when all configured AI providers are temporarily unavailable or exceeded deadline."""
+    def __init__(self, message: str, category: str = "SERVICE_UNAVAILABLE", retryable: bool = True):
+        super().__init__(message)
+        self.category = category
+        self.retryable = retryable
+
+
+class AIConfigError(AIError):
+    """Raised when there is an authentication, API key, or permanent configuration error."""
+    def __init__(self, message: str, category: str = "CONFIG_ERROR"):
+        super().__init__(message)
+        self.category = category
+
+
+def _get_providers() -> List[BaseAIProvider]:
+    """
+    Returns providers in prioritized order based on PROVIDER_ORDER env var.
+    Default order: groq → nvidia → gemini
+    Configurable via PROVIDER_ORDER=groq,nvidia,gemini (comma-separated)
+    """
+    provider_map = {
+        "gemini": GeminiProvider(),
+        "groq": GroqProvider(),
+        "nvidia": NvidiaProvider(),
+    }
+
+    order_str = os.getenv("PROVIDER_ORDER", "groq,nvidia,gemini")
+    order = [p.strip().lower() for p in order_str.split(",") if p.strip()]
+
+    ordered = []
+    seen = set()
+    for name in order:
+        if name in provider_map and name not in seen:
+            ordered.append(provider_map[name])
+            seen.add(name)
+
+    # Append any not listed
+    for name, provider in provider_map.items():
+        if name not in seen:
+            ordered.append(provider)
+
+    return ordered
+
+
+def _load_local_demo_questions(
+    course_code: str,
+    topic_name: str,
+    concepts: Optional[List[str]] = None,
+    syllabus_context: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Safe fallback mechanism for college demonstration if local questions already exist."""
+    if not DEMO_QUESTIONS_FILE.is_file():
+        return None
+    try:
+        import json
+        with open(DEMO_QUESTIONS_FILE, "r", encoding="utf-8") as f:
+            demo_data = json.load(f)
+
+        key = f"{course_code}::{topic_name}"
+        data = None
+        if key in demo_data:
+            data = demo_data[key]
+        else:
+            for item in demo_data.get("quizzes", []):
+                if item.get("course_code") == course_code and item.get("topic") == topic_name:
+                    data = item
+                    break
+
+        if data:
+            validated = validate_quiz_data(
+                data,
+                data.get("subject", ""),
+                topic_name,
+                concepts=concepts,
+                syllabus_context=syllabus_context
+            )
+            validated["is_fallback"] = True
+            validated["fallback_label"] = "Local Demo Question Bank (Offline Mode)"
+            return validated
+    except Exception as e:
+        logger.warning(f"[FALLBACK ERROR] Could not read local demo questions: {e}")
+    return None
+
+
+def generate_quiz(
+    course_code: str,
+    course_name: str,
+    topic_name: str,
+    syllabus_context: str,
+    student_id: Optional[str] = None,
+    concepts: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Multi-provider quiz generation with:
+    - Configurable provider priority order (PROVIDER_ORDER env var)
+    - Per-provider timeout budgets
+    - Bounded overall deadline
+    - Comprehensive Question & Concept Novelty checking (detects text and concept duplicates)
+    - Adaptive difficulty based on student history
+    - Anti-repetition prompt enrichment with previously tested concepts
+    - Automatic fallback to local demo questions
+    """
+    attempt_id = str(uuid.uuid4())
+
+    # ── Student context ───────────────────────────────────────────────────────
+    student_id = get_or_create_student(student_id)
+    topic_history = get_topic_history(student_id, course_code, topic_name)
+    attempt_number = len(topic_history) + 1
+
+    # Deduplicated weak concepts from history
+    seen_concepts: Dict[str, None] = {}
+    for attempt in topic_history:
+        for c in attempt.get("weak_concepts", []):
+            seen_concepts[c] = None
+    weak_concepts = list(seen_concepts.keys())
+
+    # Adaptive difficulty
+    recommended_difficulty = get_recommended_difficulty(student_id, course_code, weak_concepts)
+    difficulty_dist = get_difficulty_distribution(recommended_difficulty)
+
+    logger.info(
+        f"[ADAPTIVE] student={student_id} course={course_code} topic='{topic_name}' "
+        f"attempt=#{attempt_number} recommended={recommended_difficulty} dist={difficulty_dist} weak={weak_concepts}"
+    )
+
+    adaptive_context = get_adaptive_prompt_additions(
+        student_id, course_code, topic_name, recommended_difficulty, weak_concepts
+    )
+
+    # Get adaptive explanation for UI
+    adaptive_explanation = get_adaptive_explanation(
+        student_id, course_code, recommended_difficulty, weak_concepts
+    )
+
+    # ── Novelty & Concept History ─────────────────────────────────────────────
+    # Get fingerprints and concepts from both quiz_attempts (legacy) and question_metadata (new)
+    history_fingerprints_from_attempts = extract_fingerprints_from_history(topic_history)
+    history_concepts_from_attempts = extract_concepts_from_history(topic_history)
+    
+    # Also get from question_metadata table for more comprehensive history
+    history_fingerprints_from_metadata = get_question_fingerprints(student_id, course_code, topic_name)
+    history_concepts_from_metadata = get_question_concepts(student_id, course_code, topic_name)
+    
+    # Merge and deduplicate
+    all_fingerprints = history_fingerprints_from_attempts + [
+        fp for fp in history_fingerprints_from_metadata if fp not in history_fingerprints_from_attempts
+    ]
+    all_concepts = history_concepts_from_attempts + [
+        c for c in history_concepts_from_metadata if c not in history_concepts_from_attempts
+    ]
+    
+    novelty_block = build_exclusion_prompt_block(
+        history_fingerprints=all_fingerprints,
+        history_concepts=all_concepts,
+        attempt_id=attempt_id,
+        attempt_number=attempt_number
+    )
+
+    logger.info(
+        f"[NOVELTY] attempt_id={attempt_id} student={student_id} attempt=#{attempt_number} "
+        f"history_questions={len(all_fingerprints)} history_concepts={len(all_concepts)}"
+    )
+
+    # ── Provider orchestration ────────────────────────────────────────────────
+    start_time = time.perf_counter()
+    overall_deadline = float(os.getenv("OVERALL_DEADLINE_SECONDS", "25.0"))
+
+    providers = _get_providers()
+    configured_providers = [p for p in providers if p.is_configured()]
+
+    if not configured_providers:
+        local_quiz = _load_local_demo_questions(
+            course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context
+        )
+        if local_quiz:
+            local_quiz["attempt_id"] = attempt_id
+            return local_quiz
+        raise AIConfigError("No AI provider is configured. Set GROQ_API_KEY, NVIDIA_API_KEY, or GEMINI_API_KEY in .env.")
+
+    logger.info(
+        f"[QUIZ GEN START] attempt_id={attempt_id} course={course_code} topic='{topic_name}' "
+        f"providers={[p.name for p in configured_providers]} deadline={overall_deadline:.1f}s "
+        f"max_repairs={MAX_NOVELTY_REPAIR_ATTEMPTS}"
+    )
+
+    last_error: Optional[Exception] = None
+    novelty_repair_count = 0
+    best_quiz: Optional[Dict[str, Any]] = None
+    best_novelty_score = -1
+
+    num_configured = len(configured_providers)
+    provider_timeout_budget = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "12.0"))
+    max_retries = int(os.getenv("AI_MAX_RETRIES", "1"))
+
+    for p_idx, provider in enumerate(configured_providers):
+        for attempt_idx in range(max_retries + 1):
+            elapsed = time.perf_counter() - start_time
+            time_remaining = overall_deadline - elapsed
+
+            if time_remaining <= 2.0:
+                logger.warning(
+                    f"[DEADLINE REACHED] Only {time_remaining:.1f}s remaining. "
+                    f"Skipping provider={provider.name}."
+                )
+                break
+
+            # Reserve time for remaining providers
+            remaining_providers = num_configured - (p_idx + 1)
+            if remaining_providers > 0 and time_remaining > provider_timeout_budget + 2:
+                provider_timeout = min(provider_timeout_budget, time_remaining * 0.6)
+            else:
+                provider_timeout = min(provider_timeout_budget, time_remaining)
+
+            logger.info(
+                f"[PROVIDER ATTEMPT] provider={provider.name} attempt={attempt_idx + 1}/{max_retries + 1} "
+                f"budget={provider_timeout:.1f}s time_remaining={time_remaining:.1f}s "
+                f"fallback_count={p_idx}"
+            )
+
+            try:
+                base_prompt = get_quiz_prompt(
+                    course_code=course_code,
+                    course_name=course_name,
+                    topic_name=topic_name,
+                    syllabus_context=syllabus_context,
+                    difficulty_dist=difficulty_dist,
+                    concepts=concepts
+                )
+                extra_parts = []
+                if novelty_block:
+                    extra_parts.append(novelty_block)
+                if adaptive_context:
+                    extra_parts.append(adaptive_context)
+                full_prompt = base_prompt + ("\n\n" + "\n\n".join(extra_parts) if extra_parts else "")
+
+                raw_text = provider.generate_quiz_raw(
+                    course_code=course_code,
+                    course_name=course_name,
+                    topic_name=topic_name,
+                    syllabus_context=syllabus_context,
+                    timeout_seconds=provider_timeout,
+                    custom_prompt=full_prompt
+                )
+                data = extract_json_from_text(raw_text)
+                validated_quiz = validate_quiz_data(
+                    data,
+                    course_name,
+                    topic_name,
+                    concepts=concepts,
+                    syllabus_context=syllabus_context
+                )
+
+                # ── Bounded Replenishment for missing unique questions ─────────
+                current_unique = validated_quiz["questions"]
+                rep_attempts = 0
+                while len(current_unique) < 10 and rep_attempts < 2:
+                    rep_attempts += 1
+                    needed = 10 - len(current_unique)
+                    time_left = overall_deadline - (time.perf_counter() - start_time)
+                    if time_left <= 4.0:
+                        break
+                    ask_count = min(needed + 2, 7)
+                    logger.info(
+                        f"[REPLENISHMENT round {rep_attempts}] provider={provider.name} generated {len(current_unique)}/10 unique questions. "
+                        f"Requesting {ask_count} replenishment questions (needed={needed}) for '{topic_name}'..."
+                    )
+                    try:
+                        existing_texts = [q["question"] for q in current_unique]
+                        concept_str = ", ".join(concepts) if concepts else topic_name
+                        rep_full_prompt = f"""You are an expert academic AI quiz generator for {course_code} - {course_name}.
 Selected Topic: {topic_name}
+Syllabus Concepts: {concept_str}
 
-Syllabus Context:
-{syllabus_context}
+We need AT LEAST {ask_count} additional, completely NEW and UNIQUE multiple-choice questions for '{topic_name}' to complete a 10-question set.
+CRITICAL: Do NOT duplicate or rephrase any of these already accepted questions:
+""" + "\n".join(f"  - {t}" for t in existing_texts) + f"""
 
-Generate exactly 10 multiple-choice questions only from the selected topic.
-
-Requirements:
-- Questions 1 to 4 must be Easy
-- Questions 5 to 8 must be Medium
-- Questions 9 and 10 must be Hard
-- Every question must contain exactly four options: A, B, C and D
-- Exactly one correct answer
-- Include the concept tested
-- Include a short explanation
-- Do not repeat questions
-- Return only valid JSON
-
-Return this structure:
-
+REQUIREMENTS:
+- Return AT LEAST {ask_count} questions strictly assessing '{topic_name}'.
+- Each question must have 4 distinct options (A, B, C, D) with non-empty text.
+- Valid correct_answer letter (A, B, C, or D).
+- Specify the tested concept in the 'concept' field.
+- Return ONLY valid JSON:
 {{
-  "subject": "{course_name}",
-  "topic": "{topic_name}",
   "questions": [
     {{
-      "question": "Question text",
-      "options": {{
-        "A": "Option A",
-        "B": "Option B",
-        "C": "Option C",
-        "D": "Option D"
-      }},
+      "question": "Question text directly testing {topic_name}",
+      "options": {{"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D"}},
       "correct_answer": "A",
-      "difficulty": "Easy",
-      "concept": "Concept name",
-      "explanation": "Short explanation"
+      "difficulty": "Medium",
+      "concept": "{concepts[0] if concepts else topic_name}",
+      "explanation": "1-sentence explanation"
     }}
   ]
-}}
-"""
+}}"""
+                        raw_rep = provider.generate_quiz_raw(
+                            course_code=course_code,
+                            course_name=course_name,
+                            topic_name=topic_name,
+                            syllabus_context=syllabus_context,
+                            timeout_seconds=min(time_left * 0.8, 8.0),
+                            custom_prompt=rep_full_prompt,
+                            max_tokens=min(1200, 180 * ask_count + 100)
+                        )
+                        rep_data = extract_json_from_text(raw_rep)
+                        rep_validated = validate_quiz_data(
+                            rep_data,
+                            course_name,
+                            topic_name,
+                            concepts=concepts,
+                            syllabus_context=syllabus_context,
+                            min_questions=1
+                        )
+                        for cand_q in rep_validated["questions"]:
+                            if len(current_unique) >= 10:
+                                break
+                            if not any(is_question_near_duplicate(ex_q, cand_q)[0] for ex_q in current_unique):
+                                current_unique.append(cand_q)
+                        validated_quiz["questions"] = current_unique
+                        logger.info(
+                            f"[REPLENISHMENT SUCCESS round {rep_attempts}] provider={provider.name} total unique questions: {len(current_unique)}/10"
+                        )
+                    except Exception as rep_err:
+                        logger.warning(f"[REPLENISHMENT FAILED round {rep_attempts}] provider={provider.name}: {rep_err}")
 
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config={
-            "response_mime_type": "application/json"
-        }
+                if len(validated_quiz["questions"]) < 10:
+                    raise ValueError(f"Provider {provider.name} generated only {len(validated_quiz['questions'])} unique valid questions (need 10).")
+
+                # Slice strictly to 10 unique questions
+                validated_quiz["questions"] = validated_quiz["questions"][:10]
+
+                # ── Comprehensive Novelty Evaluation (text + concepts) ─────────
+                novelty_result = evaluate_quiz_novelty(
+                    questions=validated_quiz["questions"],
+                    history_fingerprints=all_fingerprints,
+                    history_concepts=all_concepts
+                )
+
+                is_novel = novelty_result["is_fully_novel"]
+                flagged_indices = novelty_result["all_flagged_indices"]
+                novel_count = novelty_result["novel_count"]
+
+                if novel_count > best_novelty_score:
+                    best_quiz = validated_quiz
+                    best_novelty_score = novel_count
+
+                if not is_novel:
+                    novelty_repair_count += 1
+                    logger.warning(
+                        f"[NOVELTY EVAL] provider={provider.name} "
+                        f"novel={novel_count}/10, flagged={len(flagged_indices)} "
+                        f"reasons={novelty_result['duplicate_reasons'][:3]} "
+                        f"Repair attempt {novelty_repair_count}/{MAX_NOVELTY_REPAIR_ATTEMPTS}."
+                    )
+
+                    if novelty_repair_count <= MAX_NOVELTY_REPAIR_ATTEMPTS:
+                        elapsed_now = time.perf_counter() - start_time
+                        repair_budget = overall_deadline - elapsed_now
+                        # Only attempt repair if at least 4.5s remain in overall deadline
+                        if repair_budget > 4.5:
+                            try:
+                                # Specific repair prompt targeting repeated concepts
+                                reasons_str = "\n".join(f"- {r}" for r in novelty_result["duplicate_reasons"][:5])
+                                e_c = difficulty_dist.get("Easy", 4)
+                                m_c = difficulty_dist.get("Medium", 4)
+                                h_c = difficulty_dist.get("Hard", 2)
+                                repair_feedback = (
+                                    f"CRITICAL REPAIR REQUIRED FOR RETAKE #{attempt_number}:\n"
+                                    f"The previously generated questions duplicated previous questions or concepts:\n"
+                                    f"{reasons_str}\n\n"
+                                    f"You MUST replace the questions at 1-based indices {[i + 1 for i in flagged_indices]} with completely NEW questions "
+                                    f"testing DIFFERENT learning objectives, application problems, or circuit examples from the topic context: '{syllabus_context}'.\n"
+                                    f"Return all 10 questions in valid JSON meeting the required {e_c} Easy, {m_c} Medium, {h_c} Hard distribution.\n"
+                                )
+                                repair_prompt = base_prompt + "\n\n" + repair_feedback + "\n\n" + novelty_block
+
+                                raw_repair = provider.generate_quiz_raw(
+                                    course_code=course_code,
+                                    course_name=course_name,
+                                    topic_name=topic_name,
+                                    syllabus_context=syllabus_context,
+                                    timeout_seconds=min(repair_budget * 0.8, 9.0),
+                                    custom_prompt=repair_prompt
+                                )
+                                data_repair = extract_json_from_text(raw_repair)
+                                validated_repair = validate_quiz_data(
+                                    data_repair,
+                                    course_name,
+                                    topic_name,
+                                    concepts=concepts,
+                                    syllabus_context=syllabus_context
+                                )
+                                novelty_repair = evaluate_quiz_novelty(
+                                    questions=validated_repair["questions"],
+                                    history_fingerprints=all_fingerprints,
+                                    history_concepts=all_concepts
+                                )
+
+                                if novelty_repair["novel_count"] >= novel_count:
+                                    validated_quiz = validated_repair
+                                    is_novel = novelty_repair["is_fully_novel"]
+                                    novel_count = novelty_repair["novel_count"]
+                                    if novel_count > best_novelty_score:
+                                        best_quiz = validated_quiz
+                                        best_novelty_score = novel_count
+                                    logger.info(
+                                        f"[NOVELTY REPAIR RESULT] provider={provider.name} "
+                                        f"improved novelty to {novel_count}/10 (is_novel={is_novel})"
+                                    )
+                            except Exception as repair_err:
+                                logger.warning(f"[NOVELTY REPAIR ERROR] provider={provider.name}: {repair_err}")
+
+                # ── Apply adaptive difficulty distribution ────────────────────
+                expected_difficulties = []
+                for diff, count in difficulty_dist.items():
+                    expected_difficulties.extend([diff] * count)
+                for index, q in enumerate(validated_quiz["questions"]):
+                    if index < len(expected_difficulties):
+                        q["difficulty"] = expected_difficulties[index]
+
+                validated_quiz["recommended_difficulty"] = recommended_difficulty
+                validated_quiz["adaptive_applied"] = recommended_difficulty != "mixed"
+                validated_quiz["adaptive_explanation"] = adaptive_explanation
+                validated_quiz["attempt_id"] = attempt_id
+                validated_quiz["attempt_number"] = attempt_number
+                validated_quiz["novelty_repairs"] = novelty_repair_count
+                validated_quiz["provider_used"] = provider.name
+                validated_quiz["novelty_warning"] = not is_novel
+                validated_quiz["novel_count"] = novel_count
+
+                total_duration = time.perf_counter() - start_time
+                logger.info(
+                    f"[QUIZ GEN SUCCESS] provider={provider.name} course={course_code} "
+                    f"topic='{topic_name}' attempt=#{attempt_number} questions={len(validated_quiz['questions'])} "
+                    f"total_duration={total_duration:.2f}s adaptive={recommended_difficulty} "
+                    f"novelty={novel_count}/10 novel (warning={not is_novel})"
+                )
+                return validated_quiz
+
+            except ProviderConfigError as pce:
+                last_error = pce
+                logger.error(
+                    f"[PROVIDER CONFIG ERROR] provider={provider.name} "
+                    f"category={pce.category} retryable={pce.retryable}: {pce}"
+                )
+                if len(configured_providers) == 1:
+                    raise AIConfigError(str(pce), category=pce.category) from pce
+                break
+            except ValueError as ve:
+                last_error = ve
+                time_left = overall_deadline - (time.perf_counter() - start_time)
+                if attempt_idx < max_retries and time_left > 4.5:
+                    logger.warning(
+                        f"[PROVIDER MALFORMED OUTPUT] provider={provider.name} "
+                        f"attempt={attempt_idx + 1}/{max_retries + 1}: {ve}. Retrying..."
+                    )
+                    continue
+                logger.warning(
+                    f"[PROVIDER FAILED] provider={provider.name} category=MALFORMED_OUTPUT: {ve}"
+                )
+                break
+            except (ProviderUnavailableError, ProviderError) as pe:
+                last_error = pe
+                logger.warning(
+                    f"[PROVIDER FAILED] provider={provider.name} "
+                    f"category={getattr(pe, 'category', 'ERROR')} retryable={getattr(pe, 'retryable', False)}: {pe}"
+                )
+                break
+
+    # ── All providers failed ──────────────────────────────────────────────────
+    if best_quiz is not None:
+        total_duration = time.perf_counter() - start_time
+        logger.warning(
+            f"[NOVELTY FALLBACK] Returning best available quiz across all attempts. "
+            f"total_duration={total_duration:.2f}s best_novelty={best_novelty_score}/10 "
+            f"providers_tried={len(configured_providers)}"
+        )
+        best_quiz["novelty_warning"] = True
+        best_quiz["attempt_id"] = attempt_id
+        best_quiz["attempt_number"] = attempt_number
+        best_quiz["adaptive_explanation"] = adaptive_explanation
+        return best_quiz
+
+    local_quiz = _load_local_demo_questions(
+        course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context
     )
+    if local_quiz:
+        total_duration = time.perf_counter() - start_time
+        logger.info(
+            f"[QUIZ GEN FALLBACK] Using local demo questions for {course_code} - "
+            f"'{topic_name}' duration={total_duration:.2f}s"
+        )
+        local_quiz["attempt_id"] = attempt_id
+        local_quiz["attempt_number"] = attempt_number
+        local_quiz["adaptive_explanation"] = adaptive_explanation
+        return local_quiz
 
-    data = _extract_json(response.text)
+    total_duration = time.perf_counter() - start_time
+    last_error_category = getattr(last_error, 'category', 'UNKNOWN') if last_error else 'UNKNOWN'
+    logger.error(
+        f"[QUIZ GEN FAILED] All providers exhausted course={course_code} "
+        f"topic='{topic_name}' total_duration={total_duration:.2f}s "
+        f"last_error_category={last_error_category} providers_tried={len(configured_providers)}"
+    )
+    raise AIServiceUnavailableError(
+        "AI service is temporarily experiencing high demand. Please try again shortly.",
+        category="SERVICE_UNAVAILABLE",
+        retryable=True
+    ) from last_error
 
-    questions = data.get("questions", [])
 
-    if len(questions) != 10:
-        raise RuntimeError("Gemini did not generate exactly 10 questions")
-
-    expected_difficulties = ["Easy"] * 4 + ["Medium"] * 4 + ["Hard"] * 2
-
-    for index, question in enumerate(questions):
-        question["difficulty"] = expected_difficulties[index]
-
-        options = question.get("options", {})
-
-        if set(options.keys()) != {"A", "B", "C", "D"}:
-            raise RuntimeError("Gemini returned invalid answer options")
-
-        if question.get("correct_answer") not in {"A", "B", "C", "D"}:
-            raise RuntimeError("Gemini returned an invalid correct answer")
-
-    data["subject"] = course_name
-    data["topic"] = topic_name
-
-    return data
-
-def generate_analysis(subject, topic, weak_concepts, score, total):
+def generate_analysis(subject: str, topic: str, weak_concepts: List[str], score: int, total: int) -> Dict[str, str]:
+    """
+    Personalized feedback generation across providers.
+    Never raises an unhandled error that breaks quiz scoring.
+    """
     if not weak_concepts:
         return {
-            "summary": f"You performed well in {topic}.",
-            "revision": "Review the explanations for any incorrect answers.",
-            "recommendation": "Try another AI-generated quiz for additional practice."
+            "summary": f"You performed well in {topic} with {score}/{total}.",
+            "revision": "Review the explanations for any questions you were unsure about.",
+            "recommendation": "Try another AI-generated quiz or move on to the next syllabus topic."
         }
-
-    client = _get_client()
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
     weak_text = ", ".join(weak_concepts)
+    providers = _get_providers()
+    deadline = 10.0
+    start_time = time.perf_counter()
 
-    prompt = f"""
-You are an AI tutor for a B.Tech CSE-AI&ML student.
+    for provider in providers:
+        remaining = deadline - (time.perf_counter() - start_time)
+        if remaining <= 1.5 or not provider.is_configured():
+            continue
 
-Course: {subject}
-Topic: {topic}
-Score: {score}/{total}
-Weak Concepts: {weak_text}
+        try:
+            raw_text = provider.generate_analysis_raw(
+                subject=subject,
+                topic=topic,
+                weak_concepts=weak_concepts,
+                score=score,
+                total=total,
+                timeout_seconds=remaining
+            )
+            data = extract_json_from_text(raw_text)
+            if isinstance(data, dict) and "summary" in data and "revision" in data and "recommendation" in data:
+                return {
+                    "summary": str(data["summary"]),
+                    "revision": str(data["revision"]),
+                    "recommendation": str(data["recommendation"])
+                }
+        except Exception as e:
+            logger.warning(f"[FEEDBACK PROVIDER FAILED] provider={provider.name}: {e}")
 
-Give concise personalized revision feedback.
-
-Return only valid JSON using this structure:
-
-{{
-  "summary": "Short performance analysis",
-  "revision": "What the student should revise",
-  "recommendation": "What the student should practice next"
-}}
-"""
-
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config={
-            "response_mime_type": "application/json"
-        }
-    )
-
-    return _extract_json(response.text)
+    logger.warning("[FEEDBACK FALLBACK] All feedback providers failed or timed out.")
+    return {
+        "summary": "AI feedback is temporarily unavailable. Please try again later.",
+        "revision": f"Focus on revising these key concepts: {weak_text}.",
+        "recommendation": "Review the question explanations below to strengthen your understanding."
+    }

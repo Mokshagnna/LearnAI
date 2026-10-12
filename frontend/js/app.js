@@ -7,6 +7,7 @@ let currentIndex = 0;
 let answers = [];
 let activeCourseCode = "";
 let activeTopicName = "";
+let activeTopicId = "";
 let isGenerating = false;
 let activeAbortController = null;
 let studentId = localStorage.getItem("learnai_student_id") || null;
@@ -18,6 +19,17 @@ function getStudentId() {
     localStorage.setItem("learnai_student_id", studentId);
   }
   return studentId;
+}
+
+// ── HTML Safety & Escaping Helper ───────────────────────────────────────────
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 // ── Mutually Exclusive Screen Management ────────────────────────────────────
@@ -45,7 +57,8 @@ function saveSessionState() {
       currentIndex,
       answers,
       activeCourseCode,
-      activeTopicName
+      activeTopicName,
+      activeTopicId
     }));
   }
 }
@@ -65,6 +78,7 @@ function restoreSessionState() {
       answers = data.answers || Array(currentQuiz.questions.length).fill("");
       activeCourseCode = data.activeCourseCode || currentQuiz.course_code;
       activeTopicName = data.activeTopicName || currentQuiz.topic;
+      activeTopicId = data.activeTopicId || currentQuiz.topic_id || "";
 
       // Restore select dropdowns
       if ($("course") && activeCourseCode) {
@@ -92,12 +106,20 @@ function restoreSessionState() {
 
 // ── Load Curriculum & Course Select ──────────────────────────────────────────
 async function loadCourses() {
+  const courseSelect = $("course");
   try {
     const res = await fetch("/api/courses");
+    if (!res.ok) {
+      throw new Error(`Failed to fetch curriculum: HTTP ${res.status}`);
+    }
     const data = await res.json();
     curriculum = data.courses || [];
 
-    const courseSelect = $("course");
+    if (!curriculum.length) {
+      $("setupMsg").innerHTML = '<span style="color:#b4493a;font-weight:600;">No courses available in curriculum.</span>';
+      return;
+    }
+
     courseSelect.innerHTML = '<option value="">Select a course</option>';
     curriculum.forEach(course => {
       const option = document.createElement("option");
@@ -105,8 +127,13 @@ async function loadCourses() {
       option.textContent = `${course.code} - ${course.name}`;
       courseSelect.appendChild(option);
     });
+    $("setupMsg").innerHTML = "";
   } catch (e) {
-    $("setupMsg").textContent = "Unable to load courses. Please check if the server is running.";
+    console.error("Failed to load courses:", e);
+    if (courseSelect) {
+      courseSelect.innerHTML = '<option value="">Error loading courses</option>';
+    }
+    $("setupMsg").innerHTML = '<span style="color:#b4493a;font-weight:600;">Unable to load courses. Please check if the server is running.</span>';
   }
 }
 
@@ -127,10 +154,21 @@ $("course").addEventListener("change", () => {
   first.textContent = "Select a topic";
   topicSelect.appendChild(first);
 
+  const seen = new Set();
   (course.topics || []).forEach(topic => {
+    if (!topic || !topic.name) return;
+    const name = String(topic.name).trim();
+    if (!name || seen.has(name.toLowerCase())) return;
+    seen.add(name.toLowerCase());
+
     const option = document.createElement("option");
-    option.value = topic.name;
-    option.textContent = topic.name;
+    option.value = name;
+    option.textContent = name;
+    option.dataset.topicId = topic.id || "";
+    option.dataset.topicName = name;
+    option.dataset.parentTopic = topic.parent_topic || topic.parent_section || topic.source_topic_name || "";
+    option.dataset.module = (topic.module !== undefined && topic.module !== null) ? topic.module : "";
+    option.dataset.unit = (topic.unit !== undefined && topic.unit !== null) ? topic.unit : "";
     topicSelect.appendChild(option);
   });
 
@@ -141,7 +179,10 @@ $("course").addEventListener("change", () => {
 // ── Navigation Buttons ───────────────────────────────────────────────────────
 $("generateBtn").addEventListener("click", () => {
   const courseCode = $("course").value;
-  const topic = $("topic").value;
+  const topicSelect = $("topic");
+  const topic = topicSelect.value;
+  const selectedOption = topicSelect.selectedOptions ? topicSelect.selectedOptions[0] : null;
+  const topicId = selectedOption?.dataset?.topicId || "";
 
   if (!courseCode || !topic) {
     $("setupMsg").innerHTML = '<span style="color:#b4493a;font-weight:600;">Please select both course and topic.</span>';
@@ -149,7 +190,7 @@ $("generateBtn").addEventListener("click", () => {
   }
   $("setupMsg").innerHTML = "";
 
-  startQuizGeneration(courseCode, topic, false);
+  startQuizGeneration(courseCode, topic, false, topicId);
 });
 
 $("prevBtn").addEventListener("click", () => {
@@ -198,6 +239,7 @@ $("retakeBtn").addEventListener("click", async () => {
   // Use active course/topic
   const courseCode = activeCourseCode || (currentQuiz ? currentQuiz.course_code : $("course").value);
   const topic = activeTopicName || (currentQuiz ? currentQuiz.topic : $("topic").value);
+  const topicId = activeTopicId || (currentQuiz ? currentQuiz.topic_id : null);
 
   if (!courseCode || !topic) {
     alert("Unable to detect course and topic for retake. Please choose from setup.");
@@ -224,7 +266,7 @@ $("retakeBtn").addEventListener("click", async () => {
   if ($("progressPercent")) $("progressPercent").textContent = "0% completed";
 
   // 4. Launch fresh quiz generation for retake
-  await startQuizGeneration(courseCode, topic, true);
+  await startQuizGeneration(courseCode, topic, true, topicId);
 
   retakeBtn.disabled = false;
   retakeBtn.textContent = "🔄 Retake with New AI Questions";
@@ -278,7 +320,7 @@ function clearResultDisplay() {
 }
 
 // ── Core Quiz Generation (First Attempt & Retake) ────────────────────────────
-async function startQuizGeneration(courseCode, topic, isRetake = false) {
+async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null) {
   if (isGenerating) return;
   isGenerating = true;
 
@@ -289,6 +331,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false) {
 
   activeCourseCode = courseCode;
   activeTopicName = topic;
+  activeTopicId = topicId || "";
 
   let timeoutId = null;
   const spinner = document.querySelector("#loadingSection .spinner");
@@ -328,6 +371,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false) {
       body: JSON.stringify({
         course_code: courseCode,
         topic: topic,
+        topic_id: activeTopicId || undefined,
         student_id: getStudentId(),
         retake: isRetake
       }),
@@ -344,8 +388,29 @@ async function startQuizGeneration(courseCode, topic, isRetake = false) {
       throw new Error(errMsg);
     }
 
+    // ── Validate questions before displaying them ──
+    if (!data || !Array.isArray(data.questions) || data.questions.length === 0) {
+      throw new Error("Received empty or malformed quiz from AI service. Please click Retry.");
+    }
+
+    const invalidQ = data.questions.find((q, idx) => {
+      if (!q || typeof q.question !== "string" || !q.question.trim()) return true;
+      if (!q.options || typeof q.options !== "object") return true;
+      const opts = q.options;
+      const required = ["A", "B", "C", "D"];
+      const hasAllFour = required.every(k => typeof opts[k] === "string" && opts[k].trim().length > 0);
+      if (!hasAllFour) return true;
+      if (q.correct_answer !== undefined && !required.includes(q.correct_answer)) return true;
+      return false;
+    });
+
+    if (invalidQ) {
+      throw new Error("One or more questions contained incomplete or blank answer options. Please click Retry.");
+    }
+
     // ── Success: Initialize Clean Quiz State ──
     currentQuiz = data;
+    if (data.topic_id) activeTopicId = data.topic_id;
     currentIndex = 0;
     answers = Array(data.questions.length).fill("");
 
@@ -374,7 +439,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false) {
     const retryBtn = $("loadingRetryBtn");
     if (retryBtn) {
       retryBtn.onclick = () => {
-        startQuizGeneration(courseCode, topic, isRetake);
+        startQuizGeneration(courseCode, topic, isRetake, topicId);
       };
     }
 
@@ -393,7 +458,10 @@ function renderQuizHeader(quizData) {
   const courseName = courseObj ? `${courseObj.code} - ${courseObj.name}` : (quizData.course_code || quizData.subject || "");
 
   if ($("quizCourse")) {
-    $("quizCourse").textContent = courseName;
+    const modTag = (quizData.module !== undefined && quizData.unit !== undefined)
+      ? ` • Module ${quizData.module}, Unit ${quizData.unit}`
+      : "";
+    $("quizCourse").textContent = `${courseName}${modTag}`;
   }
   if ($("quizTitle")) {
     $("quizTitle").textContent = quizData.topic;
@@ -433,20 +501,32 @@ function renderQuestion() {
   if (!options) return;
   options.innerHTML = "";
 
-  Object.entries(q.options).forEach(([key, value]) => {
+  Object.entries(q.options || {}).forEach(([key, value]) => {
     const isSelected = answers[currentIndex] === key;
     const div = document.createElement("div");
     div.className = "option" + (isSelected ? " selected" : "");
     div.setAttribute("role", "radio");
     div.setAttribute("aria-checked", isSelected ? "true" : "false");
     div.setAttribute("tabindex", "0");
-    div.innerHTML = `
-      <span class="radio-circle" aria-hidden="true">
-        <span class="radio-dot"></span>
-      </span>
-      <span class="option-letter">${key}.</span>
-      <span class="option-text">${value}</span>
-    `;
+
+    const radioCircle = document.createElement("span");
+    radioCircle.className = "radio-circle";
+    radioCircle.setAttribute("aria-hidden", "true");
+    const radioDot = document.createElement("span");
+    radioDot.className = "radio-dot";
+    radioCircle.appendChild(radioDot);
+
+    const letterSpan = document.createElement("span");
+    letterSpan.className = "option-letter";
+    letterSpan.textContent = `${key}.`;
+
+    const textSpan = document.createElement("span");
+    textSpan.className = "option-text";
+    textSpan.textContent = value; // Safe! Code snippets like <?php, <%, etc. render verbatim!
+
+    div.appendChild(radioCircle);
+    div.appendChild(letterSpan);
+    div.appendChild(textSpan);
 
     const selectOption = () => {
       answers[currentIndex] = key;
@@ -618,15 +698,15 @@ function showResult(data) {
 
   $("review").innerHTML =
     "<h3>Answer Review</h3>" +
-    data.details.map((d, i) => `
+    (data.details || []).map((d, i) => `
       <div class="review-item">
-        <div><strong>Q${i + 1}. ${d.question}</strong></div>
+        <div><strong>Q${i + 1}. ${escapeHtml(d.question)}</strong></div>
         <div class="${d.is_correct ? "correct" : "wrong"}">
           ${d.is_correct ? "Correct" : "Incorrect"}
         </div>
-        <div>Your answer: ${d.selected_answer || "Not answered"}</div>
-        <div>Correct answer: ${d.correct_answer}</div>
-        <div class="muted">${d.explanation}</div>
+        <div>Your answer: ${escapeHtml(d.selected_answer || "Not answered")}</div>
+        <div>Correct answer: ${escapeHtml(d.correct_answer)}</div>
+        <div class="muted">${escapeHtml(d.explanation)}</div>
       </div>
     `).join("");
 

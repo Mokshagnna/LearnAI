@@ -1,0 +1,138 @@
+{
+  "22AM803::Introduction and Goals of Computer Vision": {
+    "subject": "Computer Vision",
+    "topic": "Introduction and Goals of Computer Vision",
+    "questions": [
+      {
+        "question": "What is the primary goal of Computer Vision?",
+        "options": {
+          "A": "To enable computers to understand and interpret visual information from digital images or videos",
+          "B": "To increase screen resolution for gaming monitors",
+          "C": "To create vector graphics from scratch",
+          "D": "To compress image files without data loss"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Goals of Computer Vision",
+        "explanation": "Computer vision aims to replicate human vision by enabling software to understand digital visual content."
+      },
+      {
+        "question": "How does computer vision fundamentally differ from traditional image processing?",
+        "options": {
+          "A": "Computer vision only works with 3D models while image processing works with 2D",
+          "B": "Computer vision focuses on image understanding and semantics, while image processing focuses on image-to-image transformations",
+          "C": "Image processing requires neural networks whereas computer vision uses only heuristics",
+          "D": "There is no functional difference between the two fields"
+        },
+        "correct_answer": "B",
+        "difficulty": "Easy",
+        "concept": "Computer Vision vs Image Processing",
+        "explanation": "Image processing typically transforms an input image to an output image, whereas computer vision extracts high-level semantic meaning."
+      },
+      {
+        "question": "In the human visual system (bio-vision), which cells in the retina are primarily responsible for daylight and color perception?",
+        "options": {
+          "A": "Rod cells",
+          "B": "Cone cells",
+          "C": "Bipolar cells",
+          "D": "Horizontal cells"
+        },
+        "correct_answer": "B",
+        "difficulty": "Easy",
+        "concept": "Bio-Vision vs Computer Vision",
+        "explanation": "Cones operate under brighter light and provide color perception, while rods provide high-sensitivity scotopic (low-light) vision."
+      },
+      {
+        "question": "Which of the following describes the pinhole camera model concept in early image formation?",
+        "options": {
+          "A": "Light rays from an object pass through a single point to form an inverted image on a sensor plane",
+          "B": "Multiple lenses diffract incoming light into distinct spectral bands",
+          "C": "Digital sensors emit lasers that bounce back from target surfaces",
+          "D": "An electronic shutter calculates photon velocity directly"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Image Formation History",
+        "explanation": "The camera obscura / pinhole model projects inverted light rays through an aperture onto an opposing plane."
+      },
+      {
+        "question": "Why is image understanding considered an 'inverse problem' in computer vision?",
+        "options": {
+          "A": "Because digital images are always stored in inverse matrix format",
+          "B": "Because 3D physical scene properties must be reconstructed from a lower-dimensional (2D) projection",
+          "C": "Because algorithms invert pixel intensities before feature detection",
+          "D": "Because computer vision models only train on negative image pairs"
+        },
+        "correct_answer": "B",
+        "difficulty": "Medium",
+        "concept": "Inverse Problem in Vision",
+        "explanation": "Going from a 3D world to a 2D image is forward projection (loss of depth); estimating 3D properties from 2D images is an ill-posed inverse problem."
+      },
+      {
+        "question": "In digital image representation, how is a standard 8-bit RGB image stored in memory?",
+        "options": {
+          "A": "As a single continuous 1D Fourier spectrum",
+          "B": "As a 3D tensor of height × width × 3 color channels with values from 0 to 255",
+          "C": "As an array of complex floating-point numbers between -1.0 and 1.0",
+          "D": "As a set of SVG mathematical vectors"
+        },
+        "correct_answer": "B",
+        "difficulty": "Medium",
+        "concept": "Digital Image Representation",
+        "explanation": "An 8-bit RGB image has width, height, and 3 channels (R, G, B) where each channel holds pixel intensities between 0 and 255."
+      },
+      {
+        "question": "Which biological mechanism inspired early artificial receptive fields and convolutional filter architectures?",
+        "options": {
+          "A": "Hubel and Wiesel's discovery of orientation-selective neurons in the primary visual cortex (V1)",
+          "B": "The peristaltic motion of the optical nerve fluid",
+          "C": "The chemical regeneration of rhodopsin pigment in rods",
+          "D": "The accommodation reflex of the ciliary muscles in the lens"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Bio-Vision Inspiration",
+        "explanation": "Hubel and Wiesel showed visual cortex cells respond to simple edges and orientations, inspiring artificial convolutional layers."
+      },
+      {
+        "question": "What is meant by the 'semantic gap' in computer vision?",
+        "options": {
+          "A": "The difference between optical sensor refresh rates and display monitor frequencies",
+          "B": "The disparity between low-level pixel intensity values and high-level human semantic concepts",
+          "C": "The delay introduced by data serialization over network connections",
+          "D": "The discrepancy between RGB color spaces and CMYK printing profiles"
+        },
+        "correct_answer": "B",
+        "difficulty": "Medium",
+        "concept": "Semantic Gap",
+        "explanation": "The semantic gap is the challenge of translating raw pixel matrix arrays into meaningful human concepts like 'car' or 'dog'."
+      },
+      {
+        "question": "Consider a camera observing a Lambertian surface. If the surface orientation tilts such that the angle between surface normal and illuminant doubles from 30° to 60°, how does the reflected radiance change according to Lambert's Cosine Law?",
+        "options": {
+          "A": "It remains exactly identical because Lambertian surfaces reflect uniformly regardless of incident angle",
+          "B": "It drops from cos(30°) ≈ 0.866 to cos(60°) = 0.5 of maximum irradiance",
+          "C": "It doubles because illuminance is inversely proportional to distance squared",
+          "D": "It drops to zero due to total internal reflection"
+        },
+        "correct_answer": "B",
+        "difficulty": "Hard",
+        "concept": "Radiometry and Surface Reflectance",
+        "explanation": "By Lambert's Cosine Law, received irradiance and reflected radiance are proportional to cos(theta) where theta is the angle between incident light and surface normal."
+      },
+      {
+        "question": "Under perspective projection, which geometric property is NOT invariant when a 3D planar scene is projected onto a 2D camera image plane?",
+        "options": {
+          "A": "Collinearity of straight line segments",
+          "B": "Cross-ratio of four collinear points",
+          "C": "Parallelism of lines in the scene plane (non-parallel to the image plane)",
+          "D": "Incidence of points on lines"
+        },
+        "correct_answer": "C",
+        "difficulty": "Hard",
+        "concept": "Projective Geometry Invariants",
+        "explanation": "Perspective projection preserves collinearity, incidence, and the cross-ratio, but does NOT preserve parallelism (parallel lines converge to vanishing points)."
+      }
+    ]
+  }
+}
