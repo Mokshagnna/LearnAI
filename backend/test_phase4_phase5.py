@@ -170,13 +170,14 @@ class TestSecretRedactionLoggingFilter(unittest.TestCase):
         self.assertIn("[REDACTED_CREDENTIAL]", record.msg)
 
     def test_gemini_key_redaction(self):
+        fake_key = "AIza_MOCK_TEST_KEY_REDACTION_FILTER_0123456789"
         record = logging.LogRecord(
             name="test", level=logging.INFO, pathname="", lineno=0,
-            msg="Gemini initialization with AIzaSyD1234567890abcdef1234567890abcdef",
+            msg=f"Gemini initialization with {fake_key}",
             args=(), exc_info=None
         )
         self.filter.filter(record)
-        self.assertNotIn("AIzaSyD1234", record.msg)
+        self.assertNotIn(fake_key, record.msg)
         self.assertIn("[REDACTED_CREDENTIAL]", record.msg)
 
     def test_bearer_token_redaction(self):
