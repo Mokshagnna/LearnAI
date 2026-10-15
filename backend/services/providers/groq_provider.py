@@ -25,10 +25,9 @@ class GroqProvider(BaseAIProvider):
         return self._name
 
     def is_configured(self) -> bool:
-        return bool(os.getenv("GROQ_API_KEY"))
+        return bool(os.getenv("GROQ_API_KEY") or os.getenv("GROQ_BACKUP_API_KEY"))
 
-    def _get_client(self, timeout_sec: float):
-        api_key = os.getenv("GROQ_API_KEY")
+    def _get_client(self, timeout_sec: float, api_key: str):
         if not api_key:
             raise ProviderConfigError("GROQ_API_KEY is missing from environment.", category="MISSING_CREDENTIALS")
         try:
@@ -38,7 +37,16 @@ class GroqProvider(BaseAIProvider):
             raise ProviderConfigError("groq python package is not installed.", category="DEPENDENCY_MISSING") from e
 
     def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 3000) -> str:
-        if not self.is_configured():
+        primary_key = os.getenv("GROQ_API_KEY", "")
+        backup_key = os.getenv("GROQ_BACKUP_API_KEY", "")
+
+        keys_to_try = []
+        if primary_key:
+            keys_to_try.append((primary_key, "primary"))
+        if backup_key and backup_key != primary_key:
+            keys_to_try.append((backup_key, "backup"))
+
+        if not keys_to_try:
             raise ProviderConfigError("GROQ_API_KEY is not configured.", category="MISSING_CREDENTIALS")
 
         primary_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
@@ -47,58 +55,86 @@ class GroqProvider(BaseAIProvider):
             if alt not in candidate_models:
                 candidate_models.append(alt)
 
-        client = self._get_client(timeout_seconds)
-        call_start = time.perf_counter()
         last_error = None
+        overall_start = time.perf_counter()
 
-        for current_model in candidate_models:
-            time_left = timeout_seconds - (time.perf_counter() - call_start)
-            if time_left < 3.0:
+        for key_value, key_label in keys_to_try:
+            time_left_for_key = timeout_seconds - (time.perf_counter() - overall_start)
+            if time_left_for_key < 2.5:
+                logger.warning(f"[GROQ] Budget exhausted ({time_left_for_key:.1f}s left). Cannot try key={key_label}.")
                 break
-            try:
-                logger.info(f"[GROQ START] model={current_model} timeout={time_left:.1f}s")
-                extra_kwargs = {}
-                if "gpt-oss" in current_model:
-                    extra_kwargs["extra_body"] = {"reasoning_effort": "low"}
+            client = self._get_client(time_left_for_key, api_key=key_value)
+            key_error = None
 
-                chat_completion = client.chat.completions.create(
-                    model=current_model,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=max_tokens,
-                    **extra_kwargs
-                )
-                duration = time.perf_counter() - call_start
-                if not chat_completion.choices or not chat_completion.choices[0].message.content:
-                    raise ValueError(f"Groq model {current_model} returned an empty response.")
+            for current_model in candidate_models:
+                time_left = timeout_seconds - (time.perf_counter() - overall_start)
+                if time_left < 2.5:
+                    break
+                call_start = time.perf_counter()
+                try:
+                    logger.info(f"[GROQ START] key={key_label} model={current_model} timeout={time_left:.1f}s")
+                    extra_kwargs = {}
+                    if "gpt-oss" in current_model:
+                        extra_kwargs["extra_body"] = {"reasoning_effort": "low"}
 
-                result_text = chat_completion.choices[0].message.content
-                logger.info(f"[GROQ SUCCESS] model={current_model} duration={duration:.2f}s")
-                return result_text
+                    chat_completion = client.chat.completions.create(
+                        model=current_model,
+                        messages=[
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.3,
+                        max_tokens=max_tokens,
+                        **extra_kwargs
+                    )
+                    duration = time.perf_counter() - call_start
+                    if not chat_completion.choices or not chat_completion.choices[0].message.content:
+                        raise ValueError(f"Groq model {current_model} returned an empty response.")
 
-            except Exception as e:
-                last_error = e
-                duration = time.perf_counter() - call_start
-                msg = str(e).lower()
+                    result_text = chat_completion.choices[0].message.content
+                    logger.info(f"[GROQ SUCCESS] key={key_label} model={current_model} duration={duration:.2f}s")
+                    return result_text
 
-                # Auth errors cannot be solved by changing models
-                if any(term in msg for term in ["invalid api key", "authentication", "unauthorized", "api_key", "401"]):
-                    logger.error(f"[GROQ AUTH FAILED] duration={duration:.2f}s error={e}")
-                    raise ProviderConfigError(f"Groq API key is invalid or unauthorized: {e}", category="AUTH_CONFIG_ERROR") from e
+                except Exception as e:
+                    key_error = e
+                    last_error = e
+                    duration = time.perf_counter() - call_start
+                    msg = str(e).lower()
 
-                logger.warning(
-                    f"[GROQ MODEL FALLBACK] model={current_model} failed (duration={duration:.2f}s): {e}. "
-                    f"Attempting fallback model..."
-                )
-                continue
+                    # Auth errors cannot be solved by changing models or keys — fail immediately
+                    if any(term in msg for term in ["invalid api key", "authentication", "unauthorized", "api_key", "401"]):
+                        logger.error(f"[GROQ AUTH FAILED] key={key_label} duration={duration:.2f}s error={e}")
+                        raise ProviderConfigError(
+                            f"Groq API key is invalid or unauthorized: {e}", category="AUTH_CONFIG_ERROR"
+                        ) from e
+
+                    logger.warning(
+                        f"[GROQ MODEL FALLBACK] key={key_label} model={current_model} "
+                        f"failed (duration={duration:.2f}s): {e}. Attempting fallback model..."
+                    )
+                    continue
+
+            # All models on this key exhausted — decide whether to try backup key
+            if key_error is not None:
+                msg = str(key_error).lower()
+                is_recoverable = any(term in msg for term in [
+                    "rate limit", "429", "too many requests",
+                    "503", "500", "502", "504", "unavailable", "timeout", "timed out"
+                ])
+                if is_recoverable and key_label == "primary" and len(keys_to_try) > 1:
+                    logger.warning("[GROQ KEY FALLBACK] Primary key failed with recoverable error. Trying backup key.")
+                    continue
+                # Non-recoverable error or no backup available — stop
+                break
 
         if last_error:
             msg = str(last_error).lower()
             if any(term in msg for term in ["rate limit", "429", "too many requests"]):
-                raise ProviderUnavailableError("Groq rate limit reached across all models.", category="RATE_LIMIT_429") from last_error
-            raise ProviderUnavailableError(f"Groq service unavailable: {last_error}", category="SERVICE_UNAVAILABLE") from last_error
+                raise ProviderUnavailableError(
+                    "Groq rate limit reached across all models and keys.", category="RATE_LIMIT_429"
+                ) from last_error
+            raise ProviderUnavailableError(
+                f"Groq service unavailable: {last_error}", category="SERVICE_UNAVAILABLE"
+            ) from last_error
 
         raise ProviderUnavailableError("Groq timeout or all models exhausted.", category="SERVICE_UNAVAILABLE")
 

@@ -20,4 +20,17 @@ backend/.env
 .idea/
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+
+# Database & Runtime Data
 backend/data/learnai.db
+*.db
+*.sqlite3
+
+# Logs & Test Caches
+*.log
+logs/
+.pytest_cache/
+.coverage
+htmlcov/

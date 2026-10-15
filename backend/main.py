@@ -1,17 +1,22 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from pathlib import Path
 from services.llm_service import generate_quiz, generate_analysis, AIServiceUnavailableError, AIConfigError
 from services.evaluator import evaluate_answers
-from services.database import init_db, get_or_create_student, save_quiz_attempt, get_student_history
+from services.database import init_db, get_or_create_student, save_quiz_attempt, get_student_history, get_connection
 from services.curriculum_service import curriculum_service
+from services.rate_limiter import quiz_gen_limiter, quiz_submit_limiter, get_client_ip
+from services.metrics import metrics
+from services.logger_utils import setup_secure_logging, request_id_var
 from dotenv import load_dotenv
+import os
 import json
 import uuid
 import logging
 import time
+from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
@@ -22,36 +27,59 @@ if _ENV_FILE.is_file():
 else:
     load_dotenv(override=True)
 
+setup_secure_logging()
 logger = logging.getLogger("learnai.api")
 
 # Initialize database on startup
 init_db()
 
-app = FastAPI(title="LearnAI Quiz Platform")
+DEBUG = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+
+app = FastAPI(
+    title="LearnAI Quiz Platform",
+    docs_url="/docs" if DEBUG else None,
+    redoc_url="/redoc" if DEBUG else None,
+    openapi_url="/openapi.json" if DEBUG else None,
+)
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    token = request_id_var.set(req_id)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = req_id
+        return response
+    finally:
+        request_id_var.reset(token)
+
+allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "*")
+allowed_origins = [o.strip() for o in allowed_origins_raw.split(",") if o.strip()]
+is_wildcard = (len(allowed_origins) == 1 and allowed_origins[0] == "*") or not allowed_origins
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=allowed_origins if allowed_origins else ["*"],
+    allow_credentials=False if is_wildcard else True,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 QUIZZES: dict = {}
 
 class QuizRequest(BaseModel):
-    course_code: str
-    topic: str
-    topic_id: str | None = None
-    student_id: str | None = None
+    course_code: str = Field(..., min_length=2, max_length=50)
+    topic: str = Field(..., min_length=1, max_length=250)
+    topic_id: str | None = Field(default=None, max_length=100)
+    student_id: str | None = Field(default=None, max_length=100)
     # retake=True signals frontend is requesting a fresh quiz for the same topic.
     # Backend always generates fresh — this flag is used only for logging.
     retake: bool = False
 
 class SubmitRequest(BaseModel):
-    quiz_id: str
-    answers: list[str]
-    student_id: str | None = None
+    quiz_id: str = Field(..., min_length=1, max_length=100)
+    answers: list[str] = Field(..., min_length=1, max_length=50)
+    student_id: str | None = Field(default=None, max_length=100)
 
 def find_course_and_topic(course_code: str, topic_name: str, topic_id: str | None = None):
     try:
@@ -59,12 +87,61 @@ def find_course_and_topic(course_code: str, topic_name: str, topic_id: str | Non
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.get("/health")
+def liveness_check():
+    """Minimal, unauthenticated liveness probe for orchestrators and load balancers."""
+    return {"status": "ok"}
+
+@app.get("/api/health")
+def health_check(detailed: bool = False):
+    """
+    Readiness & health check endpoint.
+    Returns basic status and database readiness by default.
+    Sensitive operational telemetry and provider details are only returned in DEBUG mode or with detailed=True.
+    """
+    db_status = "connected"
+    try:
+        conn = get_connection()
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Health check DB check failure: {e}")
+        db_status = "error"
+
+    response = {
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "version": "1.0.0",
+        "database": db_status
+    }
+
+    if DEBUG or detailed or os.getenv("EXPOSE_HEALTH_METRICS", "false").lower() in ("true", "1", "yes"):
+        from services.llm_service import _get_providers
+        providers = _get_providers()
+        configured = [p.name for p in providers if p.is_configured()]
+        response["configured_providers"] = configured
+        response["metrics"] = metrics.get_summary()
+
+    return response
+
 @app.get("/api/courses")
 def get_courses():
     return curriculum_service.get_curriculum()
 
 @app.post("/api/quiz/generate")
-def create_quiz(req: QuizRequest):
+def create_quiz(req: QuizRequest, request: Request):
+    client_ip = get_client_ip(request)
+    allowed, retry_after, _ = quiz_gen_limiter.check_rate_limit(client_ip)
+    if not allowed:
+        metrics.record_rate_limit_exceeded()
+        logger.warning(f"[RATE LIMIT EXCEEDED] /api/quiz/generate client={client_ip} retry_after={retry_after}s")
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Please wait before generating another quiz.", "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)}
+        )
+
+    metrics.record_quiz_request()
     course, topic = find_course_and_topic(req.course_code, req.topic, topic_id=req.topic_id)
     t_start = time.perf_counter()
     retake_tag = "[RETAKE]" if req.retake else "[FIRST]"
@@ -110,6 +187,7 @@ def create_quiz(req: QuizRequest):
         )
     except AIServiceUnavailableError as e:
         duration = time.perf_counter() - t_start
+        metrics.record_quiz_failure("all", duration)
         logger.warning(
             f"[ENDPOINT FAILED] /api/quiz/generate (503) duration={duration:.2f}s "
             f"category={getattr(e, 'category', 'SERVICE_UNAVAILABLE')}: {e}"
@@ -117,10 +195,12 @@ def create_quiz(req: QuizRequest):
         raise HTTPException(status_code=503, detail=str(e))
     except AIConfigError as e:
         duration = time.perf_counter() - t_start
+        metrics.record_quiz_failure("all", duration)
         logger.error(f"[ENDPOINT FAILED] /api/quiz/generate (500 Config Error) duration={duration:.2f}s: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         duration = time.perf_counter() - t_start
+        metrics.record_quiz_failure("all", duration)
         logger.error(
             f"[ENDPOINT FAILED] /api/quiz/generate unexpected error duration={duration:.2f}s: {e}",
             exc_info=True
@@ -128,6 +208,7 @@ def create_quiz(req: QuizRequest):
         raise HTTPException(status_code=503, detail="AI service is temporarily unavailable. Please try again shortly.")
 
     duration = time.perf_counter() - t_start
+    metrics.record_quiz_success(quiz.get("provider_used", "unknown"), duration)
 
     # Always generate a fresh server-side quiz_id — never reuse the previous one
     quiz_id = str(uuid.uuid4())
@@ -183,7 +264,18 @@ def create_quiz(req: QuizRequest):
     }
 
 @app.post("/api/quiz/submit")
-def submit_quiz(req: SubmitRequest):
+def submit_quiz(req: SubmitRequest, request: Request):
+    client_ip = get_client_ip(request)
+    allowed, retry_after, _ = quiz_submit_limiter.check_rate_limit(client_ip)
+    if not allowed:
+        logger.warning(f"[RATE LIMIT EXCEEDED] /api/quiz/submit client={client_ip} retry_after={retry_after}s")
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Please wait before submitting another quiz.", "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)}
+        )
+
+    metrics.record_submission()
     if req.quiz_id not in QUIZZES:
         raise HTTPException(status_code=404, detail="Quiz not found or expired.")
 

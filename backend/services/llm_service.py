@@ -242,22 +242,24 @@ def generate_quiz(
     )
 
     last_error: Optional[Exception] = None
+    all_provider_errors: List[Exception] = []
     novelty_repair_count = 0
     best_quiz: Optional[Dict[str, Any]] = None
     best_novelty_score = -1
 
     num_configured = len(configured_providers)
     provider_timeout_budget = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "12.0"))
-    max_retries = int(os.getenv("AI_MAX_RETRIES", "1"))
+    max_retries = int(os.getenv("MAX_PROVIDER_RETRIES") or os.getenv("AI_MAX_RETRIES", "1"))
 
     for p_idx, provider in enumerate(configured_providers):
         for attempt_idx in range(max_retries + 1):
             elapsed = time.perf_counter() - start_time
             time_remaining = overall_deadline - elapsed
 
-            if time_remaining <= 2.0:
+            min_required_time = 4.0 if provider.name in ("gemini", "nvidia") else 3.0
+            if time_remaining <= min_required_time:
                 logger.warning(
-                    f"[DEADLINE REACHED] Only {time_remaining:.1f}s remaining. "
+                    f"[DEADLINE REACHED] Only {time_remaining:.1f}s remaining (min required: {min_required_time:.1f}s for {provider.name}). "
                     f"Skipping provider={provider.name}."
                 )
                 break
@@ -497,6 +499,7 @@ REQUIREMENTS:
 
             except ProviderConfigError as pce:
                 last_error = pce
+                all_provider_errors.append(pce)
                 logger.error(
                     f"[PROVIDER CONFIG ERROR] provider={provider.name} "
                     f"category={pce.category} retryable={pce.retryable}: {pce}"
@@ -506,6 +509,7 @@ REQUIREMENTS:
                 break
             except ValueError as ve:
                 last_error = ve
+                all_provider_errors.append(ve)
                 time_left = overall_deadline - (time.perf_counter() - start_time)
                 if attempt_idx < max_retries and time_left > 4.5:
                     logger.warning(
@@ -519,6 +523,7 @@ REQUIREMENTS:
                 break
             except (ProviderUnavailableError, ProviderError) as pe:
                 last_error = pe
+                all_provider_errors.append(pe)
                 logger.warning(
                     f"[PROVIDER FAILED] provider={provider.name} "
                     f"category={getattr(pe, 'category', 'ERROR')} retryable={getattr(pe, 'retryable', False)}: {pe}"
@@ -560,6 +565,13 @@ REQUIREMENTS:
         f"topic='{topic_name}' total_duration={total_duration:.2f}s "
         f"last_error_category={last_error_category} providers_tried={len(configured_providers)}"
     )
+
+    if all_provider_errors and all(isinstance(e, ProviderConfigError) for e in all_provider_errors):
+        raise AIConfigError(
+            "AI service configuration error: invalid or unauthorized API credentials for all configured providers.",
+            category="AUTH_CONFIG_ERROR"
+        ) from last_error
+
     raise AIServiceUnavailableError(
         "AI service is temporarily experiencing high demand. Please try again shortly.",
         category="SERVICE_UNAVAILABLE",

@@ -1,0 +1,53 @@
+name: LearnAI CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Unit & Reliability Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+
+    - name: Validate Python Syntax and Imports
+      run: |
+        python -m py_compile backend/main.py
+        python -m py_compile backend/services/llm_service.py
+        python -m py_compile backend/services/evaluator.py
+        python -m py_compile backend/services/curriculum_service.py
+        python -m py_compile backend/services/rate_limiter.py
+        python -m py_compile backend/services/metrics.py
+        python -m py_compile backend/services/logger_utils.py
+
+    - name: Run Automated Test Suite
+      env:
+        DEBUG: "false"
+        PROVIDER_ORDER: "groq,nvidia,gemini"
+        OVERALL_DEADLINE_SECONDS: "25.0"
+        PROVIDER_TIMEOUT_SECONDS: "12.0"
+        MAX_PROVIDER_RETRIES: "1"
+        RATE_LIMIT_QUIZ_GEN_PER_MIN: "10"
+        RATE_LIMIT_QUIZ_SUBMIT_PER_MIN: "30"
+      run: |
+        python -m unittest discover backend -p "test_*.py" -v
