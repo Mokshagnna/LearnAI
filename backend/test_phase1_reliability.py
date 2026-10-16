@@ -301,15 +301,20 @@ class TestPhase1Reliability(unittest.TestCase):
         self.assertEqual(mock_gemini.generate_quiz_raw.call_count, 0)
         self.assertLessEqual(clock["time"], 25.0)
 
-    def test_gemini_provider_client_timeout_not_forced_to_10s(self):
-        """_get_client sets client timeout to requested timeout_sec (in ms) without forcing a 10s floor."""
+    def test_gemini_provider_client_timeout_enforces_10s_minimum_deadline(self):
+        """_get_client enforces Google's documented minimum allowed deadline of 10s (10,000ms)."""
         from services.providers.gemini_provider import GeminiProvider
         provider = GeminiProvider()
-        client = provider._get_client(timeout_sec=4.5, api_key="test_key")
-        self.assertEqual(client._api_client._http_options.timeout, 4500)
+        # Defensive floor: sub-10s input is raised to 10,000ms to avoid Google HTTP 400 INVALID_ARGUMENT
+        client_low = provider._get_client(timeout_sec=4.5, api_key="test_key")
+        self.assertEqual(client_low._api_client._http_options.timeout, 10000)
 
-    def test_gemini_provider_direct_call_under_4s_fails_fast(self):
-        """Direct call to GeminiProvider with budget under 4.0s immediately raises ProviderUnavailableError."""
+        # Values >= 10s are preserved accurately in milliseconds
+        client_normal = provider._get_client(timeout_sec=14.0, api_key="test_key")
+        self.assertEqual(client_normal._api_client._http_options.timeout, 14000)
+
+    def test_gemini_provider_direct_call_under_10s_fails_fast(self):
+        """Direct call to GeminiProvider with budget under 10.0s fails fast without sending invalid deadline to API."""
         from services.providers.gemini_provider import GeminiProvider
         provider = GeminiProvider()
         start = time.perf_counter()
@@ -320,10 +325,97 @@ class TestPhase1Reliability(unittest.TestCase):
                     course_name="Deep Learning",
                     topic_name="Perceptron",
                     syllabus_context="Perceptron",
-                    timeout_seconds=3.5
+                    timeout_seconds=9.0
                 )
         elapsed = time.perf_counter() - start
         self.assertLess(elapsed, 0.5)
+        self.assertEqual(ctx.exception.category, "TIMEOUT")
+
+    def test_gemini_provider_handles_google_minimum_deadline_400_error(self):
+        """Mocked test for Google GenAI 400 INVALID_ARGUMENT 'Manually set deadline 9s is too short'."""
+        from services.providers.gemini_provider import GeminiProvider
+        from services.providers.base import ProviderError
+        from google.genai import errors
+
+        provider = GeminiProvider()
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = errors.APIError(
+            400,
+            {"error": {"message": "Manually set deadline 9s is too short. Minimum allowed deadline is 10s."}}
+        )
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}):
+            with patch.object(provider, "_get_client", return_value=mock_client):
+                with self.assertRaises(ProviderError) as ctx:
+                    provider._execute_with_models("prompt", timeout_seconds=12.0)
+
+        self.assertEqual(ctx.exception.category, "MALFORMED_REQUEST_400")
+        self.assertFalse(ctx.exception.retryable)
+        self.assertIsNone(ctx.exception.__cause__)
+
+    def test_orchestrator_failover_after_provider_specific_400_error(self):
+        """When Provider 1 encounters a provider-specific 400 error, orchestrator smoothly fails over to Provider 2."""
+        from services.providers.base import ProviderError
+
+        mock_groq = MagicMock()
+        mock_groq.name = "groq"
+        mock_groq.is_configured.return_value = True
+        mock_groq.generate_quiz_raw.side_effect = ProviderError(
+            "Groq malformed request / 400 Bad Request",
+            category="MALFORMED_REQUEST_400",
+            retryable=False
+        )
+
+        mock_nvidia = MagicMock()
+        mock_nvidia.name = "nvidia"
+        mock_nvidia.is_configured.return_value = True
+        mock_nvidia.generate_quiz_raw.return_value = _make_valid_quiz_json("Neural Networks")
+
+        with patch("services.llm_service._get_providers", return_value=[mock_groq, mock_nvidia]):
+            with patch.dict(os.environ, {"PROVIDER_ORDER": "groq,nvidia", "OVERALL_DEADLINE_SECONDS": "25.0"}):
+                with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                    quiz = generate_quiz(
+                        course_code="22AM301",
+                        course_name="Deep Learning",
+                        topic_name="Neural Networks",
+                        syllabus_context="Perceptron and MLP layers",
+                        student_id="test_student",
+                        concepts=["Neural Networks Basics"]
+                    )
+
+        self.assertEqual(quiz["provider_used"], "nvidia")
+        self.assertEqual(len(quiz["questions"]), 10)
+        self.assertEqual(mock_groq.generate_quiz_raw.call_count, 1)
+        self.assertEqual(mock_nvidia.generate_quiz_raw.call_count, 1)
+
+    def test_single_configured_provider_permanent_400_raises_config_error(self):
+        """When only 1 provider is configured and fails with a permanent 400, AIConfigError is raised (not masked as 503)."""
+        from services.providers.base import ProviderError
+
+        mock_gemini = MagicMock()
+        mock_gemini.name = "gemini"
+        mock_gemini.is_configured.return_value = True
+        mock_gemini.generate_quiz_raw.side_effect = ProviderError(
+            "Gemini malformed request: Manually set deadline 9s is too short. Minimum allowed deadline is 10s.",
+            category="MALFORMED_REQUEST_400",
+            retryable=False
+        )
+
+        with patch("services.llm_service._get_providers", return_value=[mock_gemini]):
+            with patch.dict(os.environ, {"PROVIDER_ORDER": "gemini", "OVERALL_DEADLINE_SECONDS": "25.0"}):
+                with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                    with patch("services.llm_service._load_local_demo_questions", return_value=None):
+                        with self.assertRaises(AIConfigError) as ctx:
+                            generate_quiz(
+                                course_code="22AM301",
+                                course_name="Deep Learning",
+                                topic_name="Unseen Topic Without Demo",
+                                syllabus_context="Custom context",
+                                student_id="test_student"
+                            )
+
+        self.assertIn("400", str(ctx.exception).upper() + ctx.exception.category)
+
     def test_orchestrator_real_provider_fallback_groq_to_nvidia(self):
         """
         Orchestrator-level integration test:

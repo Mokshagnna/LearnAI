@@ -256,7 +256,7 @@ def generate_quiz(
             elapsed = time.perf_counter() - start_time
             time_remaining = overall_deadline - elapsed
 
-            min_required_time = 4.0 if provider.name in ("gemini", "nvidia") else 3.0
+            min_required_time = 10.0 if provider.name == "gemini" else (4.0 if provider.name == "nvidia" else 3.0)
             if time_remaining <= min_required_time:
                 logger.warning(
                     f"[DEADLINE REACHED] Only {time_remaining:.1f}s remaining (min required: {min_required_time:.1f}s for {provider.name}). "
@@ -270,6 +270,10 @@ def generate_quiz(
                 provider_timeout = min(provider_timeout_budget, time_remaining * 0.6)
             else:
                 provider_timeout = min(provider_timeout_budget, time_remaining)
+
+            # Ensure provider_timeout respects provider's minimum allowed deadline without exceeding remaining budget
+            if provider.name == "gemini":
+                provider_timeout = min(max(provider_timeout, 10.0), time_remaining)
 
             logger.info(
                 f"[PROVIDER ATTEMPT] provider={provider.name} attempt={attempt_idx + 1}/{max_retries + 1} "
@@ -317,7 +321,8 @@ def generate_quiz(
                     rep_attempts += 1
                     needed = 10 - len(current_unique)
                     time_left = overall_deadline - (time.perf_counter() - start_time)
-                    if time_left <= 4.0:
+                    min_rep_time = 10.0 if provider.name == "gemini" else 4.0
+                    if time_left <= min_rep_time:
                         break
                     ask_count = min(needed + 2, 7)
                     logger.info(
@@ -358,7 +363,7 @@ REQUIREMENTS:
                             course_name=course_name,
                             topic_name=topic_name,
                             syllabus_context=syllabus_context,
-                            timeout_seconds=min(time_left * 0.8, 8.0),
+                            timeout_seconds=min(time_left, 10.0) if provider.name == "gemini" else min(time_left * 0.8, 8.0),
                             custom_prompt=rep_full_prompt,
                             max_tokens=min(1200, 180 * ask_count + 100)
                         )
@@ -416,8 +421,8 @@ REQUIREMENTS:
                     if novelty_repair_count <= MAX_NOVELTY_REPAIR_ATTEMPTS:
                         elapsed_now = time.perf_counter() - start_time
                         repair_budget = overall_deadline - elapsed_now
-                        # Only attempt repair if at least 4.5s remain in overall deadline
-                        if repair_budget > 4.5:
+                        min_repair_budget = 10.0 if provider.name == "gemini" else 4.5
+                        if repair_budget > min_repair_budget:
                             try:
                                 # Specific repair prompt targeting repeated concepts
                                 reasons_str = "\n".join(f"- {r}" for r in novelty_result["duplicate_reasons"][:5])
@@ -434,12 +439,17 @@ REQUIREMENTS:
                                 )
                                 repair_prompt = base_prompt + "\n\n" + repair_feedback + "\n\n" + novelty_block
 
+                                if provider.name == "gemini":
+                                    repair_timeout = min(repair_budget, max(repair_budget * 0.8, 10.0))
+                                else:
+                                    repair_timeout = min(repair_budget * 0.8, 9.0)
+
                                 raw_repair = provider.generate_quiz_raw(
                                     course_code=course_code,
                                     course_name=course_name,
                                     topic_name=topic_name,
                                     syllabus_context=syllabus_context,
-                                    timeout_seconds=min(repair_budget * 0.8, 9.0),
+                                    timeout_seconds=repair_timeout,
                                     custom_prompt=repair_prompt
                                 )
                                 data_repair = extract_json_from_text(raw_repair)
@@ -528,6 +538,15 @@ REQUIREMENTS:
                     f"[PROVIDER FAILED] provider={provider.name} "
                     f"category={getattr(pe, 'category', 'ERROR')} retryable={getattr(pe, 'retryable', False)}: {pe}"
                 )
+                # If only 1 provider is configured and error is non-retryable permanent error, fail fast without masking
+                if (
+                    len(configured_providers) == 1
+                    and not getattr(pe, "retryable", False)
+                    and getattr(pe, "category", "") in ("MALFORMED_REQUEST_400", "MODEL_NOT_FOUND_404", "AUTH_CONFIG_ERROR")
+                ):
+                    local_check = _load_local_demo_questions(course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context)
+                    if not local_check:
+                        raise AIConfigError(str(pe), category=getattr(pe, "category", "CONFIG_ERROR")) from pe
                 break
 
     # ── All providers failed ──────────────────────────────────────────────────
@@ -566,10 +585,16 @@ REQUIREMENTS:
         f"last_error_category={last_error_category} providers_tried={len(configured_providers)}"
     )
 
-    if all_provider_errors and all(isinstance(e, ProviderConfigError) for e in all_provider_errors):
+    # Check if all errors were permanent/configuration/malformed errors
+    if all_provider_errors and all(
+        isinstance(e, ProviderConfigError)
+        or not getattr(e, "retryable", False)
+        or getattr(e, "category", "") in ("AUTH_CONFIG_ERROR", "MODEL_NOT_FOUND_404", "MALFORMED_REQUEST_400")
+        for e in all_provider_errors
+    ):
         raise AIConfigError(
-            "AI service configuration error: invalid or unauthorized API credentials for all configured providers.",
-            category="AUTH_CONFIG_ERROR"
+            f"AI provider configuration or permanent request error across configured providers: {last_error}",
+            category=last_error_category
         ) from last_error
 
     raise AIServiceUnavailableError(
@@ -593,22 +618,24 @@ def generate_analysis(subject: str, topic: str, weak_concepts: List[str], score:
 
     weak_text = ", ".join(weak_concepts)
     providers = _get_providers()
-    deadline = 10.0
+    deadline = 12.0
     start_time = time.perf_counter()
 
     for provider in providers:
         remaining = deadline - (time.perf_counter() - start_time)
-        if remaining <= 1.5 or not provider.is_configured():
+        min_feedback_time = 10.0 if provider.name == "gemini" else 1.5
+        if remaining <= min_feedback_time or not provider.is_configured():
             continue
 
         try:
+            feedback_timeout = remaining if provider.name != "gemini" else min(remaining, 10.0)
             raw_text = provider.generate_analysis_raw(
                 subject=subject,
                 topic=topic,
                 weak_concepts=weak_concepts,
                 score=score,
                 total=total,
-                timeout_seconds=remaining
+                timeout_seconds=feedback_timeout
             )
             data = extract_json_from_text(raw_text)
             if isinstance(data, dict) and "summary" in data and "revision" in data and "recommendation" in data:
