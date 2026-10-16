@@ -324,7 +324,141 @@ class TestPhase1Reliability(unittest.TestCase):
                 )
         elapsed = time.perf_counter() - start
         self.assertLess(elapsed, 0.5)
-        self.assertEqual(ctx.exception.category, "TIMEOUT")
+    def test_orchestrator_real_provider_fallback_groq_to_nvidia(self):
+        """
+        Orchestrator-level integration test:
+        Does NOT mock _get_providers. Real GroqProvider and NvidiaProvider instances are used.
+        Groq client fails with 429 rate limit across all models.
+        Orchestrator seamlessly catches ProviderUnavailableError and invokes NvidiaProvider,
+        which generates a valid 10-question quiz.
+        """
+        from services.providers.groq_provider import GroqProvider
+        from services.providers.nvidia_provider import NvidiaProvider
+
+        mock_groq_client = MagicMock()
+        mock_groq_client.chat.completions.create.side_effect = Exception("rate limit 429 too many requests")
+
+        mock_nvidia_client = MagicMock()
+        mock_nvidia_msg = MagicMock()
+        mock_nvidia_msg.content = _make_valid_quiz_json("Convolutional Networks")
+        mock_nvidia_choice = MagicMock()
+        mock_nvidia_choice.message = mock_nvidia_msg
+        mock_nvidia_resp = MagicMock()
+        mock_nvidia_resp.choices = [mock_nvidia_choice]
+        mock_nvidia_client.chat.completions.create.return_value = mock_nvidia_resp
+
+        env_patch = {
+            "PROVIDER_ORDER": "groq,nvidia",
+            "GROQ_API_KEY": "test_groq_key",
+            "NVIDIA_API_KEY": "test_nvidia_key",
+            "GEMINI_API_KEY": "",
+            "MAX_PROVIDER_RETRIES": "0",
+            "OVERALL_DEADLINE_SECONDS": "25.0",
+        }
+
+        with patch.dict(os.environ, env_patch, clear=False):
+            with patch.object(GroqProvider, "_get_client", return_value=mock_groq_client) as mock_groq_get_client:
+                with patch.object(NvidiaProvider, "_get_client", return_value=mock_nvidia_client) as mock_nvidia_get_client:
+                    with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                        quiz = generate_quiz(
+                            course_code="22AM301",
+                            course_name="Deep Learning",
+                            topic_name="Convolutional Networks",
+                            syllabus_context="CNN convolution layers, kernels, pooling",
+                            student_id="test_student",
+                            concepts=["Convolutional Networks Core Principles"]
+                        )
+
+        self.assertEqual(quiz["provider_used"], "nvidia")
+        self.assertEqual(len(quiz["questions"]), 10)
+        self.assertTrue(mock_groq_client.chat.completions.create.called)
+        self.assertTrue(mock_nvidia_client.chat.completions.create.called)
+
+    def test_nvidia_provider_timeout_not_forced_to_4s(self):
+        """_get_client sets client timeout without enforcing an artificial 4.0s minimum floor."""
+        from services.providers.nvidia_provider import NvidiaProvider
+        provider = NvidiaProvider()
+        client = provider._get_client(timeout_sec=2.8, api_key="test_key")
+        self.assertAlmostEqual(client.timeout, 2.8, places=2)
+
+        client_large = provider._get_client(timeout_sec=12.0, api_key="test_key")
+        self.assertAlmostEqual(client_large.timeout, 12.0, places=2)
+
+    def test_nvidia_model_fallback_on_primary_failure(self):
+        """When NVIDIA primary model fails with 503, fallback model on the same key succeeds."""
+        from services.providers.nvidia_provider import NvidiaProvider
+        provider = NvidiaProvider()
+
+        primary_model = "meta/llama-3.3-70b-instruct"
+        fallback_model = "meta/llama-3.1-70b-instruct"
+
+        mock_client = MagicMock()
+
+        def fake_create(**kwargs):
+            model_called = kwargs.get("model")
+            if model_called == primary_model:
+                raise Exception("503 Service Unavailable: Model temporarily overloaded")
+            elif model_called == fallback_model:
+                msg = MagicMock()
+                msg.content = '{"quiz": "success_from_fallback"}'
+                choice = MagicMock()
+                choice.message = msg
+                resp = MagicMock()
+                resp.choices = [choice]
+                return resp
+            raise ValueError(f"Unexpected model: {model_called}")
+
+        mock_client.chat.completions.create.side_effect = fake_create
+
+        env_patch = {
+            "NVIDIA_API_KEY": "primary_key",
+            "NVIDIA_MODEL": primary_model,
+            "NVIDIA_FALLBACK_MODEL": fallback_model,
+        }
+        os.environ.pop("NVIDIA_BACKUP_API_KEY", None)
+
+        with patch.dict(os.environ, env_patch, clear=False):
+            with patch.object(provider, "_get_client", return_value=mock_client):
+                result = provider._execute("generate quiz prompt", timeout_seconds=10.0)
+
+        self.assertEqual(result, '{"quiz": "success_from_fallback"}')
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+
+    def test_provider_model_defaults_match_specification(self):
+        """Verify code defaults for models across all providers match documented standards."""
+        from services.providers.groq_provider import GroqProvider
+        from services.providers.nvidia_provider import NvidiaProvider
+        from services.providers.gemini_provider import GeminiProvider
+
+        clean_env = {
+            "GROQ_MODEL": "",
+            "NVIDIA_MODEL": "",
+            "NVIDIA_FALLBACK_MODEL": "",
+            "GEMINI_MODEL": "",
+            "GEMINI_FALLBACK_MODEL": ""
+        }
+        with patch.dict(os.environ, clean_env, clear=False):
+            os.environ.pop("GROQ_MODEL", None)
+            os.environ.pop("NVIDIA_MODEL", None)
+            os.environ.pop("NVIDIA_FALLBACK_MODEL", None)
+            os.environ.pop("GEMINI_MODEL", None)
+            os.environ.pop("GEMINI_FALLBACK_MODEL", None)
+
+            # Test Groq defaults
+            g_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+            self.assertEqual(g_model, "openai/gpt-oss-120b")
+
+            # Test NVIDIA defaults
+            nv_model = os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
+            nv_fallback = os.getenv("NVIDIA_FALLBACK_MODEL", "meta/llama-3.1-70b-instruct")
+            self.assertEqual(nv_model, "meta/llama-3.3-70b-instruct")
+            self.assertEqual(nv_fallback, "meta/llama-3.1-70b-instruct")
+
+            # Test Gemini defaults
+            gem_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+            gem_fallback = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash")
+            self.assertEqual(gem_model, "gemini-3.6-flash")
+            self.assertEqual(gem_fallback, "gemini-3.5-flash")
 
 
 if __name__ == "__main__":

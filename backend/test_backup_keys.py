@@ -173,6 +173,27 @@ class TestGroqProviderBackupKey(unittest.TestCase):
         provider = self._get_provider()
         self.assertTrue(provider.is_configured())
 
+    @patch.dict(os.environ, {"GROQ_API_KEY": "primary_key"}, clear=False)
+    def test_groq_auth_error_sanitizes_synthetic_credential(self):
+        """Synthetic Groq API key in auth exception must NEVER appear in raised exception or logs."""
+        from services.providers.base import ProviderConfigError
+        provider = self._get_provider()
+        synthetic_key = "gsk_SYNTHETIC_TEST_LEAK_CHECK_KEY_0123456789"
+        raw_sdk_error = f"401 Unauthorized: Invalid API key {synthetic_key} rejected"
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception(raw_sdk_error)
+
+        with patch.object(provider, "_get_client", return_value=mock_client):
+            with self.assertLogs("learnai.providers.groq", level="ERROR") as cm:
+                with self.assertRaises(ProviderConfigError) as ctx:
+                    provider._execute("test prompt", timeout_seconds=10.0)
+
+        self.assertNotIn(synthetic_key, str(ctx.exception))
+        for log_entry in cm.output:
+            self.assertNotIn(synthetic_key, log_entry)
+            self.assertIn("[REDACTED_CREDENTIAL]", log_entry)
+
     @patch.dict(os.environ, {}, clear=False)
     def test_is_configured_with_only_backup_key(self):
         os.environ.pop("GROQ_API_KEY", None)
@@ -286,6 +307,107 @@ class TestNvidiaProviderBackupKey(unittest.TestCase):
             self.assertTrue(provider.is_configured())
         finally:
             os.environ.pop("NVIDIA_BACKUP_API_KEY", None)
+
+    @patch.dict(os.environ, {"NVIDIA_API_KEY": "primary_key"}, clear=False)
+    def test_auth_error_sanitizes_synthetic_credential(self):
+        """Synthetic NVIDIA API key in auth exception must NEVER appear in raised exception or logs."""
+        from services.providers.base import ProviderConfigError
+        provider = self._get_provider()
+        synthetic_key = "nvapi-SYNTHETIC_TEST_LEAK_CHECK_KEY_0123456789"
+        raw_sdk_error = f"401 Unauthorized: Invalid API key {synthetic_key} provided"
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception(raw_sdk_error)
+
+        with patch.object(provider, "_get_client", return_value=mock_client):
+            with self.assertLogs("learnai.providers.nvidia", level="ERROR") as cm:
+                with self.assertRaises(ProviderConfigError) as ctx:
+                    provider._execute("test prompt", timeout_seconds=10.0)
+
+        # Assert synthetic key not in raised exception
+        self.assertNotIn(synthetic_key, str(ctx.exception))
+        # Assert synthetic key not in log records
+        for log_entry in cm.output:
+            self.assertNotIn(synthetic_key, log_entry)
+            self.assertIn("[REDACTED_CREDENTIAL]", log_entry)
+
+    @patch.dict(os.environ, {"NVIDIA_API_KEY": "primary_key"}, clear=False)
+    def test_transient_error_sanitizes_synthetic_credential(self):
+        """Synthetic key in transient 503 error message must be redacted in exception and logs."""
+        from services.providers.base import ProviderUnavailableError
+        provider = self._get_provider()
+        synthetic_key = "nvapi-SYNTHETIC_TEST_LEAK_CHECK_KEY_9876543210"
+        raw_sdk_error = f"503 Service Unavailable: connection failed for {synthetic_key}"
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception(raw_sdk_error)
+
+        with patch.object(provider, "_get_client", return_value=mock_client):
+            with self.assertRaises(ProviderUnavailableError) as ctx:
+                provider._execute("test prompt", timeout_seconds=10.0)
+
+        self.assertNotIn(synthetic_key, str(ctx.exception))
+        self.assertIn("[REDACTED_CREDENTIAL]", str(ctx.exception))
+
+    @patch.dict(os.environ, {"NVIDIA_API_KEY": "primary_key", "NVIDIA_BACKUP_API_KEY": "backup_key", "NVIDIA_FALLBACK_MODEL": "meta/llama-3.1-70b-instruct"}, clear=False)
+    def test_model_not_found_404_does_not_try_model_fallback_or_backup(self):
+        """Permanent 404 Model Not Found error must fail immediately without trying fallback model or backup key."""
+        from services.providers.base import ProviderConfigError
+        provider = self._get_provider()
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("404 Not Found: model 'unknown-model' does not exist")
+
+        with patch.object(provider, "_get_client", return_value=mock_client) as mock_get_client:
+            with self.assertRaises(ProviderConfigError) as ctx:
+                provider._execute("test prompt", timeout_seconds=10.0)
+
+        # Must fail on the first attempt without fallback
+        self.assertEqual(mock_client.chat.completions.create.call_count, 1)
+        self.assertEqual(mock_get_client.call_count, 1)
+        self.assertEqual(ctx.exception.category, "MODEL_NOT_FOUND_404")
+        # Ensure no chained cause
+        self.assertIsNone(ctx.exception.__cause__)
+
+    @patch.dict(os.environ, {"NVIDIA_API_KEY": "primary_key", "NVIDIA_BACKUP_API_KEY": "backup_key"}, clear=False)
+    def test_malformed_request_400_does_not_try_model_fallback_or_backup(self):
+        """Permanent 400 Bad Request error must fail immediately without trying fallback model or backup key."""
+        from services.providers.base import ProviderError
+        provider = self._get_provider()
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("400 Bad Request: prompt exceeds max context length")
+
+        with patch.object(provider, "_get_client", return_value=mock_client) as mock_get_client:
+            with self.assertRaises(ProviderError) as ctx:
+                provider._execute("test prompt", timeout_seconds=10.0)
+
+        # Must fail on the first attempt without fallback
+        self.assertEqual(mock_client.chat.completions.create.call_count, 1)
+        self.assertEqual(mock_get_client.call_count, 1)
+        self.assertEqual(ctx.exception.category, "MALFORMED_REQUEST_400")
+        # Ensure no chained cause
+        self.assertIsNone(ctx.exception.__cause__)
+
+    @patch.dict(os.environ, {"NVIDIA_API_KEY": "primary_key"}, clear=False)
+    def test_chained_exception_suppression_prevents_cause_leak(self):
+        """Verify that raise ... from None suppresses __cause__ on raw SDK errors containing secrets."""
+        from services.providers.base import ProviderConfigError
+        provider = self._get_provider()
+        secret_token = "nvapi-SUPER_SECRET_TOKEN_DO_NOT_LEAK"
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception(f"401 Unauthorized for token {secret_token}")
+
+        with patch.object(provider, "_get_client", return_value=mock_client):
+            with self.assertRaises(ProviderConfigError) as ctx:
+                provider._execute("test prompt", timeout_seconds=10.0)
+
+        # __cause__ must be explicitly None due to 'from None'
+        self.assertIsNone(ctx.exception.__cause__)
+        # String representation must not have secret
+        self.assertNotIn(secret_token, str(ctx.exception))
+
+
 
 
 # ---------------------------------------------------------------------------

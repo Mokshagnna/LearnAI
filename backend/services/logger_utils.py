@@ -39,6 +39,19 @@ class SecretRedactionFilter(logging.Filter):
         return True
 
 
+def sanitize_error_text(text: object) -> str:
+    """
+    Safely redacts known API keys, tokens, and authorization credentials
+    from error strings, exception objects, and representations.
+    """
+    if text is None:
+        return ""
+    clean = str(text)
+    for pattern in SECRET_PATTERNS:
+        clean = pattern.sub("[REDACTED_CREDENTIAL]", clean)
+    return clean
+
+
 def setup_secure_logging():
     """Attaches SecretRedactionFilter to root and project loggers."""
     redaction_filter = SecretRedactionFilter()
@@ -47,3 +60,4 @@ def setup_secure_logging():
         # Avoid duplicate filters
         if not any(isinstance(f, SecretRedactionFilter) for f in log.filters):
             log.addFilter(redaction_filter)
+

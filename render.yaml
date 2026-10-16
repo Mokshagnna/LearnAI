@@ -7,5 +7,34 @@ services:
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
+      # Secrets (must be provided in Render dashboard; never committed to git)
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_BACKUP_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_BACKUP_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_BACKUP_API_KEY
+        sync: false
+
+      # Provider orchestration & deadline settings
+      - key: PROVIDER_ORDER
+        value: groq,nvidia,gemini
+      - key: OVERALL_DEADLINE_SECONDS
+        value: "25.0"
+      - key: PROVIDER_TIMEOUT_SECONDS
+        value: "12.0"
+      - key: MAX_PROVIDER_RETRIES
+        value: "1"
+
+      # Reverse proxy & networking for Render cloud environment
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: DEBUG
+        value: "false"

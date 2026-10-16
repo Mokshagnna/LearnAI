@@ -10,6 +10,7 @@ from services.providers.base import (
     get_quiz_prompt,
     get_analysis_prompt
 )
+from services.logger_utils import sanitize_error_text
 
 logger = logging.getLogger("learnai.providers.groq")
 
@@ -102,14 +103,14 @@ class GroqProvider(BaseAIProvider):
 
                     # Auth errors cannot be solved by changing models or keys — fail immediately
                     if any(term in msg for term in ["invalid api key", "authentication", "unauthorized", "api_key", "401"]):
-                        logger.error(f"[GROQ AUTH FAILED] key={key_label} duration={duration:.2f}s error={e}")
+                        logger.error(f"[GROQ AUTH FAILED] key={key_label} duration={duration:.2f}s error={sanitize_error_text(e)}")
                         raise ProviderConfigError(
-                            f"Groq API key is invalid or unauthorized: {e}", category="AUTH_CONFIG_ERROR"
+                            "Groq API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR"
                         ) from e
 
                     logger.warning(
                         f"[GROQ MODEL FALLBACK] key={key_label} model={current_model} "
-                        f"failed (duration={duration:.2f}s): {e}. Attempting fallback model..."
+                        f"failed (duration={duration:.2f}s): {sanitize_error_text(e)}. Attempting fallback model..."
                     )
                     continue
 
@@ -132,8 +133,9 @@ class GroqProvider(BaseAIProvider):
                 raise ProviderUnavailableError(
                     "Groq rate limit reached across all models and keys.", category="RATE_LIMIT_429"
                 ) from last_error
+            clean_err = sanitize_error_text(last_error)
             raise ProviderUnavailableError(
-                f"Groq service unavailable: {last_error}", category="SERVICE_UNAVAILABLE"
+                f"Groq service unavailable: {clean_err}", category="SERVICE_UNAVAILABLE"
             ) from last_error
 
         raise ProviderUnavailableError("Groq timeout or all models exhausted.", category="SERVICE_UNAVAILABLE")
