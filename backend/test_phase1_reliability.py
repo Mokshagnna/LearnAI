@@ -313,8 +313,8 @@ class TestPhase1Reliability(unittest.TestCase):
         client_normal = provider._get_client(timeout_sec=14.0, api_key="test_key")
         self.assertEqual(client_normal._api_client._http_options.timeout, 14000)
 
-    def test_gemini_provider_direct_call_under_10s_fails_fast(self):
-        """Direct call to GeminiProvider with budget under 10.0s fails fast without sending invalid deadline to API."""
+    def test_gemini_provider_direct_call_under_9s_fails_fast(self):
+        """Direct call to GeminiProvider with budget under minimum threshold fails fast without sending invalid deadline to API."""
         from services.providers.gemini_provider import GeminiProvider
         provider = GeminiProvider()
         start = time.perf_counter()
@@ -325,11 +325,33 @@ class TestPhase1Reliability(unittest.TestCase):
                     course_name="Deep Learning",
                     topic_name="Perceptron",
                     syllabus_context="Perceptron",
-                    timeout_seconds=9.0
+                    timeout_seconds=8.0
                 )
         elapsed = time.perf_counter() - start
         self.assertLess(elapsed, 0.5)
         self.assertEqual(ctx.exception.category, "TIMEOUT")
+
+    def test_gemini_provider_exact_10s_budget_proceeds_without_premature_exhaustion(self):
+        """When exactly 10.0s is budgeted, GeminiProvider does not abort before calling the client."""
+        from services.providers.gemini_provider import GeminiProvider
+        provider = GeminiProvider()
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = '{"questions": []}'
+        mock_client.models.generate_content.return_value = mock_resp
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}):
+            with patch.object(provider, "_get_client", return_value=mock_client):
+                res = provider.generate_quiz_raw(
+                    course_code="22AM301",
+                    course_name="Deep Learning",
+                    topic_name="Perceptron",
+                    syllabus_context="Perceptron",
+                    timeout_seconds=10.0
+                )
+
+        self.assertTrue(mock_client.models.generate_content.called)
+        self.assertEqual(res, '{"questions": []}')
 
     def test_gemini_provider_handles_google_minimum_deadline_400_error(self):
         """Mocked test for Google GenAI 400 INVALID_ARGUMENT 'Manually set deadline 9s is too short'."""

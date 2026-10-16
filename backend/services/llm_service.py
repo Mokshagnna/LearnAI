@@ -363,7 +363,7 @@ REQUIREMENTS:
                             course_name=course_name,
                             topic_name=topic_name,
                             syllabus_context=syllabus_context,
-                            timeout_seconds=min(time_left, 10.0) if provider.name == "gemini" else min(time_left * 0.8, 8.0),
+                            timeout_seconds=min(time_left, 12.0) if provider.name == "gemini" else min(time_left * 0.8, 8.0),
                             custom_prompt=rep_full_prompt,
                             max_tokens=min(1200, 180 * ask_count + 100)
                         )
@@ -628,7 +628,7 @@ def generate_analysis(subject: str, topic: str, weak_concepts: List[str], score:
             continue
 
         try:
-            feedback_timeout = remaining if provider.name != "gemini" else min(remaining, 10.0)
+            feedback_timeout = min(remaining, 12.0)
             raw_text = provider.generate_analysis_raw(
                 subject=subject,
                 topic=topic,

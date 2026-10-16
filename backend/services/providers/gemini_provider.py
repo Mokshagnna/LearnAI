@@ -106,7 +106,8 @@ class GeminiProvider(BaseAIProvider):
 
     def _execute_with_models(self, prompt: str, timeout_seconds: float, response_mime_type: Optional[str] = None) -> str:
         MIN_GEMINI_DEADLINE_SECONDS = 10.0
-        if timeout_seconds < MIN_GEMINI_DEADLINE_SECONDS:
+        GEMINI_BUDGET_TOLERANCE_SECONDS = 9.0
+        if timeout_seconds < GEMINI_BUDGET_TOLERANCE_SECONDS:
             logger.warning(
                 f"[GEMINI] Timeout budget {timeout_seconds:.1f}s is below Gemini's minimum allowed deadline ({MIN_GEMINI_DEADLINE_SECONDS:.1f}s)."
             )
@@ -146,7 +147,7 @@ class GeminiProvider(BaseAIProvider):
             for model_idx, model in enumerate(models_to_try):
                 elapsed = time.perf_counter() - start_time
                 time_remaining = timeout_seconds - elapsed
-                if time_remaining < MIN_GEMINI_DEADLINE_SECONDS:
+                if time_remaining < GEMINI_BUDGET_TOLERANCE_SECONDS:
                     logger.warning(
                         f"[GEMINI] Time budget exhausted ({time_remaining:.1f}s left). "
                         f"Cannot attempt model={model} (min {MIN_GEMINI_DEADLINE_SECONDS:.1f}s required)."
@@ -168,7 +169,7 @@ class GeminiProvider(BaseAIProvider):
 
                 for attempt in range(1, attempts + 1):
                     cur_remaining = timeout_seconds - (time.perf_counter() - start_time)
-                    if cur_remaining < MIN_GEMINI_DEADLINE_SECONDS:
+                    if cur_remaining < GEMINI_BUDGET_TOLERANCE_SECONDS:
                         logger.warning(
                             f"[GEMINI] Time budget exhausted ({cur_remaining:.1f}s left). "
                             f"Skipping attempt {attempt} on model={model} (min {MIN_GEMINI_DEADLINE_SECONDS:.1f}s required)."
@@ -210,7 +211,7 @@ class GeminiProvider(BaseAIProvider):
 
                         # If another attempt is budgeted on this model
                         elapsed_now = time.perf_counter() - start_time
-                        if attempt < attempts and (timeout_seconds - elapsed_now) >= MIN_GEMINI_DEADLINE_SECONDS:
+                        if attempt < attempts and (timeout_seconds - elapsed_now) >= GEMINI_BUDGET_TOLERANCE_SECONDS:
                             delay = random.uniform(0.8, 1.5)
                             time.sleep(delay)
                         else:
