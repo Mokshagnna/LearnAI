@@ -574,6 +574,122 @@ class TestPhase1Reliability(unittest.TestCase):
             self.assertEqual(gem_model, "gemini-3.6-flash")
             self.assertEqual(gem_fallback, "gemini-3.5-flash")
 
+    def test_gemini_permanent_400_failover_to_groq(self):
+        """When Gemini returns a 400 malformed request, orchestrator safely falls over to Groq without failing fast."""
+        from services.providers.base import ProviderError
+
+        mock_gemini = MagicMock()
+        mock_gemini.name = "gemini"
+        mock_gemini.is_configured.return_value = True
+        mock_gemini.generate_quiz_raw.side_effect = ProviderError(
+            "Gemini deadline rejected: 400 INVALID_ARGUMENT",
+            category="MALFORMED_REQUEST_400",
+            retryable=False
+        )
+
+        mock_groq = MagicMock()
+        mock_groq.name = "groq"
+        mock_groq.is_configured.return_value = True
+        mock_groq.generate_quiz_raw.return_value = _make_valid_quiz_json("Deep Learning")
+
+        with patch("services.llm_service._get_providers", return_value=[mock_gemini, mock_groq]):
+            with patch.dict(os.environ, {"PROVIDER_ORDER": "gemini,groq", "OVERALL_DEADLINE_SECONDS": "25.0"}):
+                with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                    quiz = generate_quiz(
+                        course_code="22AM301",
+                        course_name="Deep Learning",
+                        topic_name="History of Deep Learning",
+                        syllabus_context="Deep Learning history and milestones",
+                        student_id="test_student"
+                    )
+
+        self.assertEqual(quiz["provider_used"], "groq")
+        self.assertEqual(len(quiz["questions"]), 10)
+        self.assertEqual(mock_gemini.generate_quiz_raw.call_count, 1)
+        self.assertEqual(mock_groq.generate_quiz_raw.call_count, 1)
+
+    def test_all_providers_rate_limit_raises_airatelimiterror_with_429(self):
+        """When all providers fail due to 429 quota exhaustion, AIRateLimitError is raised with status_code=429."""
+        from services.llm_service import AIRateLimitError
+
+        mock_p1 = MagicMock(spec=BaseAIProvider)
+        mock_p1.name = "groq"
+        mock_p1.is_configured.return_value = True
+        mock_p1.generate_quiz_raw.side_effect = ProviderUnavailableError("Groq 429 Rate Limit", category="RATE_LIMIT_429")
+
+        mock_p2 = MagicMock(spec=BaseAIProvider)
+        mock_p2.name = "gemini"
+        mock_p2.is_configured.return_value = True
+        mock_p2.generate_quiz_raw.side_effect = ProviderUnavailableError("Gemini 429 Quota Exhausted", category="RATE_LIMIT_429")
+
+        with patch("services.llm_service._get_providers", return_value=[mock_p1, mock_p2]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                with patch("services.llm_service._load_local_demo_questions", return_value=None):
+                    with self.assertRaises(AIRateLimitError) as ctx:
+                        generate_quiz(
+                            course_code="22AM301",
+                            course_name="Deep Learning",
+                            topic_name="Unseen Topic",
+                            syllabus_context="Context",
+                            student_id="test_student"
+                        )
+        self.assertEqual(ctx.exception.status_code, 429)
+        self.assertIn("rate limit or quota", str(ctx.exception).lower())
+
+    def test_all_providers_timeout_raises_aitimeouterror_with_504(self):
+        """When all providers time out, AITimeoutError is raised with status_code=504."""
+        from services.llm_service import AITimeoutError
+
+        mock_p1 = MagicMock(spec=BaseAIProvider)
+        mock_p1.name = "groq"
+        mock_p1.is_configured.return_value = True
+        mock_p1.generate_quiz_raw.side_effect = ProviderUnavailableError("Groq timed out", category="TIMEOUT")
+
+        mock_p2 = MagicMock(spec=BaseAIProvider)
+        mock_p2.name = "gemini"
+        mock_p2.is_configured.return_value = True
+        mock_p2.generate_quiz_raw.side_effect = ProviderUnavailableError("Gemini timed out", category="TIMEOUT")
+
+        with patch("services.llm_service._get_providers", return_value=[mock_p1, mock_p2]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                with patch("services.llm_service._load_local_demo_questions", return_value=None):
+                    with self.assertRaises(AITimeoutError) as ctx:
+                        generate_quiz(
+                            course_code="22AM301",
+                            course_name="Deep Learning",
+                            topic_name="Unseen Topic",
+                            syllabus_context="Context",
+                            student_id="test_student"
+                        )
+        self.assertEqual(ctx.exception.status_code, 504)
+        self.assertIn("timed out", str(ctx.exception).lower())
+
+    def test_api_quiz_generate_endpoint_status_codes_and_messages(self):
+        """FastAPI route returns 429, 504, 500 status codes with clean, actionable detail messages."""
+        from fastapi.testclient import TestClient
+        from main import app
+        from services.llm_service import AIRateLimitError, AITimeoutError, AIConfigError
+
+        client = TestClient(app)
+
+        # 1. Test 429 Rate Limit
+        with patch("main.generate_quiz", side_effect=AIRateLimitError("AI service rate limit exceeded.")):
+            resp = client.post("/api/quiz/generate", json={"course_code": "22AM301", "topic": "Deep Neural Networks Basics"})
+            self.assertEqual(resp.status_code, 429)
+            self.assertIn("rate limit", resp.json()["detail"].lower())
+
+        # 2. Test 504 Gateway Timeout
+        with patch("main.generate_quiz", side_effect=AITimeoutError("Quiz generation timed out.")):
+            resp = client.post("/api/quiz/generate", json={"course_code": "22AM301", "topic": "Deep Neural Networks Basics"})
+            self.assertEqual(resp.status_code, 504)
+            self.assertIn("timed out", resp.json()["detail"].lower())
+
+        # 3. Test 500 AI Configuration Error
+        with patch("main.generate_quiz", side_effect=AIConfigError("AI provider configuration error: key invalid.")):
+            resp = client.post("/api/quiz/generate", json={"course_code": "22AM301", "topic": "Deep Neural Networks Basics"})
+            self.assertEqual(resp.status_code, 500)
+            self.assertIn("configuration error", resp.json()["detail"].lower())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

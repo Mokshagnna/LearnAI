@@ -425,10 +425,10 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     // Stay on loading section with clean, human-readable error with Retry & Cancel
     if (spinner) spinner.style.display = "none";
 
-    let friendlyMsg = "AI service is temporarily experiencing high demand. Please try again.";
+    let friendlyMsg = "AI service is temporarily busy. Please try again shortly.";
     if (e.name === "AbortError") {
       friendlyMsg = "Quiz generation was cancelled or timed out. Please try again.";
-    } else if (e.message && !e.message.includes("{") && !e.message.includes("500") && !e.message.includes("503")) {
+    } else if (e.message && typeof e.message === "string" && e.message.trim().length > 0 && !e.message.startsWith("{")) {
       friendlyMsg = e.message;
     }
 

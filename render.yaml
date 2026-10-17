@@ -25,11 +25,21 @@ services:
       - key: PROVIDER_ORDER
         value: groq,nvidia,gemini
       - key: OVERALL_DEADLINE_SECONDS
-        value: "25.0"
+        value: "35.0"
       - key: PROVIDER_TIMEOUT_SECONDS
         value: "12.0"
       - key: MAX_PROVIDER_RETRIES
         value: "1"
+
+      # Optional model overrides (configurable in Render dashboard)
+      - key: GEMINI_MODEL
+        sync: false
+      - key: GEMINI_FALLBACK_MODEL
+        sync: false
+      - key: GROQ_MODEL
+        sync: false
+      - key: NVIDIA_MODEL
+        sync: false
 
       # Reverse proxy & networking for Render cloud environment
       - key: TRUST_PROXY_HEADERS

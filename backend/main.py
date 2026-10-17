@@ -3,7 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from services.llm_service import generate_quiz, generate_analysis, AIServiceUnavailableError, AIConfigError
+from services.llm_service import (
+    generate_quiz,
+    generate_analysis,
+    AIError,
+    AIServiceUnavailableError,
+    AIConfigError,
+    AIRateLimitError,
+    AITimeoutError
+)
 from services.evaluator import evaluate_answers
 from services.database import init_db, get_or_create_student, save_quiz_attempt, get_student_history, get_connection
 from services.curriculum_service import curriculum_service
@@ -185,19 +193,16 @@ def create_quiz(req: QuizRequest, request: Request):
             student_id=req.student_id,
             concepts=concepts_list
         )
-    except AIServiceUnavailableError as e:
+    except AIError as e:
         duration = time.perf_counter() - t_start
+        status_code = getattr(e, "status_code", 503)
+        cat = getattr(e, "category", "AI_ERROR")
         metrics.record_quiz_failure("all", duration)
         logger.warning(
-            f"[ENDPOINT FAILED] /api/quiz/generate (503) duration={duration:.2f}s "
-            f"category={getattr(e, 'category', 'SERVICE_UNAVAILABLE')}: {e}"
+            f"[ENDPOINT FAILED] /api/quiz/generate ({status_code}) duration={duration:.2f}s "
+            f"category={cat}: {e}"
         )
-        raise HTTPException(status_code=503, detail=str(e))
-    except AIConfigError as e:
-        duration = time.perf_counter() - t_start
-        metrics.record_quiz_failure("all", duration)
-        logger.error(f"[ENDPOINT FAILED] /api/quiz/generate (500 Config Error) duration={duration:.2f}s: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         duration = time.perf_counter() - t_start
         metrics.record_quiz_failure("all", duration)
@@ -205,7 +210,7 @@ def create_quiz(req: QuizRequest, request: Request):
             f"[ENDPOINT FAILED] /api/quiz/generate unexpected error duration={duration:.2f}s: {e}",
             exc_info=True
         )
-        raise HTTPException(status_code=503, detail="AI service is temporarily unavailable. Please try again shortly.")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while preparing your quiz.")
 
     duration = time.perf_counter() - t_start
     metrics.record_quiz_success(quiz.get("provider_used", "unknown"), duration)

@@ -28,6 +28,7 @@ from services.novelty import (
     build_exclusion_prompt_block,
     is_question_near_duplicate
 )
+from services.logger_utils import sanitize_error_text
 
 # Ensure backend/.env is reliably loaded regardless of working directory
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -52,22 +53,36 @@ MAX_NOVELTY_REPAIR_ATTEMPTS = int(os.getenv("MAX_NOVELTY_REPAIR_ATTEMPTS", "2"))
 
 class AIError(Exception):
     """Base exception for AI operations."""
-    pass
-
-
-class AIServiceUnavailableError(AIError):
-    """Raised when all configured AI providers are temporarily unavailable or exceeded deadline."""
-    def __init__(self, message: str, category: str = "SERVICE_UNAVAILABLE", retryable: bool = True):
+    def __init__(self, message: str, category: str = "AI_ERROR", status_code: int = 500, retryable: bool = False):
         super().__init__(message)
+        self.message = message
         self.category = category
+        self.status_code = status_code
         self.retryable = retryable
 
 
+class AIServiceUnavailableError(AIError):
+    """Raised when all configured AI providers are temporarily unavailable or overloaded."""
+    def __init__(self, message: str, category: str = "SERVICE_UNAVAILABLE", status_code: int = 503, retryable: bool = True):
+        super().__init__(message, category=category, status_code=status_code, retryable=retryable)
+
+
 class AIConfigError(AIError):
-    """Raised when there is an authentication, API key, or permanent configuration error."""
-    def __init__(self, message: str, category: str = "CONFIG_ERROR"):
-        super().__init__(message)
-        self.category = category
+    """Raised when there is an authentication, API key, model ID, or permanent configuration error."""
+    def __init__(self, message: str, category: str = "CONFIG_ERROR", status_code: int = 500):
+        super().__init__(message, category=category, status_code=status_code, retryable=False)
+
+
+class AIRateLimitError(AIServiceUnavailableError):
+    """Raised when AI providers exceed rate limits or quota exhausted."""
+    def __init__(self, message: str = "AI service rate limit or quota exceeded across configured providers. Please wait a moment and retry.", category: str = "RATE_LIMIT_429"):
+        super().__init__(message, category=category, status_code=429, retryable=True)
+
+
+class AITimeoutError(AIServiceUnavailableError):
+    """Raised when AI providers exceed deadline or timeouts."""
+    def __init__(self, message: str = "Quiz generation timed out across configured providers. Please try again.", category: str = "TIMEOUT"):
+        super().__init__(message, category=category, status_code=504, retryable=True)
 
 
 def _get_providers() -> List[BaseAIProvider]:
@@ -592,14 +607,35 @@ REQUIREMENTS:
         or getattr(e, "category", "") in ("AUTH_CONFIG_ERROR", "MODEL_NOT_FOUND_404", "MALFORMED_REQUEST_400")
         for e in all_provider_errors
     ):
+        clean_msg = sanitize_error_text(str(last_error)) if last_error else "Configuration error"
         raise AIConfigError(
-            f"AI provider configuration or permanent request error across configured providers: {last_error}",
+            f"AI provider configuration or permanent request error across configured providers: {clean_msg}",
             category=last_error_category
+        ) from last_error
+
+    # Differentiate failure categories instead of defaulting everything to generic message
+    if last_error_category in ("RATE_LIMIT_429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"):
+        raise AIRateLimitError(
+            "AI service rate limit or quota exceeded across configured providers. Please wait a moment and retry.",
+            category=last_error_category
+        ) from last_error
+    elif last_error_category in ("TIMEOUT", "CLIENT_TIMEOUT", "DEADLINE_EXCEEDED", "REQUEST_TIMEOUT_408"):
+        raise AITimeoutError(
+            "Quiz generation timed out across configured providers. Please try again.",
+            category=last_error_category
+        ) from last_error
+    elif last_error_category in ("NETWORK_ERROR", "CONNECTION_ERROR"):
+        raise AIServiceUnavailableError(
+            "Unable to connect to AI provider network. Please check network connectivity and retry.",
+            category=last_error_category,
+            status_code=502,
+            retryable=True
         ) from last_error
 
     raise AIServiceUnavailableError(
         "AI service is temporarily experiencing high demand. Please try again shortly.",
         category="SERVICE_UNAVAILABLE",
+        status_code=503,
         retryable=True
     ) from last_error
 
