@@ -13,7 +13,17 @@ from services.llm_service import (
     AITimeoutError
 )
 from services.evaluator import evaluate_answers
-from services.database import init_db, get_or_create_student, save_quiz_attempt, get_student_history, get_connection
+from services.database import (
+    init_db,
+    get_or_create_student,
+    save_quiz_attempt,
+    get_student_history,
+    get_connection,
+    create_quiz_session,
+    get_quiz_session,
+    submit_quiz_atomic,
+    get_student_dashboard_data
+)
 from services.curriculum_service import curriculum_service
 from services.rate_limiter import quiz_gen_limiter, quiz_submit_limiter, get_client_ip
 from services.metrics import metrics
@@ -72,8 +82,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
-
-QUIZZES: dict = {}
+# Database-backed quiz_sessions table is the sole authoritative session store (Stage C)
 
 class QuizRequest(BaseModel):
     course_code: str = Field(..., min_length=2, max_length=50)
@@ -217,13 +226,11 @@ def create_quiz(req: QuizRequest, request: Request):
 
     # Always generate a fresh server-side quiz_id — never reuse the previous one
     quiz_id = str(uuid.uuid4())
-    # Store the quiz with metadata; strip correct_answers from public payload
     quiz["course_code"] = course["code"]
     quiz["topic_id"] = topic.get("id")
     quiz["parent_section"] = topic.get("parent_section")
     quiz["module"] = topic.get("module")
     quiz["unit"] = topic.get("unit")
-    QUIZZES[quiz_id] = quiz
 
     public_questions = []
     for i, q in enumerate(quiz["questions"]):
@@ -234,6 +241,33 @@ def create_quiz(req: QuizRequest, request: Request):
             "difficulty": q["difficulty"],
             "concept": q["concept"]
         })
+
+    # Persist the active quiz session to database (sole authoritative store)
+    # Never return a usable quiz to the user if the session cannot be persisted
+    student_id = get_or_create_student(req.student_id)
+    try:
+        create_quiz_session(
+            session_id=quiz_id,
+            student_id=student_id,
+            course_code=course["code"],
+            course_name=course["name"],
+            topic_name=topic["name"],
+            questions=quiz["questions"],  # trusted server snapshot with answers & explanations
+            recommended_difficulty=quiz.get("recommended_difficulty", "mixed"),
+            adaptive_metadata={
+                **(quiz.get("adaptive_metadata") or {}),
+                "adaptive_explanation": quiz.get("adaptive_explanation"),
+                "attempt_number": quiz.get("attempt_number", 1),
+                "novel_count": quiz.get("novel_count", len(public_questions)),
+                "provider_used": quiz.get("provider_used", "unknown"),
+                "is_fallback": quiz.get("is_fallback", False)
+            }
+        )
+    except Exception as e:
+        duration = time.perf_counter() - t_start
+        metrics.record_quiz_failure("all", duration)
+        logger.error(f"[ENDPOINT FAILED] /api/quiz/generate failed to persist quiz session {quiz_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to persist quiz session. Please try again.")
 
     logger.info(
         f"[ENDPOINT COMPLETE] /api/quiz/generate quiz_id={quiz_id} "
@@ -265,7 +299,61 @@ def create_quiz(req: QuizRequest, request: Request):
         "recommended_difficulty": quiz.get("recommended_difficulty", "mixed"),
         "adaptive_applied": quiz.get("adaptive_applied", False),
         "adaptive_explanation": quiz.get("adaptive_explanation"),
+        "adaptive_metadata": quiz.get("adaptive_metadata"),
         "provider_used": quiz.get("provider_used", "unknown")
+    }
+
+@app.get("/api/quiz/session/{session_id}")
+def get_session(session_id: str, student_id: str | None = None):
+    """
+    Retrieve active or completed quiz session.
+    Enforces student ownership and session expiration.
+    Returns sanitized public questions (no answers or explanations).
+    """
+    if not student_id or not student_id.strip():
+        raw_session = get_quiz_session(session_id, auto_expire=False)
+        if not raw_session:
+            raise HTTPException(status_code=404, detail="Quiz session not found or expired.")
+        raise HTTPException(status_code=400, detail="student_id is required to access quiz session.")
+
+    clean_student_id = student_id.strip()
+    try:
+        session = get_quiz_session(session_id, student_id=clean_student_id, auto_expire=True)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Access denied: quiz session belongs to another student.")
+    except Exception as e:
+        logger.error(f"Error retrieving quiz session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve quiz session.")
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Quiz session not found or expired.")
+
+    if session["status"] == "expired":
+        raise HTTPException(status_code=400, detail="This quiz session has expired (exceeded 24 hours). Please generate a new quiz.")
+
+    # Sanitize questions for public output
+    public_questions = []
+    for i, q in enumerate(session.get("questions", [])):
+        public_questions.append({
+            "id": i,
+            "question": q["question"],
+            "options": q["options"],
+            "difficulty": q.get("difficulty", "Medium"),
+            "concept": q.get("concept", "General")
+        })
+
+    return {
+        "session_id": session["id"],
+        "student_id": session["student_id"],
+        "course_code": session["course_code"],
+        "subject": session["course_name"],
+        "topic": session["topic_name"],
+        "status": session["status"],
+        "recommended_difficulty": session.get("recommended_difficulty", "mixed"),
+        "adaptive_metadata": session.get("adaptive_metadata"),
+        "created_at": session["created_at"],
+        "expires_at": session["expires_at"],
+        "questions": public_questions
     }
 
 @app.post("/api/quiz/submit")
@@ -281,78 +369,89 @@ def submit_quiz(req: SubmitRequest, request: Request):
         )
 
     metrics.record_submission()
-    if req.quiz_id not in QUIZZES:
+
+    if not req.student_id or not req.student_id.strip():
+        raw_session = get_quiz_session(req.quiz_id, auto_expire=False)
+        if not raw_session:
+            raise HTTPException(status_code=404, detail="Quiz not found or expired.")
+        raise HTTPException(status_code=400, detail="student_id is required to submit a quiz session.")
+
+    clean_student_id = req.student_id.strip()
+
+    def _analysis_wrapper(subject, topic, weak_concepts, score, total):
+        try:
+            return generate_analysis(subject, topic, weak_concepts, score, total)
+        except Exception as e:
+            logger.warning(f"AI analysis generation failed in submit_quiz: {e}")
+            weak_str = ", ".join(weak_concepts) if weak_concepts else "None identified"
+            return {
+                "summary": "AI feedback is temporarily unavailable. Please try again later.",
+                "revision": f"Review concepts: {weak_str}." if weak_concepts else "Review the question explanations below.",
+                "recommendation": "Review the detailed question explanations below and practice more questions."
+            }
+
+    try:
+        result = submit_quiz_atomic(
+            session_id=req.quiz_id,
+            student_id=clean_student_id,
+            answers=req.answers,
+            evaluator_fn=evaluate_answers,
+            analysis_generator_fn=_analysis_wrapper
+        )
+        return result
+    except LookupError as e:
+        logger.warning(f"[SUBMIT 404] {e}")
         raise HTTPException(status_code=404, detail="Quiz not found or expired.")
-
-    quiz = QUIZZES[req.quiz_id]
-    result = evaluate_answers(quiz["questions"], req.answers)
-
-    try:
-        analysis = generate_analysis(
-            quiz["subject"],
-            quiz["topic"],
-            result["weak_concepts"],
-            result["score"],
-            result["total"]
-        )
+    except PermissionError as e:
+        logger.warning(f"[SUBMIT 403] {e}")
+        raise HTTPException(status_code=403, detail="Access denied: quiz session belongs to another student.")
+    except ValueError as e:
+        logger.warning(f"[SUBMIT 400] {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.warning(f"AI analysis generation failed in submit_quiz: {e}")
-        weak_str = ", ".join(result["weak_concepts"]) if result.get("weak_concepts") else "None identified"
-        analysis = {
-            "summary": "AI feedback is temporarily unavailable. Please try again later.",
-            "revision": f"Review concepts: {weak_str}." if result.get("weak_concepts") else "Review the question explanations below.",
-            "recommendation": "Review the detailed question explanations below and practice more questions."
-        }
-
-    result["analysis"] = analysis
-
-    # Save quiz attempt to database
-    student_id = get_or_create_student(req.student_id)
-    try:
-        save_quiz_attempt(
-            student_id=student_id,
-            course_code=quiz.get("course_code", ""),
-            course_name=quiz["subject"],
-            topic_name=quiz["topic"],
-            quiz_data=quiz,
-            score=result["score"],
-            total=result["total"],
-            percentage=result["percentage"],
-            status=result["status"],
-            difficulty_accuracy=result["difficulty_accuracy"],
-            concept_accuracy=result["concept_accuracy"],
-            weak_concepts=result["weak_concepts"],
-            strong_concepts=result["strong_concepts"],
-            recommended_difficulty=quiz.get("recommended_difficulty")
-        )
-        result["student_id"] = student_id
-    except Exception as e:
-        logger.warning(f"Failed to save quiz attempt to database: {e}")
-
-    return result
+        logger.error(f"[SUBMIT 500] Unexpected submission error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while evaluating and saving your quiz.")
 
 @app.get("/api/student/{student_id}/history")
 def get_history(student_id: str, limit: int = 20):
+    if not student_id or not student_id.strip() or len(student_id.strip()) > 100:
+        raise HTTPException(status_code=400, detail="Invalid student_id parameter.")
+    clean_id = student_id.strip()
     try:
-        history = get_student_history(student_id, limit)
-        return {"student_id": student_id, "attempts": history}
+        history = get_student_history(clean_id, limit)
+        return {"student_id": clean_id, "attempts": history}
     except Exception as e:
         logger.error(f"Failed to get student history: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve history")
 
 @app.get("/api/student/{student_id}/performance")
 def get_performance(student_id: str, course_code: str | None = None):
+    if not student_id or not student_id.strip() or len(student_id.strip()) > 100:
+        raise HTTPException(status_code=400, detail="Invalid student_id parameter.")
+    clean_id = student_id.strip()
     from services.database import get_concept_performance, get_difficulty_performance
     try:
-        concept_perf = get_concept_performance(student_id, course_code)
-        diff_perf = get_difficulty_performance(student_id, course_code)
+        concept_perf = get_concept_performance(clean_id, course_code)
+        diff_perf = get_difficulty_performance(clean_id, course_code)
         return {
-            "student_id": student_id,
+            "student_id": clean_id,
             "concept_performance": concept_perf,
             "difficulty_performance": diff_perf
         }
     except Exception as e:
         logger.error(f"Failed to get student performance: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve performance")
+
+@app.get("/api/student/{student_id}/dashboard")
+def get_dashboard(student_id: str, course_code: str | None = None, limit: int = 20):
+    if not student_id or not student_id.strip() or len(student_id.strip()) > 100:
+        raise HTTPException(status_code=400, detail="Invalid student_id parameter.")
+    clean_id = student_id.strip()
+    try:
+        data = get_student_dashboard_data(student_id=clean_id, course_code=course_code, limit=limit)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to get student dashboard: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve dashboard")
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

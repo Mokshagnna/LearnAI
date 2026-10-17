@@ -19,8 +19,21 @@ from services.providers.base import (
 from services.providers.gemini_provider import GeminiProvider
 from services.providers.groq_provider import GroqProvider
 from services.providers.nvidia_provider import NvidiaProvider
-from services.database import get_or_create_student, get_topic_history, get_concept_performance, get_question_fingerprints, get_question_concepts
-from services.adaptive import get_recommended_difficulty, get_difficulty_distribution, get_adaptive_prompt_additions, get_adaptive_explanation
+from services.database import (
+    get_or_create_student,
+    get_topic_history,
+    get_concept_performance,
+    get_question_fingerprints,
+    get_question_concepts,
+    get_stored_questions_for_topic
+)
+from services.adaptive import (
+    compute_adaptive_decision,
+    get_recommended_difficulty,
+    get_difficulty_distribution,
+    get_adaptive_prompt_additions,
+    get_adaptive_explanation
+)
 from services.novelty import (
     extract_fingerprints_from_history,
     extract_concepts_from_history,
@@ -155,6 +168,38 @@ def _load_local_demo_questions(
     return None
 
 
+def _load_stored_quiz_fallback(
+    course_code: str,
+    topic_name: str,
+    course_name: str,
+    recommended_difficulty: str,
+    attempt_id: str,
+    attempt_number: int,
+    adaptive_decision: Dict[str, Any],
+    adaptive_explanation: Dict[str, Any],
+    eligible_stored: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Safe fallback to stored validated questions when enabled via ENABLE_STORED_FALLBACK."""
+    if os.getenv("ENABLE_STORED_FALLBACK", "false").lower() not in ("true", "1"):
+        return None
+    if len(eligible_stored) >= 10:
+        return {
+            "subject": course_name,
+            "topic": topic_name,
+            "questions": eligible_stored[:10],
+            "is_fallback": True,
+            "fallback_label": "Stored Validated Topic Questions (Offline Mode)",
+            "attempt_id": attempt_id,
+            "attempt_number": attempt_number,
+            "recommended_difficulty": recommended_difficulty,
+            "adaptive_applied": recommended_difficulty != "mixed",
+            "adaptive_explanation": adaptive_explanation,
+            "adaptive_metadata": adaptive_decision,
+            "provider_used": "stored_db"
+        }
+    return None
+
+
 def generate_quiz(
     course_code: str,
     course_name: str,
@@ -187,23 +232,30 @@ def generate_quiz(
             seen_concepts[c] = None
     weak_concepts = list(seen_concepts.keys())
 
-    # Adaptive difficulty
-    recommended_difficulty = get_recommended_difficulty(student_id, course_code, weak_concepts)
+    # ── Adaptive difficulty calculation ───────────────────────────────────────
+    adaptive_decision = compute_adaptive_decision(
+        student_id=student_id,
+        course_code=course_code,
+        topic_name=topic_name
+    )
+    recommended_difficulty = adaptive_decision["recommended_difficulty"]
     difficulty_dist = get_difficulty_distribution(recommended_difficulty)
+
+    # Combine historical weak concepts from attempts and adaptive decision
+    combined_weak = list(dict.fromkeys(weak_concepts + adaptive_decision.get("weak_concepts", [])))
 
     logger.info(
         f"[ADAPTIVE] student={student_id} course={course_code} topic='{topic_name}' "
-        f"attempt=#{attempt_number} recommended={recommended_difficulty} dist={difficulty_dist} weak={weak_concepts}"
+        f"attempt=#{attempt_number} recommended={recommended_difficulty} dist={difficulty_dist} "
+        f"active={adaptive_decision['is_decision_active']} reason='{adaptive_decision['reason']}'"
     )
 
     adaptive_context = get_adaptive_prompt_additions(
-        student_id, course_code, topic_name, recommended_difficulty, weak_concepts
+        student_id, course_code, topic_name, recommended_difficulty, combined_weak
     )
 
     # Get adaptive explanation for UI
-    adaptive_explanation = get_adaptive_explanation(
-        student_id, course_code, recommended_difficulty, weak_concepts
-    )
+    adaptive_explanation = get_adaptive_explanation(adaptive_decision)
 
     # ── Novelty & Concept History ─────────────────────────────────────────────
     # Get fingerprints and concepts from both quiz_attempts (legacy) and question_metadata (new)
@@ -221,6 +273,15 @@ def generate_quiz(
     all_concepts = history_concepts_from_attempts + [
         c for c in history_concepts_from_metadata if c not in history_concepts_from_attempts
     ]
+
+    # Query eligible stored questions for this course & topic that the student hasn't seen
+    eligible_stored = get_stored_questions_for_topic(
+        course_code=course_code,
+        topic_name=topic_name,
+        difficulty=None,
+        exclude_fingerprints=all_fingerprints,
+        limit=10
+    )
     
     novelty_block = build_exclusion_prompt_block(
         history_fingerprints=all_fingerprints,
@@ -242,6 +303,20 @@ def generate_quiz(
     configured_providers = [p for p in providers if p.is_configured()]
 
     if not configured_providers:
+        stored_fallback = _load_stored_quiz_fallback(
+            course_code=course_code,
+            topic_name=topic_name,
+            course_name=course_name,
+            recommended_difficulty=recommended_difficulty,
+            attempt_id=attempt_id,
+            attempt_number=attempt_number,
+            adaptive_decision=adaptive_decision,
+            adaptive_explanation=adaptive_explanation,
+            eligible_stored=eligible_stored
+        )
+        if stored_fallback:
+            return stored_fallback
+
         local_quiz = _load_local_demo_questions(
             course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context
         )
@@ -335,7 +410,8 @@ def generate_quiz(
                     course_name,
                     topic_name,
                     concepts=concepts,
-                    syllabus_context=syllabus_context
+                    syllabus_context=syllabus_context,
+                    difficulty_dist=difficulty_dist
                 )
 
                 # ── Bounded Replenishment for missing unique questions ─────────
@@ -398,7 +474,8 @@ REQUIREMENTS:
                             topic_name,
                             concepts=concepts,
                             syllabus_context=syllabus_context,
-                            min_questions=1
+                            min_questions=1,
+                            difficulty_dist=difficulty_dist
                         )
                         for cand_q in rep_validated["questions"]:
                             if len(current_unique) >= 10:
@@ -411,6 +488,14 @@ REQUIREMENTS:
                         )
                     except Exception as rep_err:
                         logger.warning(f"[REPLENISHMENT FAILED round {rep_attempts}] provider={provider.name}: {rep_err}")
+
+                # If still under 10, supplement with eligible stored questions if available
+                if len(validated_quiz["questions"]) < 10 and eligible_stored:
+                    for sq in eligible_stored:
+                        if len(validated_quiz["questions"]) >= 10:
+                            break
+                        if not any(is_question_near_duplicate(ex_q, sq)[0] for ex_q in validated_quiz["questions"]):
+                            validated_quiz["questions"].append(sq)
 
                 if len(validated_quiz["questions"]) < 10:
                     raise ValueError(f"Provider {provider.name} generated only {len(validated_quiz['questions'])} unique valid questions (need 10).")
@@ -504,17 +589,21 @@ REQUIREMENTS:
                             except Exception as repair_err:
                                 logger.warning(f"[NOVELTY REPAIR ERROR] provider={provider.name}: {repair_err}")
 
-                # ── Apply adaptive difficulty distribution ────────────────────
+                # ── Ensure all questions have valid difficulty metadata ───────
                 expected_difficulties = []
                 for diff, count in difficulty_dist.items():
                     expected_difficulties.extend([diff] * count)
                 for index, q in enumerate(validated_quiz["questions"]):
-                    if index < len(expected_difficulties):
-                        q["difficulty"] = expected_difficulties[index]
+                    if not q.get("difficulty") or q["difficulty"] not in ("Easy", "Medium", "Hard"):
+                        if index < len(expected_difficulties):
+                            q["difficulty"] = expected_difficulties[index]
+                        else:
+                            q["difficulty"] = "Medium"
 
                 validated_quiz["recommended_difficulty"] = recommended_difficulty
                 validated_quiz["adaptive_applied"] = recommended_difficulty != "mixed"
                 validated_quiz["adaptive_explanation"] = adaptive_explanation
+                validated_quiz["adaptive_metadata"] = adaptive_decision
                 validated_quiz["attempt_id"] = attempt_id
                 validated_quiz["attempt_number"] = attempt_number
                 validated_quiz["novelty_repairs"] = novelty_repair_count
@@ -591,8 +680,30 @@ REQUIREMENTS:
         best_quiz["novelty_warning"] = True
         best_quiz["attempt_id"] = attempt_id
         best_quiz["attempt_number"] = attempt_number
+        best_quiz["recommended_difficulty"] = recommended_difficulty
+        best_quiz["adaptive_applied"] = recommended_difficulty != "mixed"
         best_quiz["adaptive_explanation"] = adaptive_explanation
+        best_quiz["adaptive_metadata"] = adaptive_decision
         return best_quiz
+
+    # Stored questions fallback if enabled and sufficient eligible stored questions exist
+    stored_fallback = _load_stored_quiz_fallback(
+        course_code=course_code,
+        topic_name=topic_name,
+        course_name=course_name,
+        recommended_difficulty=recommended_difficulty,
+        attempt_id=attempt_id,
+        attempt_number=attempt_number,
+        adaptive_decision=adaptive_decision,
+        adaptive_explanation=adaptive_explanation,
+        eligible_stored=eligible_stored
+    )
+    if stored_fallback:
+        total_duration = time.perf_counter() - start_time
+        logger.warning(
+            f"[STORED FALLBACK] All providers failed. Serving 10 stored validated questions for '{topic_name}' duration={total_duration:.2f}s."
+        )
+        return stored_fallback
 
     local_quiz = _load_local_demo_questions(
         course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context
@@ -605,7 +716,10 @@ REQUIREMENTS:
         )
         local_quiz["attempt_id"] = attempt_id
         local_quiz["attempt_number"] = attempt_number
+        local_quiz["recommended_difficulty"] = recommended_difficulty
+        local_quiz["adaptive_applied"] = recommended_difficulty != "mixed"
         local_quiz["adaptive_explanation"] = adaptive_explanation
+        local_quiz["adaptive_metadata"] = adaptive_decision
         return local_quiz
 
     total_duration = time.perf_counter() - start_time

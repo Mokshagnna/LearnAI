@@ -27,6 +27,11 @@ Thumbs.db
 backend/data/learnai.db
 *.db
 *.sqlite3
+*.db-wal
+*.db-shm
+*.bak
+backups/
+backend/data/backups/
 
 # Logs & Test Caches
 *.log

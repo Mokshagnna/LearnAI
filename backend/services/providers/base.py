@@ -375,13 +375,19 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
         or f"Option {correct_ans} is the correct answer based on {topic_name} principles."
     ).strip()
 
-    return {
+    raw_diff = str(raw_q.get("difficulty") or "").strip().capitalize()
+    difficulty = raw_diff if raw_diff in {"Easy", "Medium", "Hard"} else None
+
+    res = {
         "question": q_text,
         "options": options,
         "correct_answer": correct_ans,
         "concept": concept,
         "explanation": explanation
     }
+    if difficulty:
+        res["difficulty"] = difficulty
+    return res
 
 
 def validate_quiz_data(
@@ -390,7 +396,8 @@ def validate_quiz_data(
     topic_name: str,
     concepts: Optional[List[str]] = None,
     syllabus_context: Optional[str] = None,
-    min_questions: int = 5
+    min_questions: int = 5,
+    difficulty_dist: Optional[Dict[str, int]] = None
 ) -> Dict[str, Any]:
     """
     Validates that the generated data strictly fulfills quiz requirements:
@@ -457,13 +464,19 @@ def validate_quiz_data(
     if len(unique_questions) < min_questions:
         raise ValueError(f"Only {len(unique_questions)} unique questions passed strict relevance, duplicate, and option validation.")
 
-    # Apply standard difficulty progression to the available unique questions
-    expected_difficulties = ["Easy"] * 4 + ["Medium"] * 4 + ["Hard"] * 2
+    # Apply difficulty distribution to questions missing difficulty metadata
+    if not difficulty_dist:
+        difficulty_dist = {"Easy": 4, "Medium": 4, "Hard": 2}
+    expected_difficulties: List[str] = []
+    for diff, count in difficulty_dist.items():
+        expected_difficulties.extend([diff] * count)
+
     for index, q in enumerate(unique_questions):
-        if index < len(expected_difficulties):
-            q["difficulty"] = expected_difficulties[index]
-        else:
-            q["difficulty"] = "Medium"
+        if not q.get("difficulty"):
+            if index < len(expected_difficulties):
+                q["difficulty"] = expected_difficulties[index]
+            else:
+                q["difficulty"] = "Medium"
 
     return {
         "subject": course_name,
