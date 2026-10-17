@@ -8,6 +8,10 @@ services:
     plan: free
     envVars:
       # Secrets (must be provided in Render dashboard; never committed to git)
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET_KEY
+        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_BACKUP_API_KEY

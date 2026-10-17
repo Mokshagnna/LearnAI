@@ -6,9 +6,43 @@ import re
 import os
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Union
+
+from services.db.base import (
+    CompatibleRow,
+    DatabaseConfig,
+    DatabaseConnectionError,
+    translate_placeholders_to_pg,
+    parse_json_safely,
+    parse_json_column,
+    serialize_json_for_db,
+)
+from services.db.sqlite_adapter import SQLiteAdapter
+from services.db.postgres_adapter import (
+    PostgresAdapter,
+    PostgresConnectionWrapper,
+    PostgresCursorWrapper,
+)
+from services.db.migrations import apply_migrations
 
 logger = logging.getLogger("learnai.database")
+
+_db_config = DatabaseConfig()
+_sqlite_adapter = SQLiteAdapter(_db_config)
+_postgres_adapter: Optional[PostgresAdapter] = None
+
+
+def get_db_config() -> DatabaseConfig:
+    global _db_config
+    return _db_config
+
+
+def is_postgres_active() -> bool:
+    return _db_config.is_postgres
+
+
+def is_pg_conn(conn: Any) -> bool:
+    return isinstance(conn, PostgresConnectionWrapper) or hasattr(conn, "_pool")
 
 
 def get_utc_now() -> datetime:
@@ -79,21 +113,27 @@ def normalise_text(text: str) -> str:
     return text
 
 
-def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
+def get_connection(db_path: Optional[Path] = None) -> Any:
     """
-    Acquire SQLite connection with foreign key enforcement, WAL mode compatibility,
-    and busy timeout handling.
+    Acquire database connection.
+    If db_path is explicitly provided: always uses SQLite for that path (essential for test isolation).
+    If db_path is None:
+        If DATABASE_URL or SUPABASE_DB_URL is set: uses PostgresAdapter with connection pool.
+        Else: uses SQLiteAdapter with WAL mode and busy timeout.
     """
-    target = db_path or get_db_path()
-    conn = sqlite3.connect(target)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA busy_timeout = 5000;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
-    return conn
+    global _postgres_adapter
+    if db_path is not None:
+        return _sqlite_adapter.get_connection(db_path=db_path)
+
+    if _db_config.is_postgres:
+        if _postgres_adapter is None:
+            _postgres_adapter = PostgresAdapter(_db_config)
+        return _postgres_adapter.get_connection()
+
+    return _sqlite_adapter.get_connection()
 
 
-def _ensure_column(cursor: sqlite3.Cursor, table: str, column: str, column_type: str):
+def _ensure_column(cursor: Any, table: str, column: str, column_type: str):
     """Safely add a column to an existing table if it does not already exist."""
     cursor.execute(f"PRAGMA table_info({table})")
     columns = [row[1] for row in cursor.fetchall()]
@@ -105,9 +145,24 @@ def _ensure_column(cursor: sqlite3.Cursor, table: str, column: str, column_type:
 def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """
     Initialize database schema with idempotent DDL, WAL journal mode, and safe migrations.
+    - If PostgreSQL is configured (DATABASE_URL is set) and db_path is None:
+      runs versioned Supabase migrations.
+    - If db_path is provided or PostgreSQL is not configured: initializes SQLite.
     Preserves all existing data in students, quiz_attempts, and question_metadata.
     Adds quiz_sessions, student_answers, and topic_mastery.
     """
+    global _postgres_adapter
+    if db_path is None and _db_config.is_postgres:
+        if _postgres_adapter is None:
+            _postgres_adapter = PostgresAdapter(_db_config)
+        conn = _postgres_adapter.get_connection()
+        try:
+            applied = apply_migrations(conn, is_postgres=True)
+            logger.info("Supabase PostgreSQL initialized successfully (applied migrations: %s)", applied)
+            return {"status": "ok", "backend": "postgres", "applied_migrations": applied}
+        finally:
+            conn.close()
+
     conn = get_connection(db_path)
     cursor = conn.cursor()
 
@@ -398,9 +453,9 @@ def create_quiz_session(
         course_name,
         topic_name,
         "in_progress",
-        json.dumps(questions),
+        serialize_json_for_db(questions, is_postgres=is_pg_conn(conn)),
         recommended_difficulty,
-        json.dumps(adaptive_metadata or {}),
+        serialize_json_for_db(adaptive_metadata or {}, is_postgres=is_pg_conn(conn)),
         created_at,
         expires_at
     ))
@@ -475,15 +530,8 @@ def get_quiz_session(
             logger.info("Session %s transitioned to 'expired' (expired at %s)", session_id, session["expires_at"])
 
     # 3. Deserialize JSON snapshots
-    try:
-        session["questions"] = json.loads(session["questions_snapshot"])
-    except Exception:
-        session["questions"] = []
-
-    try:
-        session["adaptive_metadata"] = json.loads(session["adaptive_metadata"]) if session["adaptive_metadata"] else {}
-    except Exception:
-        session["adaptive_metadata"] = {}
+    session["questions"] = parse_json_safely(session.get("questions_snapshot"), default=[])
+    session["adaptive_metadata"] = parse_json_safely(session.get("adaptive_metadata"), default={})
 
     if close_conn:
         conn.close()
@@ -667,26 +715,11 @@ def get_attempt_by_session_id(
         return None
 
     attempt = dict(row)
-    try:
-        attempt["quiz_data"] = json.loads(attempt["quiz_data"])
-    except Exception:
-        attempt["quiz_data"] = {}
-    try:
-        attempt["difficulty_accuracy"] = json.loads(attempt["difficulty_accuracy"])
-    except Exception:
-        attempt["difficulty_accuracy"] = {}
-    try:
-        attempt["concept_accuracy"] = json.loads(attempt["concept_accuracy"])
-    except Exception:
-        attempt["concept_accuracy"] = {}
-    try:
-        attempt["weak_concepts"] = json.loads(attempt["weak_concepts"])
-    except Exception:
-        attempt["weak_concepts"] = []
-    try:
-        attempt["strong_concepts"] = json.loads(attempt["strong_concepts"])
-    except Exception:
-        attempt["strong_concepts"] = []
+    attempt["quiz_data"] = parse_json_safely(attempt.get("quiz_data"), default={})
+    attempt["difficulty_accuracy"] = parse_json_safely(attempt.get("difficulty_accuracy"), default={})
+    attempt["concept_accuracy"] = parse_json_safely(attempt.get("concept_accuracy"), default={})
+    attempt["weak_concepts"] = parse_json_safely(attempt.get("weak_concepts"), default=[])
+    attempt["strong_concepts"] = parse_json_safely(attempt.get("strong_concepts"), default=[])
 
     return attempt
 
@@ -859,15 +892,15 @@ def submit_quiz_atomic(
             session["course_code"],
             session["course_name"],
             session["topic_name"],
-            json.dumps(quiz_data),
+            serialize_json_for_db(quiz_data, is_postgres=is_pg_conn(conn)),
             result["score"],
             result["total"],
             result["percentage"],
             result["status"],
-            json.dumps(result["difficulty_accuracy"]),
-            json.dumps(result["concept_accuracy"]),
-            json.dumps(result["weak_concepts"]),
-            json.dumps(result["strong_concepts"]),
+            serialize_json_for_db(result["difficulty_accuracy"], is_postgres=is_pg_conn(conn)),
+            serialize_json_for_db(result["concept_accuracy"], is_postgres=is_pg_conn(conn)),
+            serialize_json_for_db(result["weak_concepts"], is_postgres=is_pg_conn(conn)),
+            serialize_json_for_db(result["strong_concepts"], is_postgres=is_pg_conn(conn)),
             session.get("recommended_difficulty"),
             now_iso,
             session_id
@@ -962,15 +995,8 @@ def get_topic_mastery(
         return None
 
     mastery = dict(row)
-    try:
-        mastery["weak_concepts"] = json.loads(mastery["weak_concepts"])
-    except Exception:
-        mastery["weak_concepts"] = []
-
-    try:
-        mastery["strong_concepts"] = json.loads(mastery["strong_concepts"])
-    except Exception:
-        mastery["strong_concepts"] = []
+    mastery["weak_concepts"] = parse_json_safely(mastery.get("weak_concepts"), default=[])
+    mastery["strong_concepts"] = parse_json_safely(mastery.get("strong_concepts"), default=[])
 
     return mastery
 
@@ -1056,14 +1082,8 @@ def upsert_topic_mastery(
         base_level = current_level or ex_dict["current_level"]
 
         # Merge weak concepts and strong concepts
-        try:
-            ex_weak = json.loads(ex_dict["weak_concepts"])
-        except Exception:
-            ex_weak = []
-        try:
-            ex_strong = json.loads(ex_dict["strong_concepts"])
-        except Exception:
-            ex_strong = []
+        ex_weak = parse_json_safely(ex_dict.get("weak_concepts"), default=[])
+        ex_strong = parse_json_safely(ex_dict.get("strong_concepts"), default=[])
 
         # Fresh strong concepts supersede older weak concepts
         merged_weak = [c for c in list(dict.fromkeys(ex_weak + weak_concepts)) if c not in strong_concepts]
@@ -1098,7 +1118,9 @@ def upsert_topic_mastery(
     """, (
         mastery_id, student_id, course_code, topic_name, new_attempts,
         new_total_q, new_total_c, mastery_score, next_level,
-        json.dumps(merged_weak), json.dumps(merged_strong), now
+        serialize_json_for_db(merged_weak, is_postgres=is_pg_conn(conn)),
+        serialize_json_for_db(merged_strong, is_postgres=is_pg_conn(conn)),
+        now
     ))
 
     if close_conn:
@@ -1149,14 +1171,8 @@ def backfill_topic_mastery_from_attempts(conn: Optional[sqlite3.Connection] = No
 
     processed_count = 0
     for r in rows:
-        try:
-            wc = json.loads(r["weak_concepts"]) if r["weak_concepts"] else []
-        except Exception:
-            wc = []
-        try:
-            sc = json.loads(r["strong_concepts"]) if r["strong_concepts"] else []
-        except Exception:
-            sc = []
+        wc = parse_json_safely(r.get("weak_concepts"), default=[])
+        sc = parse_json_safely(r.get("strong_concepts"), default=[])
 
         upsert_topic_mastery(
             student_id=r["student_id"],
@@ -1216,9 +1232,8 @@ def get_stored_questions_for_topic(
     matching_questions: List[Dict[str, Any]] = []
 
     for row in rows:
-        try:
-            quiz_obj = json.loads(row["quiz_data"])
-        except Exception:
+        quiz_obj = parse_json_column(row, "quiz_data", default={})
+        if not quiz_obj:
             continue
 
         questions = quiz_obj.get("questions", [])
@@ -1316,15 +1331,15 @@ def save_quiz_attempt(
         course_code,
         course_name,
         topic_name,
-        json.dumps(quiz_data),
+        serialize_json_for_db(quiz_data, is_postgres=is_pg_conn(conn)),
         score,
         total,
         percentage,
         status,
-        json.dumps(difficulty_accuracy),
-        json.dumps(concept_accuracy),
-        json.dumps(weak_concepts),
-        json.dumps(strong_concepts),
+        serialize_json_for_db(difficulty_accuracy, is_postgres=is_pg_conn(conn)),
+        serialize_json_for_db(concept_accuracy, is_postgres=is_pg_conn(conn)),
+        serialize_json_for_db(weak_concepts, is_postgres=is_pg_conn(conn)),
+        serialize_json_for_db(strong_concepts, is_postgres=is_pg_conn(conn)),
         recommended_difficulty,
         now,
         session_id
@@ -1416,11 +1431,11 @@ def get_student_history(student_id: str, limit: int = 50, conn: Optional[sqlite3
     attempts = []
     for row in rows:
         attempt = dict(row)
-        attempt["quiz_data"] = json.loads(attempt["quiz_data"])
-        attempt["difficulty_accuracy"] = json.loads(attempt["difficulty_accuracy"])
-        attempt["concept_accuracy"] = json.loads(attempt["concept_accuracy"])
-        attempt["weak_concepts"] = json.loads(attempt["weak_concepts"])
-        attempt["strong_concepts"] = json.loads(attempt["strong_concepts"])
+        attempt["quiz_data"] = parse_json_safely(attempt.get("quiz_data"), default={})
+        attempt["difficulty_accuracy"] = parse_json_safely(attempt.get("difficulty_accuracy"), default={})
+        attempt["concept_accuracy"] = parse_json_safely(attempt.get("concept_accuracy"), default={})
+        attempt["weak_concepts"] = parse_json_safely(attempt.get("weak_concepts"), default=[])
+        attempt["strong_concepts"] = parse_json_safely(attempt.get("strong_concepts"), default=[])
         attempts.append(attempt)
 
     return attempts
@@ -1447,11 +1462,11 @@ def get_topic_history(student_id: str, course_code: str, topic_name: str, conn: 
     attempts = []
     for row in rows:
         attempt = dict(row)
-        attempt["quiz_data"] = json.loads(attempt["quiz_data"])
-        attempt["difficulty_accuracy"] = json.loads(attempt["difficulty_accuracy"])
-        attempt["concept_accuracy"] = json.loads(attempt["concept_accuracy"])
-        attempt["weak_concepts"] = json.loads(attempt["weak_concepts"])
-        attempt["strong_concepts"] = json.loads(attempt["strong_concepts"])
+        attempt["quiz_data"] = parse_json_safely(attempt.get("quiz_data"), default={})
+        attempt["difficulty_accuracy"] = parse_json_safely(attempt.get("difficulty_accuracy"), default={})
+        attempt["concept_accuracy"] = parse_json_safely(attempt.get("concept_accuracy"), default={})
+        attempt["weak_concepts"] = parse_json_safely(attempt.get("weak_concepts"), default=[])
+        attempt["strong_concepts"] = parse_json_safely(attempt.get("strong_concepts"), default=[])
         attempts.append(attempt)
 
     return attempts
@@ -1514,9 +1529,8 @@ def get_concept_performance(student_id: str, course_code: Optional[str] = None, 
 
     aggregated: Dict[str, Dict[str, int]] = {}
     for row in rows:
-        try:
-            concept_acc = json.loads(row["concept_accuracy"])
-        except Exception:
+        concept_acc = parse_json_column(row, "concept_accuracy", default={})
+        if not concept_acc:
             continue
         for concept, stats in concept_acc.items():
             if concept not in aggregated:
@@ -1552,9 +1566,8 @@ def get_difficulty_performance(student_id: str, course_code: Optional[str] = Non
 
     aggregated: Dict[str, Dict[str, int]] = {}
     for row in rows:
-        try:
-            diff_acc = json.loads(row["difficulty_accuracy"])
-        except Exception:
+        diff_acc = parse_json_column(row, "difficulty_accuracy", default={})
+        if not diff_acc:
             continue
         for diff, stats in diff_acc.items():
             if diff not in aggregated:
@@ -1774,14 +1787,8 @@ def get_student_dashboard_data(
             t_last = m["last_practiced_at"]
             practiced_topic_keys.add((t_course, t_name))
 
-            try:
-                weak_c = json.loads(m["weak_concepts"]) if m["weak_concepts"] else []
-            except Exception:
-                weak_c = []
-            try:
-                strong_c = json.loads(m["strong_concepts"]) if m["strong_concepts"] else []
-            except Exception:
-                strong_c = []
+            weak_c = parse_json_column(m, "weak_concepts", default=[])
+            strong_c = parse_json_column(m, "strong_concepts", default=[])
 
             all_weak_concepts.extend(weak_c)
             all_strong_concepts.extend(strong_c)

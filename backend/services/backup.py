@@ -7,6 +7,7 @@ Uses Python's native sqlite3 Connection.backup API with integrity verification a
 
 import os
 import sqlite3
+import json
 import logging
 import threading
 import uuid
@@ -14,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
-from services.database import get_db_path, get_connection
+from services.database import get_db_path, get_connection, is_postgres_active
 
 logger = logging.getLogger("learnai.backup")
 
@@ -94,6 +95,64 @@ def prune_old_backups(
     return deleted
 
 
+def _backup_postgres_database(
+    backup_dir: Optional[Path] = None,
+    dest_path: Optional[Path] = None,
+    retention_days: int = DEFAULT_RETENTION_DAYS
+) -> Dict[str, Any]:
+    """
+    Perform logical backup/export of Supabase PostgreSQL tables to a JSON snapshot file.
+    """
+    target_dir = (backup_dir or get_backup_dir()).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+
+    if dest_path is not None:
+        final_dest = dest_path.resolve()
+        final_dest.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+        unique_suffix = uuid.uuid4().hex[:6]
+        dest_filename = f"learnai_pg_backup_{timestamp_str}_{unique_suffix}.json"
+        final_dest = target_dir / dest_filename
+
+    conn = get_connection()
+    export_data = {}
+    table_counts = {}
+    try:
+        tables = ["students", "quiz_sessions", "quiz_attempts", "question_metadata", "student_answers", "topic_mastery"]
+        cursor = conn.cursor()
+        for t in tables:
+            cursor.execute(f"SELECT * FROM {t};")
+            rows = cursor.fetchall()
+            export_data[t] = [dict(r) for r in rows]
+            table_counts[t] = len(rows)
+
+        with open(final_dest, "w", encoding="utf-8") as f:
+            json.dump({
+                "created_at": now.isoformat(),
+                "backend": "supabase_postgresql",
+                "table_counts": table_counts,
+                "data": export_data
+            }, f, indent=2, default=str)
+
+        size_bytes = final_dest.stat().st_size
+        pruned = prune_old_backups(final_dest.parent, retention_days=retention_days)
+        logger.info("Supabase PostgreSQL backup completed successfully: %s (%d bytes)", final_dest.name, size_bytes)
+        return {
+            "status": "success",
+            "backend": "postgres",
+            "backup_file": str(final_dest),
+            "filename": final_dest.name,
+            "size_bytes": size_bytes,
+            "table_counts": table_counts,
+            "created_at": now.isoformat(),
+            "pruned_count": len(pruned)
+        }
+    finally:
+        conn.close()
+
+
 def backup_database(
     db_path: Optional[Path] = None,
     backup_dir: Optional[Path] = None,
@@ -101,15 +160,19 @@ def backup_database(
     retention_days: int = DEFAULT_RETENTION_DAYS
 ) -> Dict[str, Any]:
     """
-    Create an online, transactionally consistent SQLite backup using Python's backup API.
+    Create an online, transactionally consistent backup.
+    - If PostgreSQL is active and db_path is None: performs logical PostgreSQL export.
+    - If SQLite is active (or db_path provided): uses SQLite Connection.backup API.
     Guarantees:
     - Non-blocking snapshot while application reads and writes occur.
     - Thread-safe via global backup lock.
     - Never overwrites the active database.
-    - Verifies completed backup with PRAGMA integrity_check.
     - Applies retention policy, keeping at least the latest backup.
     """
     with _BACKUP_LOCK:
+        if db_path is None and is_postgres_active():
+            return _backup_postgres_database(backup_dir=backup_dir, dest_path=dest_path, retention_days=retention_days)
+
         source_path = (db_path or get_db_path()).resolve()
         target_dir = (backup_dir or get_backup_dir()).resolve()
 
@@ -203,10 +266,17 @@ def restore_database(
     """
     with _BACKUP_LOCK:
         backup_path = Path(backup_file).resolve()
-        target_path = (target_db_path or get_db_path()).resolve()
-
         if not backup_path.is_file():
             raise FileNotFoundError(f"Backup file not found: {backup_path}")
+
+        if target_db_path is None and is_postgres_active():
+            raise RuntimeError(
+                "Cannot restore backup directly to live Supabase PostgreSQL via SQLite restore. "
+                "For SQLite migration to Supabase, use backend/scripts/migrate_sqlite_to_postgres.py. "
+                "For PostgreSQL point-in-time restore, use Supabase management tools."
+            )
+
+        target_path = (target_db_path or get_db_path()).resolve()
 
         # 1. Pre-verification: Verify backup snapshot integrity
         if not verify_database_integrity(backup_path):
