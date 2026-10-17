@@ -279,12 +279,21 @@ def generate_quiz(
                 )
                 break
 
-            # Reserve time for remaining providers
-            remaining_providers = num_configured - (p_idx + 1)
-            if remaining_providers > 0 and time_remaining > provider_timeout_budget + 2:
-                provider_timeout = min(provider_timeout_budget, time_remaining * 0.6)
+            # Calculate provider timeout
+            if num_configured == 1:
+                # Single provider mode (e.g., only Gemini configured in Render dashboard):
+                # Allocate a realistic budget (16s default for Gemini) so it doesn't prematurely 504 on 10 MCQs
+                target_budget = max(provider_timeout_budget, 16.0) if provider.name == "gemini" else provider_timeout_budget
+                provider_timeout = min(target_budget, max(time_remaining - 3.0, min_required_time))
             else:
-                provider_timeout = min(provider_timeout_budget, time_remaining)
+                # Multi-provider mode: reserve budget for subsequent configured providers
+                remaining_providers = configured_providers[p_idx + 1:]
+                reserve_needed = sum(10.0 if p.name == "gemini" else (4.0 if p.name == "nvidia" else 3.0) for p in remaining_providers)
+                if reserve_needed > 0 and time_remaining > min_required_time:
+                    max_alloc = max(time_remaining - reserve_needed, min_required_time)
+                    provider_timeout = min(provider_timeout_budget, max_alloc)
+                else:
+                    provider_timeout = min(provider_timeout_budget, time_remaining)
 
             # Ensure provider_timeout respects provider's minimum allowed deadline without exceeding remaining budget
             if provider.name == "gemini":
@@ -549,9 +558,16 @@ REQUIREMENTS:
             except (ProviderUnavailableError, ProviderError) as pe:
                 last_error = pe
                 all_provider_errors.append(pe)
+                cat = getattr(pe, "category", "ERROR")
+                retryable = getattr(pe, "retryable", False)
+                has_next = (p_idx + 1) < num_configured
+                next_provider_name = configured_providers[p_idx + 1].name if has_next else "none"
+                clean_pe = sanitize_error_text(str(pe))
+
                 logger.warning(
                     f"[PROVIDER FAILED] provider={provider.name} "
-                    f"category={getattr(pe, 'category', 'ERROR')} retryable={getattr(pe, 'retryable', False)}: {pe}"
+                    f"category={cat} retryable={retryable} "
+                    f"proceeding_to_next_provider={has_next} (next={next_provider_name}): {clean_pe}"
                 )
                 # If only 1 provider is configured and error is non-retryable permanent error, fail fast without masking
                 if (
@@ -561,7 +577,7 @@ REQUIREMENTS:
                 ):
                     local_check = _load_local_demo_questions(course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context)
                     if not local_check:
-                        raise AIConfigError(str(pe), category=getattr(pe, "category", "CONFIG_ERROR")) from pe
+                        raise AIConfigError(clean_pe, category=getattr(pe, "category", "CONFIG_ERROR")) from pe
                 break
 
     # ── All providers failed ──────────────────────────────────────────────────
@@ -613,15 +629,43 @@ REQUIREMENTS:
             category=last_error_category
         ) from last_error
 
-    # Differentiate failure categories instead of defaulting everything to generic message
-    if last_error_category in ("RATE_LIMIT_429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"):
-        raise AIRateLimitError(
-            "AI service rate limit or quota exceeded across configured providers. Please wait a moment and retry.",
-            category=last_error_category
-        ) from last_error
-    elif last_error_category in ("TIMEOUT", "CLIENT_TIMEOUT", "DEADLINE_EXCEEDED", "REQUEST_TIMEOUT_408"):
+    # Diagnostic response when sole provider fails
+    if num_configured == 1:
+        sole_name = configured_providers[0].name.capitalize()
+        all_possible = ["Groq", "NVIDIA", "Gemini"]
+        unconfigured = [p for p in all_possible if p.lower() != configured_providers[0].name.lower()]
+        unconfigured_str = "/".join(unconfigured)
+
+        if (
+            last_error_category in ("TIMEOUT", "CLIENT_TIMEOUT", "DEADLINE_EXCEEDED", "DEADLINE_EXCEEDED_504", "SERVER_ERROR_504", "REQUEST_TIMEOUT_408")
+            or "504" in last_error_category
+            or "deadline" in str(last_error).lower()
+            or "timeout" in str(last_error).lower()
+        ):
+            raise AITimeoutError(
+                f"AI provider '{sole_name}' timed out generating the quiz. No fallback providers ({unconfigured_str}) are configured in Render.",
+                category="TIMEOUT"
+            ) from last_error
+        elif last_error_category in ("RATE_LIMIT_429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"):
+            raise AIRateLimitError(
+                f"AI provider '{sole_name}' rate limit or quota exceeded. No fallback providers ({unconfigured_str}) are configured in Render.",
+                category=last_error_category
+            ) from last_error
+
+    # Differentiate failure categories across multi-provider attempts
+    if (
+        last_error_category in ("TIMEOUT", "CLIENT_TIMEOUT", "DEADLINE_EXCEEDED", "DEADLINE_EXCEEDED_504", "SERVER_ERROR_504", "REQUEST_TIMEOUT_408")
+        or "504" in last_error_category
+        or "deadline" in str(last_error).lower()
+        or "timeout" in str(last_error).lower()
+    ):
         raise AITimeoutError(
             "Quiz generation timed out across configured providers. Please try again.",
+            category="TIMEOUT"
+        ) from last_error
+    elif last_error_category in ("RATE_LIMIT_429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"):
+        raise AIRateLimitError(
+            "AI service rate limit or quota exceeded across configured providers. Please wait a moment and retry.",
             category=last_error_category
         ) from last_error
     elif last_error_category in ("NETWORK_ERROR", "CONNECTION_ERROR"):

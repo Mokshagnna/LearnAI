@@ -91,12 +91,18 @@ class GeminiProvider(BaseAIProvider):
                 return "RATE_LIMIT_429"
             elif code == 408:
                 return "REQUEST_TIMEOUT_408"
-            elif code in {500, 502, 504}:
+            elif code == 504:
+                return "DEADLINE_EXCEEDED_504"
+            elif code in {500, 502}:
                 return f"SERVER_ERROR_{code}"
             elif code == 400:
                 return "MALFORMED_REQUEST_400"
             elif code == 404:
                 return "MODEL_NOT_FOUND_404"
+        msg = str(exc).lower()
+        status = (getattr(exc, "status", "") or "").lower()
+        if "deadline" in msg or "deadline_exceeded" in status or "504" in msg:
+            return "DEADLINE_EXCEEDED_504"
         exc_name = type(exc).__name__
         if "Timeout" in exc_name:
             return "CLIENT_TIMEOUT"
@@ -208,6 +214,11 @@ class GeminiProvider(BaseAIProvider):
 
                         key_had_recoverable_error = True
                         logger.warning(f"[GEMINI RETRYABLE ERROR] key={key_label} model={model} attempt={attempt}/{attempts} duration={duration:.2f}s category={cat}: {sanitize_error_text(e)}")
+
+                        # Avoid redundant retries of the same timed-out model
+                        if cat in ("DEADLINE_EXCEEDED_504", "CLIENT_TIMEOUT", "REQUEST_TIMEOUT_408") or "deadline" in str(e).lower() or "timeout" in str(e).lower():
+                            logger.info(f"[GEMINI TIMEOUT] model={model} timed out after {duration:.2f}s. Yielding without redundant retries of this model.")
+                            break
 
                         # If another attempt is budgeted on this model
                         elapsed_now = time.perf_counter() - start_time

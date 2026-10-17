@@ -284,6 +284,9 @@ def test_api_course_quiz(course_code: str, topic_name: str, topic_label: str):
     return True
 
 
+test_api_course_quiz.__test__ = False
+
+
 def run_all_tests():
     print("=" * 70)
     print("       LEARNAI COMPREHENSIVE GLOBAL VERIFICATION TEST SUITE")

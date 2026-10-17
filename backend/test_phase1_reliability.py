@@ -690,6 +690,263 @@ class TestPhase1Reliability(unittest.TestCase):
             self.assertEqual(resp.status_code, 500)
             self.assertIn("configuration error", resp.json()["detail"].lower())
 
+    # ── Section 5 Regression Tests: Gemini 504 Timeout and Failover ──────────
+
+    @patch("services.llm_service._load_local_demo_questions", return_value=None)
+    def test_gemini_504_failover_to_groq_succeeds(self, mock_load_demo):
+        """Scenario 1: Gemini returns a 504 DEADLINE_EXCEEDED and orchestrator fails over to Groq which succeeds."""
+        mock_gemini = MagicMock(spec=BaseAIProvider)
+        mock_gemini.name = "gemini"
+        mock_gemini.is_configured.return_value = True
+        mock_gemini.generate_quiz_raw.side_effect = ProviderUnavailableError(
+            "504 DEADLINE_EXCEEDED: Deadline expired before operation could complete",
+            category="DEADLINE_EXCEEDED_504"
+        )
+
+        mock_groq = MagicMock(spec=BaseAIProvider)
+        mock_groq.name = "groq"
+        mock_groq.is_configured.return_value = True
+        mock_groq.generate_quiz_raw.return_value = _make_valid_quiz_json("History of Deep Learning")
+
+        with patch("services.llm_service._get_providers", return_value=[mock_gemini, mock_groq]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                quiz = generate_quiz(
+                    course_code="22AM301",
+                    course_name="Deep Learning",
+                    topic_name="History of Deep Learning, What Is Deep Learning",
+                    syllabus_context="Historical overview of deep learning",
+                    student_id="test_student"
+                )
+
+        self.assertEqual(quiz["provider_used"], "groq")
+        self.assertEqual(len(quiz["questions"]), 10)
+        self.assertEqual(mock_gemini.generate_quiz_raw.call_count, 1)
+        self.assertEqual(mock_groq.generate_quiz_raw.call_count, 1)
+
+    @patch("services.llm_service._load_local_demo_questions", return_value=None)
+    def test_gemini_504_failover_to_nvidia_when_groq_unavailable(self, mock_load_demo):
+        """Scenario 2: Gemini returns 504, Groq is unavailable/fails, and NVIDIA succeeds."""
+        mock_gemini = MagicMock(spec=BaseAIProvider)
+        mock_gemini.name = "gemini"
+        mock_gemini.is_configured.return_value = True
+        mock_gemini.generate_quiz_raw.side_effect = ProviderUnavailableError(
+            "504 DEADLINE_EXCEEDED", category="DEADLINE_EXCEEDED_504"
+        )
+
+        mock_groq = MagicMock(spec=BaseAIProvider)
+        mock_groq.name = "groq"
+        mock_groq.is_configured.return_value = True
+        mock_groq.generate_quiz_raw.side_effect = ProviderUnavailableError(
+            "503 Service Unavailable", category="SERVICE_UNAVAILABLE_503"
+        )
+
+        mock_nvidia = MagicMock(spec=BaseAIProvider)
+        mock_nvidia.name = "nvidia"
+        mock_nvidia.is_configured.return_value = True
+        mock_nvidia.generate_quiz_raw.return_value = _make_valid_quiz_json("History of Deep Learning")
+
+        with patch("services.llm_service._get_providers", return_value=[mock_gemini, mock_groq, mock_nvidia]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                quiz = generate_quiz(
+                    course_code="22AM301",
+                    course_name="Deep Learning",
+                    topic_name="History of Deep Learning, What Is Deep Learning",
+                    syllabus_context="Historical overview",
+                    student_id="test_student"
+                )
+
+        self.assertEqual(quiz["provider_used"], "nvidia")
+        self.assertEqual(len(quiz["questions"]), 10)
+        self.assertEqual(mock_gemini.generate_quiz_raw.call_count, 1)
+        self.assertEqual(mock_groq.generate_quiz_raw.call_count, 1)
+        self.assertEqual(mock_nvidia.generate_quiz_raw.call_count, 1)
+
+    @patch("services.llm_service._load_local_demo_questions", return_value=None)
+    def test_sole_gemini_configured_times_out_raises_diagnostic_error(self, mock_load_demo):
+        """Scenario 3: Only Gemini is configured and times out; raises diagnostic AITimeoutError (HTTP 504) noting unconfigured providers."""
+        from services.llm_service import AITimeoutError
+
+        mock_gemini = MagicMock(spec=BaseAIProvider)
+        mock_gemini.name = "gemini"
+        mock_gemini.is_configured.return_value = True
+        mock_gemini.generate_quiz_raw.side_effect = ProviderUnavailableError(
+            "504 DEADLINE_EXCEEDED: Deadline expired before operation could complete",
+            category="DEADLINE_EXCEEDED_504"
+        )
+
+        with patch("services.llm_service._get_providers", return_value=[mock_gemini]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                with self.assertRaises(AITimeoutError) as ctx:
+                    generate_quiz(
+                        course_code="22AM301",
+                        course_name="Deep Learning",
+                        topic_name="History of Deep Learning, What Is Deep Learning",
+                        syllabus_context="Historical overview",
+                        student_id="test_student"
+                    )
+
+        err_msg = str(ctx.exception)
+        self.assertEqual(ctx.exception.status_code, 504)
+        self.assertIn("Gemini", err_msg)
+        self.assertIn("timed out", err_msg)
+        self.assertIn("No fallback providers", err_msg)
+        self.assertIn("Render", err_msg)
+
+    @patch("services.llm_service._load_local_demo_questions", return_value=None)
+    def test_no_provider_configured_raises_aiconfigerror(self, mock_load_demo):
+        """Scenario 4: No provider has valid configuration in environment; raises AIConfigError (HTTP 500)."""
+        mock_gemini = MagicMock(spec=BaseAIProvider)
+        mock_gemini.name = "gemini"
+        mock_gemini.is_configured.return_value = False
+
+        mock_groq = MagicMock(spec=BaseAIProvider)
+        mock_groq.name = "groq"
+        mock_groq.is_configured.return_value = False
+
+        mock_nvidia = MagicMock(spec=BaseAIProvider)
+        mock_nvidia.name = "nvidia"
+        mock_nvidia.is_configured.return_value = False
+
+        with patch("services.llm_service._get_providers", return_value=[mock_gemini, mock_groq, mock_nvidia]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                with self.assertRaises(AIConfigError) as ctx:
+                    generate_quiz(
+                        course_code="22AM301",
+                        course_name="Deep Learning",
+                        topic_name="History of Deep Learning",
+                        syllabus_context="Historical overview",
+                        student_id="test_student"
+                    )
+
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertIn("No AI provider is configured", str(ctx.exception))
+
+    def test_gemini_internal_fallback_cannot_fit_within_deadline_yields_promptly(self):
+        """Scenario 5: Gemini's internal model fallback cannot fit within deadline; yields promptly without sub-10s call."""
+        from services.providers.gemini_provider import GeminiProvider
+        from google.genai import errors
+
+        provider = GeminiProvider()
+        api_error_504 = errors.APIError(504, "Deadline expired before operation could complete", None)
+        api_error_504.code = 504
+        api_error_504.status = "DEADLINE_EXCEEDED"
+
+        mock_client = MagicMock()
+        def side_effect(*args, **kwargs):
+            raise api_error_504
+
+        mock_client.models.generate_content.side_effect = side_effect
+
+        with patch.object(provider, "_get_client", return_value=mock_client):
+            with patch.dict(os.environ, {
+                "GEMINI_API_KEY": "AIzaSyFakeKeyForTestDeadlineYield_012345",
+                "GEMINI_MODEL": "gemini-3.6-flash",
+                "GEMINI_FALLBACK_MODEL": "gemini-3.5-flash"
+            }):
+                # Simulate time consumed such that remaining budget after attempt 1 is 2.14s (< 9.0s)
+                counter_calls = [0.0, 0.1, 0.1, 0.1, 9.86, 9.86, 9.86, 9.86, 9.86]
+                call_idx = [0]
+                def mock_perf():
+                    idx = call_idx[0]
+                    call_idx[0] += 1
+                    if idx < len(counter_calls):
+                        return counter_calls[idx]
+                    return 9.86
+
+                with patch("time.perf_counter", side_effect=mock_perf):
+                    with self.assertRaises(ProviderUnavailableError) as ctx:
+                        provider._execute_with_models(prompt="Generate quiz", timeout_seconds=12.0)
+
+        # Gemini should have tried primary model once, seen 2.14s left, and stopped without calling fallback model
+        self.assertEqual(mock_client.models.generate_content.call_count, 1)
+        self.assertEqual(ctx.exception.category, "DEADLINE_EXCEEDED_504")
+
+    @patch("services.llm_service._load_local_demo_questions", return_value=None)
+    def test_provider_failover_respects_overall_time_budget(self, mock_load_demo):
+        """Scenario 6: Failover respects overall time budget; skips Gemini if remaining time <= 10.0s."""
+        from services.llm_service import AITimeoutError
+
+        mock_p1 = MagicMock(spec=BaseAIProvider)
+        mock_p1.name = "groq"
+        mock_p1.is_configured.return_value = True
+        mock_p1.generate_quiz_raw.side_effect = ProviderUnavailableError("Groq failed", category="TIMEOUT")
+
+        mock_gemini = MagicMock(spec=BaseAIProvider)
+        mock_gemini.name = "gemini"
+        mock_gemini.is_configured.return_value = True
+
+        with patch("services.llm_service._get_providers", return_value=[mock_p1, mock_gemini]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                with patch.dict(os.environ, {"OVERALL_DEADLINE_SECONDS": "12.0"}):
+                    # Mock perf_counter to show 9.5s elapsed after Groq
+                    seq = [0.0, 0.1, 9.5, 9.6, 9.7, 9.8, 9.9]
+                    idx = [0]
+                    def mock_time():
+                        cur = seq[min(idx[0], len(seq) - 1)]
+                        idx[0] += 1
+                        return cur
+
+                    with patch("time.perf_counter", side_effect=mock_time):
+                        with self.assertRaises(AITimeoutError):
+                            generate_quiz(
+                                course_code="22AM301",
+                                course_name="Deep Learning",
+                                topic_name="History of Deep Learning",
+                                syllabus_context="Context",
+                                student_id="test_student"
+                            )
+
+        # Gemini must not have been called because remaining budget (2.5s) was below minimum 10.0s
+        self.assertEqual(mock_gemini.generate_quiz_raw.call_count, 0)
+
+    @patch("services.llm_service._load_local_demo_questions", return_value=None)
+    def test_provider_timeout_never_returns_partial_or_fake_successful_quiz(self, mock_load_demo):
+        """Scenario 7: When providers time out, the system never returns an empty, partial, or malformed dict."""
+        from services.llm_service import AITimeoutError
+
+        mock_p1 = MagicMock(spec=BaseAIProvider)
+        mock_p1.name = "gemini"
+        mock_p1.is_configured.return_value = True
+        mock_p1.generate_quiz_raw.side_effect = ProviderUnavailableError("Deadline exceeded", category="DEADLINE_EXCEEDED_504")
+
+        with patch("services.llm_service._get_providers", return_value=[mock_p1]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                with self.assertRaises(AITimeoutError):
+                    generate_quiz(
+                        course_code="22AM301",
+                        course_name="Deep Learning",
+                        topic_name="History of Deep Learning",
+                        syllabus_context="Context",
+                        student_id="test_student"
+                    )
+
+    @patch("services.llm_service._load_local_demo_questions", return_value=None)
+    def test_existing_quiz_generation_and_adaptive_learning_intact(self, mock_load_demo):
+        """Scenario 8: Normal successful generation preserves 10 distinct questions, adaptive distribution, and novelty checks."""
+        mock_groq = MagicMock(spec=BaseAIProvider)
+        mock_groq.name = "groq"
+        mock_groq.is_configured.return_value = True
+        mock_groq.generate_quiz_raw.return_value = _make_valid_quiz_json("History of Deep Learning", "Deep Learning")
+
+        with patch("services.llm_service._get_providers", return_value=[mock_groq]):
+            with patch("services.llm_service.get_or_create_student", return_value="test_student"):
+                quiz = generate_quiz(
+                    course_code="22AM301",
+                    course_name="Deep Learning",
+                    topic_name="History of Deep Learning, What Is Deep Learning",
+                    syllabus_context="Detailed concepts in deep learning",
+                    student_id="test_student",
+                    concepts=["Concept 1", "Concept 2"]
+                )
+
+        self.assertEqual(len(quiz["questions"]), 10)
+        self.assertEqual(quiz["provider_used"], "groq")
+        self.assertIn("adaptive_explanation", quiz)
+        self.assertIn(quiz["recommended_difficulty"], ["Easy", "Medium", "Hard", "mixed"])
+        for q in quiz["questions"]:
+            self.assertEqual(len(q["options"]), 4)
+            self.assertIn(q["difficulty"], ["Easy", "Medium", "Hard"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
