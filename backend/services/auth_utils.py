@@ -11,7 +11,8 @@ import hashlib
 import time
 import base64
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
+from fastapi import Request, HTTPException, Header
 
 logger = logging.getLogger("learnai.auth")
 
@@ -124,3 +125,101 @@ def verify_student_identity(
         return False, student_id, "Token expired"
 
     return True, student_id, None
+
+
+def get_token_from_request(
+    request: Request,
+    authorization: Optional[str] = None
+) -> Optional[str]:
+    """
+    Extracts Bearer token from Authorization header, X-Student-Token header, or query param 'token'.
+    """
+    auth_header = None
+    if isinstance(authorization, str):
+        auth_header = authorization
+    elif request is not None and hasattr(request, "headers"):
+        auth_header = request.headers.get("Authorization")
+
+    if auth_header and isinstance(auth_header, str) and auth_header.strip():
+        parts = auth_header.strip().split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            return parts[1].strip()
+        elif len(parts) == 1:
+            return parts[0].strip()
+
+    if request is not None and hasattr(request, "headers"):
+        custom_header = request.headers.get("X-Student-Token")
+        if custom_header and isinstance(custom_header, str) and custom_header.strip():
+            return custom_header.strip()
+
+    if request is not None and hasattr(request, "query_params"):
+        query_token = request.query_params.get("token")
+        if query_token and isinstance(query_token, str) and query_token.strip():
+            return query_token.strip()
+
+    return None
+
+
+def get_authenticated_student_id(
+    request: Request,
+    authorization: Optional[str] = None
+) -> str:
+    """
+    FastAPI dependency / utility that enforces server-verified HMAC student identity.
+    Raises HTTP 401 if token is missing, invalid, expired, or tampered.
+    Returns the authenticated student_id.
+    """
+    token = get_token_from_request(request, authorization)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
+        )
+
+    is_valid, student_id, err = verify_student_identity(token)
+    if not is_valid:
+        if err == "Token expired":
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication token expired. Please refresh your session."
+            )
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid authentication token: {err}"
+        )
+
+    return student_id
+
+
+def get_optional_authenticated_student_id(
+    request: Request,
+    authorization: Optional[str] = None
+) -> Optional[str]:
+    """
+    Extracts authenticated student_id if token is present and valid.
+    Raises HTTP 401 if token is present but invalid or expired.
+    Returns None if no token was provided.
+    """
+    token = get_token_from_request(request, authorization)
+    if not token:
+        return None
+
+    is_valid, student_id, err = verify_student_identity(token)
+    if not is_valid:
+        if err == "Token expired":
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication token expired. Please refresh your session."
+            )
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid authentication token: {err}"
+        )
+
+    return student_id
+
+
+def auth_header_for(student_id: str, ttl_seconds: Optional[int] = None) -> Dict[str, str]:
+    """Helper for tests and client requests to generate Authorization header."""
+    token = sign_student_identity(student_id, ttl_seconds=ttl_seconds)
+    return {"Authorization": f"Bearer {token}"}

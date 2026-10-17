@@ -21,6 +21,7 @@ from services.database import (
     ADAPTIVE_LEVEL_MIXED,
     ADAPTIVE_LEVEL_ADVANCED
 )
+from services.auth_utils import auth_header_for
 
 
 SAMPLE_QUESTIONS = [
@@ -599,7 +600,10 @@ class TestDashboardApiEndpoint:
         )
         conn.close()
 
-        response = client.get(f"/api/student/{student_id}/dashboard")
+        response = client.get(
+            f"/api/student/{student_id}/dashboard",
+            headers=auth_header_for(student_id)
+        )
         assert response.status_code == 200
         payload = response.json()
 
@@ -638,7 +642,10 @@ class TestDashboardApiEndpoint:
         conn.close()
 
         # Query with limit=3
-        res = client.get(f"/api/student/{student_id}/dashboard?course_code=22AM301&limit=3")
+        res = client.get(
+            f"/api/student/{student_id}/dashboard?course_code=22AM301&limit=3",
+            headers=auth_header_for(student_id)
+        )
         assert res.status_code == 200
         data = res.json()
 

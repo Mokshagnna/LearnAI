@@ -34,6 +34,7 @@ from services.adaptive import (
     PROMOTION_THRESHOLD,
     DEMOTION_THRESHOLD
 )
+from services.auth_utils import auth_header_for
 from services.llm_service import generate_quiz, AIServiceUnavailableError
 
 
@@ -580,7 +581,10 @@ class TestAdaptiveGenerationIntegration:
         session_id = res.json()["quiz_id"]
 
         # Retrieve session
-        get_res = client.get(f"/api/quiz/session/{session_id}?student_id=stud_int_2")
+        get_res = client.get(
+            f"/api/quiz/session/{session_id}?student_id=stud_int_2",
+            headers=auth_header_for("stud_int_2")
+        )
         assert get_res.status_code == 200
         s_data = get_res.json()
 
@@ -665,11 +669,15 @@ class TestAdaptiveSubmissionAndChaining:
         conn.close()
 
         # Submit quiz with perfect score (all 'A')
-        submit_res = client.post("/api/quiz/submit", json={
-            "quiz_id": "sess_chain_1",
-            "answers": ["A"] * 10,
-            "student_id": student_id
-        })
+        submit_res = client.post(
+            "/api/quiz/submit",
+            json={
+                "quiz_id": "sess_chain_1",
+                "answers": ["A"] * 10,
+                "student_id": student_id
+            },
+            headers=auth_header_for(student_id)
+        )
         assert submit_res.status_code == 200
         result = submit_res.json()
         assert result["score"] == 10
@@ -715,19 +723,27 @@ class TestAdaptiveSubmissionAndChaining:
         conn.close()
 
         # First submission
-        res1 = client.post("/api/quiz/submit", json={
-            "quiz_id": "sess_dup_mastery",
-            "answers": ["A"] * 10,
-            "student_id": student_id
-        })
+        res1 = client.post(
+            "/api/quiz/submit",
+            json={
+                "quiz_id": "sess_dup_mastery",
+                "answers": ["A"] * 10,
+                "student_id": student_id
+            },
+            headers=auth_header_for(student_id)
+        )
         assert res1.status_code == 200
 
         # Second submission
-        res2 = client.post("/api/quiz/submit", json={
-            "quiz_id": "sess_dup_mastery",
-            "answers": ["A"] * 10,
-            "student_id": student_id
-        })
+        res2 = client.post(
+            "/api/quiz/submit",
+            json={
+                "quiz_id": "sess_dup_mastery",
+                "answers": ["A"] * 10,
+                "student_id": student_id
+            },
+            headers=auth_header_for(student_id)
+        )
         assert res2.status_code == 200
 
         conn = get_connection(db_file)

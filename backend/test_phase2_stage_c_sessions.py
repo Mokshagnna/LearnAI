@@ -21,6 +21,7 @@ from services.database import (
     ADAPTIVE_LEVEL_MIXED,
     ADAPTIVE_LEVEL_ADVANCED
 )
+from services.auth_utils import auth_header_for
 
 
 SAMPLE_QUESTIONS = [
@@ -129,7 +130,10 @@ class TestStageCSessionPersistence:
         quiz_id = gen_res.json()["quiz_id"]
 
         # Valid retrieval by owner
-        sess_res = client.get(f"/api/quiz/session/{quiz_id}?student_id=stud_get_sess")
+        sess_res = client.get(
+            f"/api/quiz/session/{quiz_id}?student_id=stud_get_sess",
+            headers=auth_header_for("stud_get_sess")
+        )
         assert sess_res.status_code == 200
         sess_data = sess_res.json()
         assert sess_data["session_id"] == quiz_id
@@ -157,7 +161,10 @@ class TestStageCSessionPersistence:
         new_client = TestClient(app)
 
         # Step 3: Retrieve session through new client
-        get_res = new_client.get(f"/api/quiz/session/{quiz_id}?student_id=stud_restart_01")
+        get_res = new_client.get(
+            f"/api/quiz/session/{quiz_id}?student_id=stud_restart_01",
+            headers=auth_header_for("stud_restart_01")
+        )
         assert get_res.status_code == 200
         assert get_res.json()["session_id"] == quiz_id
 
@@ -165,11 +172,15 @@ class TestStageCSessionPersistence:
         answers = ["B"] * 10  # All B (10/10 correct)
         with patch("main.generate_analysis") as mock_analysis:
             mock_analysis.return_value = {"summary": "Great work!", "revision": "None", "recommendation": "Advance"}
-            sub_res = new_client.post("/api/quiz/submit", json={
-                "quiz_id": quiz_id,
-                "answers": answers,
-                "student_id": "stud_restart_01"
-            })
+            sub_res = new_client.post(
+                "/api/quiz/submit",
+                json={
+                    "quiz_id": quiz_id,
+                    "answers": answers,
+                    "student_id": "stud_restart_01"
+                },
+                headers=auth_header_for("stud_restart_01")
+            )
             assert sub_res.status_code == 200
             res_data = sub_res.json()
             assert res_data["score"] == 10
@@ -238,16 +249,23 @@ class TestStageCSessionPersistence:
         conn.close()
 
         # GET must return 400
-        get_res = client.get("/api/quiz/session/sess_expired_test?student_id=stud_exp")
+        get_res = client.get(
+            "/api/quiz/session/sess_expired_test?student_id=stud_exp",
+            headers=auth_header_for("stud_exp")
+        )
         assert get_res.status_code == 400
         assert "expired" in get_res.json()["detail"].lower()
 
         # POST submit must return 400
-        sub_res = client.post("/api/quiz/submit", json={
-            "quiz_id": "sess_expired_test",
-            "answers": ["B"] * 10,
-            "student_id": "stud_exp"
-        })
+        sub_res = client.post(
+            "/api/quiz/submit",
+            json={
+                "quiz_id": "sess_expired_test",
+                "answers": ["B"] * 10,
+                "student_id": "stud_exp"
+            },
+            headers=auth_header_for("stud_exp")
+        )
         assert sub_res.status_code == 400
         assert "expired" in sub_res.json()["detail"].lower()
 
@@ -281,7 +299,7 @@ class TestStageCSubmissionAndGrading:
 
         with patch("main.generate_analysis") as mock_analysis:
             mock_analysis.return_value = {"summary": "Analysis OK", "revision": "Rev", "recommendation": "Rec"}
-            sub_res = client.post("/api/quiz/submit", json=sub_payload)
+            sub_res = client.post("/api/quiz/submit", json=sub_payload, headers=auth_header_for("stud_grade_test"))
             assert sub_res.status_code == 200
             res = sub_res.json()
 
@@ -305,11 +323,15 @@ class TestStageCSubmissionAndGrading:
         quiz_id = gen_res.json()["quiz_id"]
 
         # 9 answers instead of 10
-        sub_res = client.post("/api/quiz/submit", json={
-            "quiz_id": quiz_id,
-            "answers": ["A"] * 9,
-            "student_id": "stud_malformed"
-        })
+        sub_res = client.post(
+            "/api/quiz/submit",
+            json={
+                "quiz_id": quiz_id,
+                "answers": ["A"] * 9,
+                "student_id": "stud_malformed"
+            },
+            headers=auth_header_for("stud_malformed")
+        )
         assert sub_res.status_code == 400
         assert "count" in sub_res.json()["detail"].lower()
 
@@ -328,11 +350,15 @@ class TestStageCSubmissionAndGrading:
 
         with patch("main.generate_analysis") as mock_analysis:
             mock_analysis.return_value = {"summary": "Summary", "revision": "Rev", "recommendation": "Rec"}
-            sub_res = client.post("/api/quiz/submit", json={
-                "quiz_id": quiz_id,
-                "answers": ["B"] * 10,
-                "student_id": "stud_persist_check"
-            })
+            sub_res = client.post(
+                "/api/quiz/submit",
+                json={
+                    "quiz_id": quiz_id,
+                    "answers": ["B"] * 10,
+                    "student_id": "stud_persist_check"
+                },
+                headers=auth_header_for("stud_persist_check")
+            )
             assert sub_res.status_code == 200
 
         # Direct DB checks
@@ -379,20 +405,28 @@ class TestStageCIdempotencyAndTransactions:
         with patch("main.generate_analysis") as mock_analysis:
             mock_analysis.return_value = {"summary": "Analysis", "revision": "Rev", "recommendation": "Rec"}
             # First submission
-            sub1 = client.post("/api/quiz/submit", json={
-                "quiz_id": quiz_id,
-                "answers": ["B"] * 10,
-                "student_id": "stud_idemp_check"
-            })
+            sub1 = client.post(
+                "/api/quiz/submit",
+                json={
+                    "quiz_id": quiz_id,
+                    "answers": ["B"] * 10,
+                    "student_id": "stud_idemp_check"
+                },
+                headers=auth_header_for("stud_idemp_check")
+            )
             assert sub1.status_code == 200
             data1 = sub1.json()
 
             # Second (duplicate) submission for same session
-            sub2 = client.post("/api/quiz/submit", json={
-                "quiz_id": quiz_id,
-                "answers": ["B"] * 10,
-                "student_id": "stud_idemp_check"
-            })
+            sub2 = client.post(
+                "/api/quiz/submit",
+                json={
+                    "quiz_id": quiz_id,
+                    "answers": ["B"] * 10,
+                    "student_id": "stud_idemp_check"
+                },
+                headers=auth_header_for("stud_idemp_check")
+            )
             assert sub2.status_code == 200
             data2 = sub2.json()
 
@@ -430,11 +464,15 @@ class TestStageCIdempotencyAndTransactions:
 
         # Simulate a database failure during save_student_answers inside transaction
         with patch("services.database.save_student_answers", side_effect=sqlite3.OperationalError("Disk simulated failure")):
-            sub_res = client.post("/api/quiz/submit", json={
-                "quiz_id": quiz_id,
-                "answers": ["B"] * 10,
-                "student_id": "stud_rollback_check"
-            })
+            sub_res = client.post(
+                "/api/quiz/submit",
+                json={
+                    "quiz_id": quiz_id,
+                    "answers": ["B"] * 10,
+                    "student_id": "stud_rollback_check"
+                },
+                headers=auth_header_for("stud_rollback_check")
+            )
             assert sub_res.status_code == 500
 
         # Verify rollback: session must remain 'in_progress', no attempt or student answers saved
@@ -481,7 +519,10 @@ class TestStageCHistoricalCompatibility:
         conn.close()
 
         # Query history via API endpoint
-        hist_res = client.get("/api/student/stud_hist_compat/history")
+        hist_res = client.get(
+            "/api/student/stud_hist_compat/history",
+            headers=auth_header_for("stud_hist_compat")
+        )
         assert hist_res.status_code == 200
         data = hist_res.json()
         assert len(data["attempts"]) == 1

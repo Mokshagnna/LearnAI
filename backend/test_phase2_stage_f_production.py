@@ -30,7 +30,8 @@ from services.database import (
 from services.auth_utils import (
     sign_student_identity,
     verify_student_identity,
-    validate_student_id_format
+    validate_student_id_format,
+    auth_header_for
 )
 from services.backup import (
     backup_database,
@@ -184,7 +185,10 @@ class TestStudentIdentityAndSessionOwnership:
         assert "Access denied" in res.json()["detail"]
 
         # Legitimate owner accesses session
-        res_owner = client.get(f"/api/quiz/session/sess_owner_check?student_id={student_id}")
+        res_owner = client.get(
+            f"/api/quiz/session/sess_owner_check?student_id={student_id}",
+            headers=auth_header_for(student_id)
+        )
         assert res_owner.status_code == 200
         assert res_owner.json()["session_id"] == "sess_owner_check"
 

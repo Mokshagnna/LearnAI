@@ -11,14 +11,58 @@ let activeTopicId = "";
 let isGenerating = false;
 let activeAbortController = null;
 let studentId = localStorage.getItem("learnai_student_id") || null;
+let authToken = localStorage.getItem("learnai_auth_token") || null;
 
-// ── Student ID Management ───────────────────────────────────────────────────
-function getStudentId() {
-  if (!studentId) {
-    studentId = crypto.randomUUID();
-    localStorage.setItem("learnai_student_id", studentId);
+// ── Student Authentication & Session Management ──────────────────────────────
+async function ensureAuthSession() {
+  if (authToken && studentId) {
+    return { token: authToken, studentId: studentId };
   }
+  try {
+    const res = await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      authToken = data.token;
+      studentId = data.student_id;
+      localStorage.setItem("learnai_auth_token", authToken);
+      localStorage.setItem("learnai_student_id", studentId);
+      return { token: authToken, studentId: studentId };
+    }
+  } catch (err) {
+    console.warn("Failed to initialize server auth session:", err);
+  }
+  return { token: authToken, studentId: studentId };
+}
+
+function getStudentId() {
   return studentId;
+}
+
+function getAuthToken() {
+  return authToken;
+}
+
+async function authenticatedFetch(url, options = {}) {
+  await ensureAuthSession();
+  options.headers = options.headers || {};
+  if (authToken) {
+    options.headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  let res = await fetch(url, options);
+  if (res.status === 401) {
+    console.warn("[AUTH] 401 Unauthorized received. Renewing session...");
+    localStorage.removeItem("learnai_auth_token");
+    authToken = null;
+    await ensureAuthSession();
+    if (authToken) {
+      options.headers["Authorization"] = `Bearer ${authToken}`;
+      res = await fetch(url, options);
+    }
+  }
+  return res;
 }
 
 // ── HTML Safety & Escaping Helper ───────────────────────────────────────────
@@ -369,14 +413,14 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     const timeoutSec = 50;
     timeoutId = setTimeout(() => activeAbortController?.abort(), timeoutSec * 1000);
 
-    const res = await fetch("/api/quiz/generate", {
+    const res = await authenticatedFetch("/api/quiz/generate", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         course_code: courseCode,
         topic: topic,
         topic_id: activeTopicId || undefined,
-        student_id: getStudentId(),
+        student_id: getStudentId() || undefined,
         retake: isRetake
       }),
       signal: activeAbortController.signal
@@ -390,6 +434,15 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
         ? (typeof data.detail === "object" ? data.detail.message : data.detail)
         : "AI service is temporarily busy. Please try again.";
       throw new Error(errMsg);
+    }
+
+    if (data.auth_token) {
+      authToken = data.auth_token;
+      localStorage.setItem("learnai_auth_token", authToken);
+    }
+    if (data.student_id) {
+      studentId = data.student_id;
+      localStorage.setItem("learnai_student_id", studentId);
     }
 
     // ── Validate questions before displaying them ──
@@ -599,13 +652,14 @@ async function submitQuiz() {
   const timeoutId = setTimeout(() => controller.abort(), 45000);
 
   try {
-    const res = await fetch("/api/quiz/submit", {
+    const res = await authenticatedFetch("/api/quiz/submit", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         quiz_id: currentQuiz.quiz_id,
         answers: answers,
-        student_id: getStudentId()
+        student_id: getStudentId(),
+        auth_token: getAuthToken()
       }),
       signal: controller.signal
     });
@@ -730,7 +784,8 @@ function showResult(data) {
 async function loadAttemptHistory() {
   try {
     const sId = getStudentId();
-    const res = await fetch(`/api/student/${sId}/history?limit=10`);
+    if (!sId) return;
+    const res = await authenticatedFetch(`/api/student/${sId}/history?limit=10`);
     if (!res.ok) return;
 
     const data = await res.json();
@@ -824,14 +879,18 @@ async function loadDashboard() {
   if (contentEl) contentEl.classList.add("hidden");
 
   try {
+    await ensureAuthSession();
     const sId = getStudentId();
+    if (!sId) {
+      throw new Error("Unable to establish authenticated student session.");
+    }
     const courseFilter = $("dashboardCourseFilter")?.value || "";
     let url = `/api/student/${encodeURIComponent(sId)}/dashboard?limit=20`;
     if (courseFilter) {
       url += `&course_code=${encodeURIComponent(courseFilter)}`;
     }
 
-    const res = await fetch(url);
+    const res = await authenticatedFetch(url);
     if (!res.ok) {
       throw new Error(`Failed to load dashboard: HTTP ${res.status}`);
     }
@@ -1107,6 +1166,7 @@ $("dashboardCourseFilter")?.addEventListener("change", loadDashboard);
 
 // ── App Initialization ──────────────────────────────────────────────────────
 async function initApp() {
+  await ensureAuthSession();
   await loadCourses();
   restoreSessionState();
 }

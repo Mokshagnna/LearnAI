@@ -24,6 +24,14 @@ from services.database import (
     submit_quiz_atomic,
     get_student_dashboard_data
 )
+from services.auth_utils import (
+    sign_student_identity,
+    verify_student_identity,
+    get_authenticated_student_id,
+    get_optional_authenticated_student_id,
+    get_token_from_request,
+    DEFAULT_TOKEN_TTL_SECONDS
+)
 from services.curriculum_service import curriculum_service
 from services.rate_limiter import quiz_gen_limiter, quiz_submit_limiter, get_client_ip
 from services.metrics import metrics
@@ -97,6 +105,7 @@ class SubmitRequest(BaseModel):
     quiz_id: str = Field(..., min_length=1, max_length=100)
     answers: list[str] = Field(..., min_length=1, max_length=50)
     student_id: str | None = Field(default=None, max_length=100)
+    auth_token: str | None = Field(default=None, max_length=500)
 
 def find_course_and_topic(course_code: str, topic_name: str, topic_id: str | None = None):
     try:
@@ -140,6 +149,58 @@ def health_check(detailed: bool = False):
         response["metrics"] = metrics.get_summary()
 
     return response
+
+@app.post("/api/auth/session")
+def create_auth_session(request: Request):
+    """
+    Issue a server-minted pseudonymous student identity and signed HMAC token.
+    Zero-friction: no passwords or registration required.
+    """
+    token = get_token_from_request(request)
+    if token:
+        is_valid, existing_student_id, _ = verify_student_identity(token)
+        if is_valid and existing_student_id:
+            new_token = sign_student_identity(existing_student_id)
+            return {
+                "student_id": existing_student_id,
+                "token": new_token,
+                "expires_at": int(time.time()) + DEFAULT_TOKEN_TTL_SECONDS
+            }
+
+    new_student_id = str(uuid.uuid4())
+    get_or_create_student(new_student_id)
+    token = sign_student_identity(new_student_id)
+    return {
+        "student_id": new_student_id,
+        "token": token,
+        "expires_at": int(time.time()) + DEFAULT_TOKEN_TTL_SECONDS
+    }
+
+@app.post("/api/auth/refresh")
+def refresh_auth_session(request: Request):
+    """
+    Refresh an existing, valid HMAC token.
+    Requires Authorization: Bearer <token>.
+    """
+    token = get_token_from_request(request)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
+        )
+
+    is_valid, student_id, err = verify_student_identity(token)
+    if not is_valid:
+        if err == "Token expired":
+            raise HTTPException(status_code=401, detail="Authentication token expired. Please establish a new session.")
+        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
+
+    new_token = sign_student_identity(student_id)
+    return {
+        "student_id": student_id,
+        "token": new_token,
+        "expires_at": int(time.time()) + DEFAULT_TOKEN_TTL_SECONDS
+    }
 
 @app.get("/api/courses")
 def get_courses():
@@ -244,7 +305,31 @@ def create_quiz(req: QuizRequest, request: Request):
 
     # Persist the active quiz session to database (sole authoritative store)
     # Never return a usable quiz to the user if the session cannot be persisted
-    student_id = get_or_create_student(req.student_id)
+    auth_student_id = get_optional_authenticated_student_id(request)
+    if auth_student_id:
+        if req.student_id and req.student_id.strip() and req.student_id.strip() != auth_student_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: student_id does not match authenticated token."
+            )
+        student_id = auth_student_id
+    elif req.student_id and req.student_id.strip():
+        requested_id = req.student_id.strip()
+        conn = get_connection()
+        existing_row = conn.execute("SELECT id FROM students WHERE id = ?", (requested_id,)).fetchone()
+        conn.close()
+        if existing_row:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication token required to access existing student identity."
+            )
+        student_id = get_or_create_student(requested_id)
+    else:
+        student_id = str(uuid.uuid4())
+        student_id = get_or_create_student(student_id)
+
+    auth_token = sign_student_identity(student_id)
+
     try:
         create_quiz_session(
             session_id=quiz_id,
@@ -283,6 +368,8 @@ def create_quiz(req: QuizRequest, request: Request):
         "quiz_id": quiz_id,
         "attempt_id": quiz.get("attempt_id", quiz_id),
         "attempt_number": quiz.get("attempt_number", 1),
+        "student_id": student_id,
+        "auth_token": auth_token,
         "course_code": course["code"],
         "subject": course["name"],
         "topic": topic["name"],
@@ -304,21 +391,40 @@ def create_quiz(req: QuizRequest, request: Request):
     }
 
 @app.get("/api/quiz/session/{session_id}")
-def get_session(session_id: str, student_id: str | None = None):
+def get_session(session_id: str, request: Request, student_id: str | None = None):
     """
     Retrieve active or completed quiz session.
-    Enforces student ownership and session expiration.
+    Enforces student ownership and server-verified HMAC authentication.
     Returns sanitized public questions (no answers or explanations).
     """
-    if not student_id or not student_id.strip():
-        raw_session = get_quiz_session(session_id, auto_expire=False)
-        if not raw_session:
-            raise HTTPException(status_code=404, detail="Quiz session not found or expired.")
-        raise HTTPException(status_code=400, detail="student_id is required to access quiz session.")
+    raw_session = get_quiz_session(session_id, auto_expire=False)
+    if not raw_session:
+        raise HTTPException(status_code=404, detail="Quiz session not found or expired.")
 
-    clean_student_id = student_id.strip()
+    token = get_token_from_request(request)
+    if token:
+        is_valid, auth_student_id, err = verify_student_identity(token)
+        if not is_valid:
+            if err == "Token expired":
+                raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
+            raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
+        if raw_session["student_id"] != auth_student_id:
+            raise HTTPException(status_code=403, detail="Access denied: quiz session belongs to another student.")
+        effective_student_id = auth_student_id
+    else:
+        # Token is missing: require valid credentials
+        if not student_id or not student_id.strip():
+            raise HTTPException(status_code=400, detail="student_id is required to access quiz session.")
+        clean_student_id = student_id.strip()
+        if raw_session["student_id"] != clean_student_id:
+            raise HTTPException(status_code=403, detail="Access denied: quiz session belongs to another student.")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
+        )
+
     try:
-        session = get_quiz_session(session_id, student_id=clean_student_id, auto_expire=True)
+        session = get_quiz_session(session_id, student_id=effective_student_id, auto_expire=True)
     except PermissionError:
         raise HTTPException(status_code=403, detail="Access denied: quiz session belongs to another student.")
     except Exception as e:
@@ -370,13 +476,35 @@ def submit_quiz(req: SubmitRequest, request: Request):
 
     metrics.record_submission()
 
+    raw_session = get_quiz_session(req.quiz_id, auto_expire=False)
+    if not raw_session:
+        raise HTTPException(status_code=404, detail="Quiz not found or expired.")
+
     if not req.student_id or not req.student_id.strip():
-        raw_session = get_quiz_session(req.quiz_id, auto_expire=False)
-        if not raw_session:
-            raise HTTPException(status_code=404, detail="Quiz not found or expired.")
         raise HTTPException(status_code=400, detail="student_id is required to submit a quiz session.")
 
     clean_student_id = req.student_id.strip()
+
+    # Enforce ownership mismatch first
+    if raw_session["student_id"] != clean_student_id:
+        raise HTTPException(status_code=403, detail="Access denied: quiz session belongs to another student.")
+
+    # Extract and verify authentication token
+    token = get_token_from_request(request) or req.auth_token
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
+        )
+
+    is_valid, auth_student_id, err = verify_student_identity(token)
+    if not is_valid:
+        if err == "Token expired":
+            raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
+        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
+
+    if auth_student_id != clean_student_id:
+        raise HTTPException(status_code=403, detail="Access denied: student_id does not match authenticated token.")
 
     def _analysis_wrapper(subject, topic, weak_concepts, score, total):
         try:
@@ -413,10 +541,27 @@ def submit_quiz(req: SubmitRequest, request: Request):
         raise HTTPException(status_code=500, detail="An error occurred while evaluating and saving your quiz.")
 
 @app.get("/api/student/{student_id}/history")
-def get_history(student_id: str, limit: int = 20):
+def get_history(student_id: str, request: Request, limit: int = 20):
     if not student_id or not student_id.strip() or len(student_id.strip()) > 100:
         raise HTTPException(status_code=400, detail="Invalid student_id parameter.")
     clean_id = student_id.strip()
+
+    token = get_token_from_request(request)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
+        )
+
+    is_valid, auth_student_id, err = verify_student_identity(token)
+    if not is_valid:
+        if err == "Token expired":
+            raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
+        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
+
+    if auth_student_id != clean_id:
+        raise HTTPException(status_code=403, detail="Access denied: cannot view another student's history.")
+
     try:
         history = get_student_history(clean_id, limit)
         return {"student_id": clean_id, "attempts": history}
@@ -425,10 +570,27 @@ def get_history(student_id: str, limit: int = 20):
         raise HTTPException(status_code=500, detail="Failed to retrieve history")
 
 @app.get("/api/student/{student_id}/performance")
-def get_performance(student_id: str, course_code: str | None = None):
+def get_performance(student_id: str, request: Request, course_code: str | None = None):
     if not student_id or not student_id.strip() or len(student_id.strip()) > 100:
         raise HTTPException(status_code=400, detail="Invalid student_id parameter.")
     clean_id = student_id.strip()
+
+    token = get_token_from_request(request)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
+        )
+
+    is_valid, auth_student_id, err = verify_student_identity(token)
+    if not is_valid:
+        if err == "Token expired":
+            raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
+        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
+
+    if auth_student_id != clean_id:
+        raise HTTPException(status_code=403, detail="Access denied: cannot view another student's performance.")
+
     from services.database import get_concept_performance, get_difficulty_performance
     try:
         concept_perf = get_concept_performance(clean_id, course_code)
@@ -443,10 +605,27 @@ def get_performance(student_id: str, course_code: str | None = None):
         raise HTTPException(status_code=500, detail="Failed to retrieve performance")
 
 @app.get("/api/student/{student_id}/dashboard")
-def get_dashboard(student_id: str, course_code: str | None = None, limit: int = 20):
+def get_dashboard(student_id: str, request: Request, course_code: str | None = None, limit: int = 20):
     if not student_id or not student_id.strip() or len(student_id.strip()) > 100:
         raise HTTPException(status_code=400, detail="Invalid student_id parameter.")
     clean_id = student_id.strip()
+
+    token = get_token_from_request(request)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
+        )
+
+    is_valid, auth_student_id, err = verify_student_identity(token)
+    if not is_valid:
+        if err == "Token expired":
+            raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
+        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
+
+    if auth_student_id != clean_id:
+        raise HTTPException(status_code=403, detail="Access denied: cannot view another student's dashboard.")
+
     try:
         data = get_student_dashboard_data(student_id=clean_id, course_code=course_code, limit=limit)
         return data
