@@ -13,18 +13,82 @@ import base64
 import logging
 from typing import Optional, Tuple, Dict, Any
 from fastapi import Request, HTTPException, Header
+from services.db.base import is_production_mode
 
 logger = logging.getLogger("learnai.auth")
 
 DEFAULT_TOKEN_TTL_SECONDS = int(os.getenv("STUDENT_TOKEN_TTL_SECONDS", "86400"))  # 24 hours
 
+KNOWN_INSECURE_SECRETS = {
+    "learnai-default-dev-secret-key-change-in-production-32b!",
+    "your_secure_random_hmac_secret_here",
+    "change_me",
+    "changeme",
+    "secret",
+    "dev-secret",
+    "development",
+    "default",
+}
+
+
+def is_known_insecure_secret(secret_str: str) -> bool:
+    """Check if the provided secret is a known template or development fallback."""
+    if not secret_str:
+        return True
+    s = secret_str.strip().lower()
+    if s in {k.lower() for k in KNOWN_INSECURE_SECRETS}:
+        return True
+    if "change-in-production" in s or "change_in_production" in s:
+        return True
+    return False
+
+
+def validate_production_auth_config() -> None:
+    """
+    Validate that SESSION_SECRET_KEY is configured safely for production.
+    Strictly requires canonical SESSION_SECRET_KEY in production (no aliases).
+    Fails fast with clear error message; never prints secrets.
+    """
+    if not is_production_mode():
+        return
+
+    secret = (os.getenv("SESSION_SECRET_KEY") or "").strip()
+    if not secret:
+        logger.critical(
+            "CRITICAL: Production startup failed: SESSION_SECRET_KEY is not configured. "
+            "Production mode requires a dedicated HMAC secret key."
+        )
+        raise RuntimeError(
+            "Production configuration error: SESSION_SECRET_KEY environment variable is required and cannot be empty."
+        )
+
+    if is_known_insecure_secret(secret):
+        logger.critical(
+            "CRITICAL: Production startup failed: SESSION_SECRET_KEY is using a known development or template fallback."
+        )
+        raise RuntimeError(
+            "Production configuration error: SESSION_SECRET_KEY cannot use a known development fallback or template secret. "
+            "Please configure a strong, random secret key for production."
+        )
+
 
 def get_session_secret() -> bytes:
     """
     Retrieve server signing secret from environment.
-    Falls back to a warning default if not configured.
+    In production mode:
+      - Strictly requires canonical SESSION_SECRET_KEY to be non-empty.
+      - Rejects known development fallback secrets and template placeholders.
+      - Never logs or exposes secret values.
+    In development/test mode:
+      - Supports SESSION_SECRET_KEY or legacy LEARNAI_SECRET_KEY.
+      - Uses development fallback with a logged warning if neither is configured.
     """
-    secret = os.getenv("SESSION_SECRET_KEY") or os.getenv("LEARNAI_SECRET_KEY")
+    if is_production_mode():
+        validate_production_auth_config()
+        secret = (os.getenv("SESSION_SECRET_KEY") or "").strip()
+        return secret.encode("utf-8")
+
+    secret = (os.getenv("SESSION_SECRET_KEY") or os.getenv("LEARNAI_SECRET_KEY") or "").strip()
     if not secret:
         # Development fallback (logs warning once)
         secret = "learnai-default-dev-secret-key-change-in-production-32b!"
@@ -33,6 +97,7 @@ def get_session_secret() -> bytes:
             "Set a strong random key in production!"
         )
     return secret.encode("utf-8")
+
 
 
 def validate_student_id_format(student_id: Optional[str]) -> bool:

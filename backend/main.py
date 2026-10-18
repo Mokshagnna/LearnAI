@@ -30,8 +30,10 @@ from services.auth_utils import (
     get_authenticated_student_id,
     get_optional_authenticated_student_id,
     get_token_from_request,
-    DEFAULT_TOKEN_TTL_SECONDS
+    DEFAULT_TOKEN_TTL_SECONDS,
+    validate_production_auth_config,
 )
+from services.db.base import is_production_mode, validate_production_db_config
 from services.curriculum_service import curriculum_service
 from services.rate_limiter import quiz_gen_limiter, quiz_submit_limiter, get_client_ip
 from services.metrics import metrics
@@ -56,8 +58,26 @@ else:
 setup_secure_logging()
 logger = logging.getLogger("learnai.api")
 
+
+def validate_production_environment() -> None:
+    """
+    Validate all production configuration requirements on startup.
+    Fails fast if production mode is active but required configuration is missing or unsafe.
+    Never prints credentials or secret values.
+    """
+    if not is_production_mode():
+        return
+
+    validate_production_auth_config()
+    validate_production_db_config()
+
+
+# Validate production environment before initializing database
+validate_production_environment()
+
 # Initialize database on startup
 init_db()
+
 
 DEBUG = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
 

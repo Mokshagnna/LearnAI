@@ -47,6 +47,8 @@ services:
         sync: false
 
       # Reverse proxy & networking for Render cloud environment
+      - key: ENVIRONMENT
+        value: "production"
       - key: TRUST_PROXY_HEADERS
         value: "true"
       - key: ALLOWED_ORIGINS

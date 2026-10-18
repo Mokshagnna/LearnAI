@@ -16,6 +16,7 @@ from services.db.base import (
     parse_json_safely,
     parse_json_column,
     serialize_json_for_db,
+    is_production_mode,
 )
 from services.db.sqlite_adapter import SQLiteAdapter
 from services.db.postgres_adapter import (
@@ -113,15 +114,53 @@ def normalise_text(text: str) -> str:
     return text
 
 
+def reset_db_adapter() -> None:
+    """Reset cached PostgreSQL adapter and pool for test isolation."""
+    global _postgres_adapter
+    if _postgres_adapter is not None:
+        try:
+            PostgresAdapter.close_pool()
+        except Exception:
+            pass
+        _postgres_adapter = None
+
+
 def get_connection(db_path: Optional[Path] = None) -> Any:
     """
     Acquire database connection.
-    If db_path is explicitly provided: always uses SQLite for that path (essential for test isolation).
-    If db_path is None:
+    If running in production:
+        Requires PostgreSQL via DATABASE_URL; explicit SQLite db_path or missing
+        PostgreSQL configuration raises DatabaseConnectionError (no silent fallback).
+    If db_path is explicitly provided in non-production:
+        Always uses SQLite for that path (essential for test isolation).
+    If db_path is None in non-production:
         If DATABASE_URL or SUPABASE_DB_URL is set: uses PostgresAdapter with connection pool.
         Else: uses SQLiteAdapter with WAL mode and busy timeout.
     """
     global _postgres_adapter
+
+    if is_production_mode():
+        if db_path is not None:
+            logger.critical(
+                "CRITICAL: Explicit SQLite db_path provided in production mode. "
+                "SQLite is strictly prohibited in production."
+            )
+            raise DatabaseConnectionError(
+                "Production configuration error: Explicit SQLite path is prohibited in production mode."
+            )
+        if not _db_config.is_postgres:
+            logger.critical(
+                "CRITICAL: get_connection() invoked in production mode without DATABASE_URL configured. "
+                "Silent fallback to SQLite is prohibited in production."
+            )
+            raise DatabaseConnectionError(
+                "Production configuration error: PostgreSQL connection is required in production. "
+                "Silent fallback to SQLite is prohibited."
+            )
+        if _postgres_adapter is None:
+            _postgres_adapter = PostgresAdapter(_db_config)
+        return _postgres_adapter.get_connection()
+
     if db_path is not None:
         return _sqlite_adapter.get_connection(db_path=db_path)
 
@@ -145,13 +184,46 @@ def _ensure_column(cursor: Any, table: str, column: str, column_type: str):
 def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """
     Initialize database schema with idempotent DDL, WAL journal mode, and safe migrations.
-    - If PostgreSQL is configured (DATABASE_URL is set) and db_path is None:
-      runs versioned Supabase migrations.
-    - If db_path is provided or PostgreSQL is not configured: initializes SQLite.
+    - In production mode:
+      Requires DATABASE_URL and executes Supabase PostgreSQL migrations.
+      Explicit SQLite path or missing DATABASE_URL raises DatabaseConnectionError (no silent fallback).
+    - In development/test mode:
+      If PostgreSQL is configured (DATABASE_URL is set) and db_path is None:
+        runs versioned Supabase migrations.
+      If db_path is provided or PostgreSQL is not configured: initializes SQLite.
     Preserves all existing data in students, quiz_attempts, and question_metadata.
     Adds quiz_sessions, student_answers, and topic_mastery.
     """
     global _postgres_adapter
+
+    if is_production_mode():
+        if db_path is not None:
+            logger.critical(
+                "CRITICAL: Explicit SQLite db_path provided to init_db() in production mode. "
+                "SQLite is strictly prohibited in production."
+            )
+            raise DatabaseConnectionError(
+                "Production configuration error: Explicit SQLite path is prohibited in production mode."
+            )
+        if not _db_config.is_postgres:
+            logger.critical(
+                "CRITICAL: init_db() invoked in production mode without DATABASE_URL configured. "
+                "Silent fallback to SQLite is prohibited in production."
+            )
+            raise DatabaseConnectionError(
+                "Production configuration error: DATABASE_URL is required in production. "
+                "Silent fallback to SQLite is prohibited."
+            )
+        if _postgres_adapter is None:
+            _postgres_adapter = PostgresAdapter(_db_config)
+        conn = _postgres_adapter.get_connection()
+        try:
+            applied = apply_migrations(conn, is_postgres=True)
+            logger.info("Supabase PostgreSQL initialized successfully (applied migrations: %s)", applied)
+            return {"status": "ok", "backend": "postgres", "applied_migrations": applied}
+        finally:
+            conn.close()
+
     if db_path is None and _db_config.is_postgres:
         if _postgres_adapter is None:
             _postgres_adapter = PostgresAdapter(_db_config)
@@ -355,6 +427,7 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     logger.info("Database initialized successfully at %s (journal_mode=%s)", actual_path, active_journal_mode)
     return {
         "status": "initialized",
+        "backend": "sqlite",
         "path": str(actual_path),
         "journal_mode": str(active_journal_mode)
     }

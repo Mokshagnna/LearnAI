@@ -173,27 +173,99 @@ def serialize_json_for_db(val: Any, is_postgres: bool = False) -> Any:
     return json.dumps(val)
 
 
+def is_production_mode() -> bool:
+    """
+    Determine whether the application is running in production mode.
+    Precedence policy:
+    1. Render Cloud Guard (Highest Priority):
+       If deployed on Render (RENDER=true or 1), ALWAYS evaluates to True.
+       Production safeguards can NEVER be accidentally disabled on Render.
+    2. Canonical Environment Variable (ENVIRONMENT):
+       - 'production' or 'prod' -> True
+       - 'development', 'dev', 'test', 'testing', 'local' -> False
+    3. Secondary Environment Alias (APP_ENV):
+       - 'production' or 'prod' -> True
+       - 'development', 'dev', 'test', 'testing', 'local' -> False
+    4. Default (unset or unrecognized): False (local development mode).
+    """
+    if os.getenv("RENDER", "").strip().lower() in ("true", "1"):
+        return True
+
+    env = os.getenv("ENVIRONMENT", "").strip().lower()
+    if env in ("production", "prod"):
+        return True
+    if env in ("development", "dev", "test", "testing", "local"):
+        return False
+
+    app_env = os.getenv("APP_ENV", "").strip().lower()
+    if app_env in ("production", "prod"):
+        return True
+    if app_env in ("development", "dev", "test", "testing", "local"):
+        return False
+
+    return False
+
+
+def validate_production_db_config() -> None:
+    """
+    Validate that PostgreSQL database configuration is present and properly formatted
+    when running in production mode.
+    Strictly requires canonical DATABASE_URL in production (no aliases).
+    Fails fast with clear error message; never prints credentials.
+    """
+    if not is_production_mode():
+        return
+
+    db_url = (os.getenv("DATABASE_URL") or "").strip()
+    if not db_url:
+        logger.critical(
+            "CRITICAL: Production startup failed: DATABASE_URL is not configured. "
+            "Production mode requires a valid PostgreSQL database connection and will not fall back to SQLite."
+        )
+        raise RuntimeError(
+            "Production startup error: DATABASE_URL environment variable is required and cannot be empty. "
+            "Production LearnAI must connect to PostgreSQL; silent SQLite fallback is prohibited."
+        )
+
+    if not (db_url.startswith("postgresql://") or db_url.startswith("postgres://")):
+        logger.critical(
+            "CRITICAL: Production startup failed: DATABASE_URL must be a PostgreSQL connection URI."
+        )
+        raise RuntimeError(
+            "Production configuration error: DATABASE_URL must be a PostgreSQL connection URI "
+            "(starting with postgresql:// or postgres://)."
+        )
+
+
 class DatabaseConfig:
     """
     Database configuration manager.
     Detects whether PostgreSQL or SQLite is active based on environment variables.
 
     Precedence:
-    1. DATABASE_URL or SUPABASE_DB_URL -> Supabase PostgreSQL
+    1. DATABASE_URL (production canonical) or SUPABASE_DB_URL (development legacy alias)
     2. LEARNAI_DB_PATH -> SQLite persistent path
     3. SQLITE_DB_PATH -> SQLite legacy path
     4. Default -> backend/data/learnai.db
     """
 
     @property
+    def is_production(self) -> bool:
+        """True if running in production mode."""
+        return is_production_mode()
+
+    @property
     def is_postgres(self) -> bool:
         """True if PostgreSQL / Supabase connection is configured."""
-        url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+        url = self.database_url
         return bool(url and url.strip())
 
     @property
     def database_url(self) -> Optional[str]:
-        url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+        if self.is_production:
+            url = os.getenv("DATABASE_URL")
+        else:
+            url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
         return url.strip() if url else None
 
     @property
