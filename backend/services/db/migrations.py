@@ -24,6 +24,7 @@ def ensure_migration_table(conn: Any, is_postgres: bool = True):
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version TEXT PRIMARY KEY,
+                name TEXT DEFAULT '',
                 applied_at TIMESTAMPTZ NOT NULL
             );
         """)
@@ -31,6 +32,7 @@ def ensure_migration_table(conn: Any, is_postgres: bool = True):
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version TEXT PRIMARY KEY,
+                name TEXT DEFAULT '',
                 applied_at TEXT NOT NULL
             );
         """)
@@ -77,13 +79,13 @@ def apply_migrations(conn: Any, is_postgres: bool = True, migrations_dir: Option
             now_str = datetime.now(timezone.utc).isoformat()
             if is_postgres:
                 cursor.execute(
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (%s, %s);",
-                    (version, now_str)
+                    "INSERT INTO schema_migrations (version, name, applied_at) VALUES (%s, %s, %s);",
+                    (version, sql_file.name, now_str)
                 )
             else:
                 cursor.execute(
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?);",
-                    (version, now_str)
+                    "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?);",
+                    (version, sql_file.name, now_str)
                 )
             conn.commit()
             newly_applied.append(version)

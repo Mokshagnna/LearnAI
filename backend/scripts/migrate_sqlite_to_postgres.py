@@ -6,7 +6,7 @@ Production-grade data migration utility for LearnAI:
 Migrates data from SQLite (offline snapshot) to Supabase PostgreSQL with zero data loss.
 
 Features:
-- Source SQLite integrity check before migrating.
+- Source SQLite integrity check before migrating (opens in read-only mode).
 - Target connection validation and automated schema migration check.
 - Strict foreign key dependency ordering:
   1. students
@@ -17,10 +17,11 @@ Features:
   6. topic_mastery
 - Configurable batching with progress tracking.
 - Type conversion for JSONB, timestamps, and primitives.
-- Dry-run mode (--dry-run).
+- Dry-run mode (--dry-run): validates data, types, foreign keys, and schema with zero remote writes.
 - Atomic transaction (rolls back target completely on any error).
 - Post-migration reconciliation and row count verification.
 - Re-entrant support: --clean and --skip-existing.
+- Credential privacy: never logs or displays passwords or complete connection strings.
 """
 
 import os
@@ -29,6 +30,7 @@ import json
 import sqlite3
 import argparse
 import logging
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -36,6 +38,15 @@ from typing import Any, Dict, List, Optional, Tuple
 backend_dir = Path(__file__).resolve().parent.parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
+
+# Load backend/.env relative to script
+env_file = backend_dir / ".env"
+if env_file.is_file():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_file, override=False)
+    except ImportError:
+        pass
 
 from services.db.base import DatabaseConfig, parse_json_safely
 from services.db.postgres_adapter import PostgresAdapter
@@ -56,13 +67,38 @@ TABLE_DEPENDENCY_ORDER = [
 ]
 
 
+def mask_connection_url(url: str) -> str:
+    """Mask password from connection URL for safe logging and display."""
+    if not url:
+        return "<not configured>"
+    try:
+        parsed = urlparse(url)
+        netloc = parsed.netloc
+        if "@" in netloc:
+            creds, host_part = netloc.split("@", 1)
+            if ":" in creds:
+                user, _ = creds.split(":", 1)
+                netloc = f"{user}:***@{host_part}"
+            else:
+                netloc = f"{creds}:***@{host_part}"
+        return f"{parsed.scheme}://{netloc}{parsed.path}"
+    except Exception:
+        return "postgresql://***:***@***"
+
+
 def verify_sqlite_source(sqlite_path: Path) -> Dict[str, Any]:
-    """Verify SQLite source database integrity and count rows across all tables."""
+    """Verify SQLite source database integrity in read-only mode and count rows across all tables."""
     if not sqlite_path.is_file():
         raise FileNotFoundError(f"Source SQLite database not found at: {sqlite_path}")
 
-    logger.info("Verifying source SQLite integrity at %s...", sqlite_path)
-    conn = sqlite3.connect(str(sqlite_path))
+    logger.info("Verifying source SQLite integrity at %s (read-only)...", sqlite_path)
+    try:
+        # Open in URI read-only mode to prevent any writes to source
+        uri = f"file:///{sqlite_path.resolve().as_posix()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
+    except Exception:
+        conn = sqlite3.connect(str(sqlite_path))
+
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -86,8 +122,13 @@ def verify_sqlite_source(sqlite_path: Path) -> Dict[str, Any]:
 
 
 def get_sqlite_rows(sqlite_path: Path, table: str) -> List[Dict[str, Any]]:
-    """Retrieve all rows from a source SQLite table as dictionaries."""
-    conn = sqlite3.connect(str(sqlite_path))
+    """Retrieve all rows from a source SQLite table as dictionaries in read-only mode."""
+    try:
+        uri = f"file:///{sqlite_path.resolve().as_posix()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
+    except Exception:
+        conn = sqlite3.connect(str(sqlite_path))
+
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     try:
@@ -133,16 +174,17 @@ def migrate_data(
     clean_target: bool = False,
     skip_existing: bool = False,
 ) -> Dict[str, Any]:
-    """Execute the data migration from SQLite to Supabase PostgreSQL."""
+    """Execute or rehearse data migration from SQLite to Supabase PostgreSQL."""
     import psycopg
     from psycopg.types.json import Jsonb
 
-    # 1. Source verification
+    # 1. Source verification (strictly read-only)
     source_counts = verify_sqlite_source(sqlite_path)
 
     # 2. Target connection
     normalized_url = PostgresAdapter.normalize_database_url(target_url)
-    logger.info("Connecting to target Supabase PostgreSQL...")
+    masked_url = mask_connection_url(target_url)
+    logger.info("Connecting to target Supabase PostgreSQL at %s...", masked_url)
 
     target_conn = psycopg.connect(normalized_url, autocommit=False)
     target_cursor = target_conn.cursor()
@@ -162,13 +204,68 @@ def migrate_data(
                 )
 
         if dry_run:
-            logger.info("DRY-RUN MODE ENABLED: Validated connection and schema. No data will be written.")
+            logger.info("DRY-RUN MODE ENABLED: Validating all data, types, and foreign keys without writing...")
+            fk_cache: Dict[str, set] = {t: set() for t in TABLE_DEPENDENCY_ORDER}
+            type_conversions: Dict[str, Any] = {
+                t: {"total_rows": 0, "jsonb_converted": 0, "valid_rows": 0, "errors": []}
+                for t in TABLE_DEPENDENCY_ORDER
+            }
+            fk_violations: List[str] = []
+
+            for table in TABLE_DEPENDENCY_ORDER:
+                rows = get_sqlite_rows(sqlite_path, table)
+                type_conversions[table]["total_rows"] = len(rows)
+
+                for r in rows:
+                    try:
+                        cols, values = prepare_row_for_postgres(table, r)
+                        type_conversions[table]["valid_rows"] += 1
+
+                        for v in values:
+                            if isinstance(v, Jsonb):
+                                type_conversions[table]["jsonb_converted"] += 1
+
+                        if "id" in r:
+                            fk_cache[table].add(r["id"])
+
+                        # Foreign key validations
+                        if table == "quiz_sessions" and r.get("student_id") not in fk_cache["students"]:
+                            fk_violations.append(f"quiz_sessions {r.get('id')} references unknown student {r.get('student_id')}")
+                        elif table == "quiz_attempts" and r.get("student_id") not in fk_cache["students"]:
+                            fk_violations.append(f"quiz_attempts {r.get('id')} references unknown student {r.get('student_id')}")
+                        elif table == "question_metadata" and r.get("attempt_id") not in fk_cache["quiz_attempts"]:
+                            fk_violations.append(f"question_metadata {r.get('id')} references unknown attempt {r.get('attempt_id')}")
+                        elif table == "student_answers":
+                            if r.get("student_id") not in fk_cache["students"]:
+                                fk_violations.append(f"student_answers {r.get('id')} references unknown student {r.get('student_id')}")
+                            if r.get("session_id") not in fk_cache["quiz_sessions"]:
+                                fk_violations.append(f"student_answers {r.get('id')} references unknown session {r.get('session_id')}")
+                        elif table == "topic_mastery" and r.get("student_id") not in fk_cache["students"]:
+                            fk_violations.append(f"topic_mastery {r.get('id')} references unknown student {r.get('student_id')}")
+
+                    except Exception as row_err:
+                        type_conversions[table]["errors"].append(str(row_err))
+
+            logger.info("DRY-RUN VALIDATION COMPLETE: Zero remote writes. Rolling back connection.")
             target_conn.rollback()
             target_conn.close()
+
             return {
                 "dry_run": True,
+                "status": "dry_run_success" if not fk_violations else "dry_run_warnings",
                 "source_counts": source_counts,
-                "status": "dry_run_success"
+                "proposed_rows": {t: type_conversions[t]["valid_rows"] for t in TABLE_DEPENDENCY_ORDER},
+                "foreign_key_dependency_order": TABLE_DEPENDENCY_ORDER,
+                "foreign_key_violations": fk_violations,
+                "type_conversions": {
+                    t: {
+                        "total_rows": type_conversions[t]["total_rows"],
+                        "jsonb_columns_converted": type_conversions[t]["jsonb_converted"],
+                        "errors": type_conversions[t]["errors"]
+                    }
+                    for t in TABLE_DEPENDENCY_ORDER
+                },
+                "remote_changes": 0
             }
 
         # Clean target if requested (in reverse dependency order)
@@ -253,7 +350,7 @@ def migrate_data(
         return summary
 
     except Exception as e:
-        logger.critical("Migration failed! Rolling back all target changes: %s", e)
+        logger.critical("Migration operation failed: %s", e)
         try:
             target_conn.rollback()
         except Exception:
@@ -273,8 +370,8 @@ def main():
     parser.add_argument(
         "--target-url",
         type=str,
-        default=os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL"),
-        help="Target PostgreSQL connection string (defaults to DATABASE_URL)."
+        default=os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL"),
+        help="Target PostgreSQL connection string (defaults to TEST_DATABASE_URL or DATABASE_URL)."
     )
     parser.add_argument(
         "--batch-size",
@@ -285,7 +382,7 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate source, target connection, and schema without writing data."
+        help="Validate source, target connection, types, foreign keys, and schema without writing data."
     )
     parser.add_argument(
         "--clean",
@@ -304,7 +401,7 @@ def main():
     target_url = args.target_url
 
     if not target_url:
-        logger.error("No target PostgreSQL URL provided. Set DATABASE_URL or pass --target-url.")
+        logger.error("No target PostgreSQL URL provided. Set TEST_DATABASE_URL or pass --target-url.")
         sys.exit(1)
 
     try:
@@ -318,7 +415,7 @@ def main():
         )
         print("\n=== MIGRATION SUMMARY ===")
         print(json.dumps(summary, indent=2))
-        sys.exit(0 if summary.get("reconciliation_passed", True) else 1)
+        sys.exit(0 if summary.get("status") in ("success", "dry_run_success") else 1)
     except Exception as e:
         print(f"\nMigration failed with error: {e}", file=sys.stderr)
         sys.exit(1)

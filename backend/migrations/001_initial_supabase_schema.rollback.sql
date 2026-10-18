@@ -12,4 +12,4 @@ DROP TABLE IF EXISTS quiz_attempts CASCADE;
 DROP TABLE IF EXISTS quiz_sessions CASCADE;
 DROP TABLE IF EXISTS topic_mastery CASCADE;
 DROP TABLE IF EXISTS students CASCADE;
-DELETE FROM schema_migrations WHERE version = '001';
+DELETE FROM schema_migrations WHERE version = '001_initial_supabase_schema' OR version = '001';

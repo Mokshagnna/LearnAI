@@ -510,6 +510,12 @@ def get_quiz_session(
 
     session = dict(row)
 
+    # Normalize datetime fields to ISO strings for cross-backend consistency (PostgreSQL vs SQLite)
+    for dt_col in ("created_at", "expires_at", "submitted_at"):
+        val = session.get(dt_col)
+        if isinstance(val, datetime):
+            session[dt_col] = val.isoformat()
+
     # 1. Ownership Validation
     if student_id and session["student_id"] != student_id:
         if close_conn:
@@ -522,12 +528,13 @@ def get_quiz_session(
 
     # 2. Expiration Validation
     now_iso = get_utc_now_iso()
-    if session["status"] == "in_progress" and now_iso > session["expires_at"]:
+    exp_iso = session.get("expires_at") or ""
+    if session["status"] == "in_progress" and exp_iso and now_iso > exp_iso:
         if auto_expire:
             cursor.execute("UPDATE quiz_sessions SET status = 'expired' WHERE id = ?", (session_id,))
             conn.commit()
             session["status"] = "expired"
-            logger.info("Session %s transitioned to 'expired' (expired at %s)", session_id, session["expires_at"])
+            logger.info("Session %s transitioned to 'expired' (expired at %s)", session_id, exp_iso)
 
     # 3. Deserialize JSON snapshots
     session["questions"] = parse_json_safely(session.get("questions_snapshot"), default=[])

@@ -7,7 +7,7 @@
 -- 0. Schema Migration Tracking Table
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
+    name VARCHAR(255) DEFAULT '',
     applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS question_metadata (
     topic_name VARCHAR(250) NOT NULL,
     question_index INTEGER NOT NULL,
     question_text TEXT NOT NULL,
-    question_fingerprint VARCHAR(255) NOT NULL,
+    question_fingerprint TEXT NOT NULL,
     concept VARCHAR(250) NOT NULL,
     difficulty VARCHAR(50) NOT NULL,
     question_type VARCHAR(50) DEFAULT 'mcq',
