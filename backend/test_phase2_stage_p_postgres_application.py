@@ -20,6 +20,7 @@ Test Coverage:
 import os
 import sys
 import uuid
+import time
 import pytest
 from pathlib import Path
 from urllib.parse import urlparse
@@ -39,22 +40,170 @@ if env_file.is_file():
 
 LIVE_PG_URL = os.getenv("TEST_DATABASE_URL")
 KNOWN_TEST_PROJECT_REF = "rnlbkdmjbcduoltefyup"  # Supabase project ref for learnai-dev-test
+PRODUCTION_TARGET_INDICATORS = ("prod", "production")
 MIGRATED_STUDENT_ID = "c8e3f165-e22b-45fe-a49b-ee6341c97e7e"  # Migrated student with 10 attempts & 3 mastery records
 
 
 def is_verified_test_target(url: str) -> bool:
-    """Ensure target URL points strictly to the intended disposable test database."""
-    if not url:
+    """
+    Ensure target URL points strictly to an approved disposable test database.
+    Production-target rejection takes absolute precedence over all acceptance conditions,
+    including CONFIRM_DISPOSABLE_TEST_TARGET=true.
+    """
+    if not url or not isinstance(url, str) or not url.strip():
         return False
-    parsed = urlparse(url)
-    username = parsed.username or ""
-    hostname = parsed.hostname or ""
-    return (
-        KNOWN_TEST_PROJECT_REF in username
-        or KNOWN_TEST_PROJECT_REF in hostname
-        or "dev-test" in hostname
-        or os.getenv("CONFIRM_DISPOSABLE_TEST_TARGET") == "true"
+
+    trimmed = url.strip()
+    try:
+        parsed = urlparse(trimmed)
+    except Exception:
+        return False
+
+    # Scheme must be a valid PostgreSQL scheme
+    if parsed.scheme not in ("postgresql", "postgres"):
+        return False
+
+    username = (parsed.username or "").lower()
+    hostname = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+
+    if not hostname:
+        return False
+
+    # 1. ABSOLUTE GUARD: Reject production targets unconditionally.
+    # Neither CONFIRM_DISPOSABLE_TEST_TARGET nor matching test substrings may override this.
+    # Note: parsed.password is deliberately NOT checked so passwords containing "prod" do not cause false rejections.
+    for indicator in PRODUCTION_TARGET_INDICATORS:
+        if indicator in username or indicator in hostname or indicator in path:
+            return False
+
+    # 2. Exact allowlist verification for known disposable Supabase project (learnai-dev-test)
+    # Check for Supabase pooler pattern: username postgres.<project_ref> on *.pooler.supabase.com
+    is_valid_pooler = (
+        hostname.endswith(".pooler.supabase.com")
+        and (username == f"postgres.{KNOWN_TEST_PROJECT_REF}" or username.startswith(f"postgres.{KNOWN_TEST_PROJECT_REF}."))
     )
+    # Check for Supabase direct connection pattern: host db.<project_ref>.supabase.co
+    is_valid_direct = (
+        hostname == f"db.{KNOWN_TEST_PROJECT_REF}.supabase.co"
+        or (hostname.endswith(".supabase.co") and KNOWN_TEST_PROJECT_REF in hostname)
+    )
+
+    if is_valid_pooler or is_valid_direct:
+        return True
+
+    # 3. Hostnames containing 'dev-test' alone are NOT treated as proof of disposable test database.
+    # Unknown targets (including custom local DBs) fail closed by default,
+    # and require explicit opt-in confirmation via CONFIRM_DISPOSABLE_TEST_TARGET=true.
+    # Note: If target is an unknown Supabase project, reject it even with confirmation to prevent pointing to unverified Supabase instances.
+    if hostname.endswith(".supabase.co") or hostname.endswith(".supabase.com"):
+        return False
+
+    return os.getenv("CONFIRM_DISPOSABLE_TEST_TARGET") == "true"
+
+
+class TestPostgresTestTargetSafeguards:
+    """Unit tests verifying test target safety guards (no DB connection required)."""
+
+    def test_exact_approved_disposable_test_target_accepted(self):
+        pooler_url = f"postgresql://postgres.{KNOWN_TEST_PROJECT_REF}:dummy_pass@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require"
+        assert is_verified_test_target(pooler_url) is True
+
+        direct_url = f"postgresql://postgres:dummy_pass@db.{KNOWN_TEST_PROJECT_REF}.supabase.co:5432/postgres?sslmode=require"
+        assert is_verified_test_target(direct_url) is True
+
+    def test_empty_url_rejected(self):
+        assert is_verified_test_target("") is False
+        assert is_verified_test_target("   ") is False
+        assert is_verified_test_target(None) is False
+
+    def test_malformed_url_rejected(self):
+        assert is_verified_test_target("not-a-valid-url") is False
+        assert is_verified_test_target(":///") is False
+        assert is_verified_test_target("http://aws-0-ap-southeast-1.pooler.supabase.com/postgres") is False
+        assert is_verified_test_target("mysql://user:pass@localhost:3306/db") is False
+
+    def test_production_project_rejected(self):
+        prod_url_hostname = "postgresql://postgres:dummy_pass@learnai-prod.supabase.co:5432/postgres"
+        assert is_verified_test_target(prod_url_hostname) is False
+
+        prod_url_production = "postgresql://postgres:dummy_pass@learnai-production.supabase.co:5432/postgres"
+        assert is_verified_test_target(prod_url_production) is False
+
+    def test_production_rejected_even_with_confirmation_override(self, monkeypatch):
+        monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+        prod_url = "postgresql://postgres:dummy_pass@learnai-prod.supabase.co:5432/postgres"
+        assert is_verified_test_target(prod_url) is False
+
+    def test_production_project_reference_in_username_rejected(self, monkeypatch):
+        monkeypatch.delenv("CONFIRM_DISPOSABLE_TEST_TARGET", raising=False)
+        prod_user_url = "postgresql://postgres.myproject-prod:dummy_pass@aws-0-pooler.supabase.com:5432/postgres"
+        assert is_verified_test_target(prod_user_url) is False
+
+        prod_user_full = "postgresql://postgres.production-db:dummy_pass@aws-0-pooler.supabase.com:5432/postgres"
+        assert is_verified_test_target(prod_user_full) is False
+
+    def test_production_project_reference_in_hostname_rejected(self):
+        prod_host_url = "postgresql://postgres:dummy_pass@db.production-ref.supabase.co:5432/postgres"
+        assert is_verified_test_target(prod_host_url) is False
+
+    def test_deceptive_combinations_rejected(self):
+        tricky_url1 = "postgresql://postgres.dev-test:dummy_pass@learnai-prod.supabase.co:5432/postgres"
+        assert is_verified_test_target(tricky_url1) is False
+
+        tricky_url2 = f"postgresql://postgres:dummy_pass@learnai-prod.supabase.co:5432/{KNOWN_TEST_PROJECT_REF}"
+        assert is_verified_test_target(tricky_url2) is False
+
+        unverified_dev_test = "postgresql://postgres:dummy_pass@aws-0-dev-test.supabase.co:5432/postgres"
+        assert is_verified_test_target(unverified_dev_test) is False
+
+    def test_unknown_target_rejected_by_default_and_requires_confirmation(self, monkeypatch):
+        unrelated_url = "postgresql://postgres:dummy_pass@my-custom-test-host.local:5432/postgres"
+
+        # Without confirmation: rejected
+        monkeypatch.delenv("CONFIRM_DISPOSABLE_TEST_TARGET", raising=False)
+        assert is_verified_test_target(unrelated_url) is False
+
+        # With confirmation: accepted if non-production custom host
+        monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+        assert is_verified_test_target(unrelated_url) is True
+
+        # Unknown Supabase projects fail closed even with confirmation
+        unknown_supabase = "postgresql://postgres:dummy_pass@db.unknown-ref.supabase.co:5432/postgres"
+        assert is_verified_test_target(unknown_supabase) is False
+
+    def test_password_containing_prod_does_not_cause_rejection_or_leak(self):
+        pwd_with_prod = "my_prod_secret_password_123"
+        url = f"postgresql://postgres.{KNOWN_TEST_PROJECT_REF}:{pwd_with_prod}@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require"
+        assert is_verified_test_target(url) is True
+
+    def test_stage_o_and_stage_p_validators_have_identical_behavior(self, monkeypatch):
+        from test_phase2_stage_o_postgres_integration import is_verified_test_target as o_validator
+        from test_phase2_stage_p_postgres_application import is_verified_test_target as p_validator
+
+        test_cases = [
+            f"postgresql://postgres.{KNOWN_TEST_PROJECT_REF}:pass@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
+            f"postgresql://postgres:pass@db.{KNOWN_TEST_PROJECT_REF}.supabase.co:5432/postgres",
+            "",
+            "   ",
+            None,
+            "invalid-url",
+            "postgresql://postgres:pass@learnai-prod.supabase.co:5432/postgres",
+            "postgresql://postgres.myproject-prod:pass@aws-0-pooler.supabase.com:5432/postgres",
+            "postgresql://postgres:pass@custom.local:5432/postgres",
+        ]
+        for tc in test_cases:
+            monkeypatch.delenv("CONFIRM_DISPOSABLE_TEST_TARGET", raising=False)
+            assert o_validator(tc) == p_validator(tc)
+            monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+            assert o_validator(tc) == p_validator(tc)
+
+    def test_rejection_occurs_before_database_connection(self):
+        start = time.perf_counter()
+        result = is_verified_test_target("postgresql://postgres:pass@nonexistent-fake-prod-host.invalid:5432/postgres")
+        duration = time.perf_counter() - start
+        assert result is False
+        assert duration < 0.05
 
 
 requires_live_pg = pytest.mark.skipif(
