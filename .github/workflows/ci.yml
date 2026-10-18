@@ -42,6 +42,7 @@ jobs:
 
     - name: Run Automated Test Suite
       env:
+        PYTHONPATH: backend
         DEBUG: "false"
         PROVIDER_ORDER: "groq,nvidia,gemini"
         OVERALL_DEADLINE_SECONDS: "25.0"
@@ -50,4 +51,4 @@ jobs:
         RATE_LIMIT_QUIZ_GEN_PER_MIN: "10"
         RATE_LIMIT_QUIZ_SUBMIT_PER_MIN: "30"
       run: |
-        python -m unittest discover backend -p "test_*.py" -v
+        pytest backend -v

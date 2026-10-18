@@ -138,6 +138,7 @@ class TestTokenIssuanceAndLifecycle:
         client, db_file = isolated_auth_client
         conn = get_connection(db_file)
         get_or_create_student("stud_already_exists", conn=conn)
+        conn.commit()
         conn.close()
 
         res = client.post("/api/quiz/generate", json={
@@ -147,6 +148,23 @@ class TestTokenIssuanceAndLifecycle:
         })
         assert res.status_code == 401
         assert "Authentication token required" in res.json()["detail"]
+
+    def test_generate_quiz_fails_fast_on_existing_student_before_ai_service(self, isolated_auth_client):
+        """Verify that an existing student without token is rejected with 401 before calling AI generation."""
+        client, db_file = isolated_auth_client
+        conn = get_connection(db_file)
+        get_or_create_student("stud_fail_fast_check", conn=conn)
+        conn.commit()
+        conn.close()
+
+        with patch("main.generate_quiz", side_effect=RuntimeError("AI service should never be called")):
+            res = client.post("/api/quiz/generate", json={
+                "course_code": "22AM301",
+                "topic": "McCulloch-Pitts Neuron",
+                "student_id": "stud_fail_fast_check"
+            })
+            assert res.status_code == 401
+            assert "Authentication token required" in res.json()["detail"]
 
 
 # ── 2. Protected Session Retrieval ───────────────────────────────────────────

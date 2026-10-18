@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import sqlite3
 import pytest
 from pathlib import Path
@@ -369,6 +370,7 @@ class TestDashboardCumulativeVsRecentAccuracy:
         )
 
         # Attempt 2: 10 / 10 (all 10 questions correct)
+        time.sleep(0.02)
         create_quiz_session(
             session_id="sess-att-2",
             student_id=student_id,

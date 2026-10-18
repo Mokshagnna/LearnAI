@@ -454,8 +454,8 @@ def get_or_create_student(student_id: Optional[str] = None, conn: Optional[sqlit
                 "UPDATE students SET last_active = ? WHERE id = ?",
                 (now, sid)
             )
+            conn.commit()
             if close_conn:
-                conn.commit()
                 conn.close()
             return sid
         else:
@@ -463,8 +463,8 @@ def get_or_create_student(student_id: Optional[str] = None, conn: Optional[sqlit
                 "INSERT INTO students (id, created_at, last_active) VALUES (?, ?, ?)",
                 (sid, now, now)
             )
+            conn.commit()
             if close_conn:
-                conn.commit()
                 conn.close()
             logger.info("Registered student: %s", sid)
             return sid
@@ -474,8 +474,8 @@ def get_or_create_student(student_id: Optional[str] = None, conn: Optional[sqlit
         "INSERT INTO students (id, created_at, last_active) VALUES (?, ?, ?)",
         (new_id, now, now)
     )
+    conn.commit()
     if close_conn:
-        conn.commit()
         conn.close()
     logger.info("Created new student: %s", new_id)
     return new_id

@@ -239,6 +239,30 @@ def create_quiz(req: QuizRequest, request: Request):
             headers={"Retry-After": str(retry_after)}
         )
 
+    # Authenticate / resolve student identity before invoking AI generation
+    auth_student_id = get_optional_authenticated_student_id(request)
+    if auth_student_id:
+        if req.student_id and req.student_id.strip() and req.student_id.strip() != auth_student_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: student_id does not match authenticated token."
+            )
+        student_id = auth_student_id
+    elif req.student_id and req.student_id.strip():
+        requested_id = req.student_id.strip()
+        conn = get_connection()
+        existing_row = conn.execute("SELECT id FROM students WHERE id = ?", (requested_id,)).fetchone()
+        conn.close()
+        if existing_row:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication token required to access existing student identity."
+            )
+        student_id = get_or_create_student(requested_id)
+    else:
+        student_id = str(uuid.uuid4())
+        student_id = get_or_create_student(student_id)
+
     metrics.record_quiz_request()
     course, topic = find_course_and_topic(req.course_code, req.topic, topic_id=req.topic_id)
     t_start = time.perf_counter()
@@ -246,7 +270,7 @@ def create_quiz(req: QuizRequest, request: Request):
     parent_label = topic.get("parent_topic") or topic.get("parent_section") or ""
     logger.info(
         f"[ENDPOINT START] {retake_tag} /api/quiz/generate "
-        f"course={course['code']} topic='{topic['name']}' (parent='{parent_label}') student={req.student_id}"
+        f"course={course['code']} topic='{topic['name']}' (parent='{parent_label}') student={student_id}"
     )
 
     # Build focused syllabus context for the selected topic/concept
@@ -280,7 +304,7 @@ def create_quiz(req: QuizRequest, request: Request):
             course_name=course["name"],
             topic_name=topic["name"],
             syllabus_context=focused_syllabus,
-            student_id=req.student_id,
+            student_id=student_id,
             concepts=concepts_list
         )
     except AIError as e:
@@ -325,29 +349,6 @@ def create_quiz(req: QuizRequest, request: Request):
 
     # Persist the active quiz session to database (sole authoritative store)
     # Never return a usable quiz to the user if the session cannot be persisted
-    auth_student_id = get_optional_authenticated_student_id(request)
-    if auth_student_id:
-        if req.student_id and req.student_id.strip() and req.student_id.strip() != auth_student_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Forbidden: student_id does not match authenticated token."
-            )
-        student_id = auth_student_id
-    elif req.student_id and req.student_id.strip():
-        requested_id = req.student_id.strip()
-        conn = get_connection()
-        existing_row = conn.execute("SELECT id FROM students WHERE id = ?", (requested_id,)).fetchone()
-        conn.close()
-        if existing_row:
-            raise HTTPException(
-                status_code=401,
-                detail="Authentication token required to access existing student identity."
-            )
-        student_id = get_or_create_student(requested_id)
-    else:
-        student_id = str(uuid.uuid4())
-        student_id = get_or_create_student(student_id)
-
     auth_token = sign_student_identity(student_id)
 
     try:
