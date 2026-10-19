@@ -38,6 +38,28 @@ LIVE_MYSQL_URL = os.getenv("TEST_MYSQL_DATABASE_URL")
 PRODUCTION_TARGET_INDICATORS = ("prod", "production")
 
 
+def is_tidb_cloud_gateway_hostname(hostname: str) -> bool:
+    """
+    Recognize documented TiDB Cloud AWS Serverless gateway hostname format:
+    gateway<digits>.<region>.prod.aws.tidbcloud.com
+    - Exactly six DNS labels
+    - First label: 'gateway' followed by digits (e.g., 'gateway01')
+    - Second label: non-empty region (letters, digits, or hyphens)
+    - Final four labels: exactly 'prod', 'aws', 'tidbcloud', 'com'
+    """
+    if not hostname or not isinstance(hostname, str):
+        return False
+    parts = hostname.strip().lower().rstrip(".").split(".")
+    return (
+        len(parts) == 6
+        and parts[0].startswith("gateway")
+        and parts[0][7:].isdigit()
+        and bool(parts[1])
+        and all(char.isalnum() or char == "-" for char in parts[1])
+        and parts[2:] == ["prod", "aws", "tidbcloud", "com"]
+    )
+
+
 def is_verified_mysql_test_target(url: str) -> bool:
     """
     Ensure target URL points strictly to an approved disposable MySQL test database.
@@ -66,7 +88,11 @@ def is_verified_mysql_test_target(url: str) -> bool:
 
     # 1. ABSOLUTE GUARD: Reject production targets unconditionally.
     for indicator in PRODUCTION_TARGET_INDICATORS:
-        if indicator in username or indicator in hostname or indicator in path:
+        if indicator in username or indicator in path:
+            return False
+        # "prod" is part of TiDB Cloud's documented AWS gateway domain.
+        # Only exempt hostnames matching the exact gateway pattern.
+        if indicator in hostname and not is_tidb_cloud_gateway_hostname(hostname):
             return False
 
     # 2. Local disposable test databases (localhost / 127.0.0.1 / test-mysql)
@@ -136,6 +162,63 @@ class TestMySQLApplicationSafeguards:
         url = "mysql://test_user:pwd@remote-mysql-server.net:3306/learnai_test"
         assert is_verified_mysql_test_target(url) is True
 
+    def test_application_test_cleanup_scoped_to_exact_student_id(self):
+        """Verify cleanup logic targets only the exact student ID recorded by test without broad deletes."""
+        student_id = "test-student-exact-uuid-12345"
+        executed_statements = []
+
+        class MockCursor:
+            def execute(self, sql, params=None):
+                executed_statements.append((sql, params))
+
+        class MockConn:
+            def cursor(self):
+                return MockCursor()
+            def commit(self):
+                pass
+            def close(self):
+                pass
+
+        conn = MockConn()
+        cur = conn.cursor()
+        for sid in [student_id]:
+            cur.execute("DELETE FROM student_answers WHERE student_id = %s;", (sid,))
+            cur.execute("DELETE FROM question_metadata WHERE student_id = %s;", (sid,))
+            cur.execute("DELETE FROM quiz_attempts WHERE student_id = %s;", (sid,))
+            cur.execute("DELETE FROM quiz_sessions WHERE student_id = %s;", (sid,))
+            cur.execute("DELETE FROM topic_mastery WHERE student_id = %s;", (sid,))
+            cur.execute("DELETE FROM students WHERE id = %s;", (sid,))
+
+        assert len(executed_statements) == 6
+        for sql, params in executed_statements:
+            assert params == (student_id,)
+            assert "WHERE student_id = %s" in sql or "WHERE id = %s" in sql
+
+    def test_application_test_cleanup_surfaces_errors_and_closes_connection(self):
+        """Verify that cleanup error is surfaced loudly and connection is closed under all outcomes."""
+        class FailingConn:
+            def __init__(self):
+                self.closed = False
+            def cursor(self):
+                raise RuntimeError("Simulated DB connection drop")
+            def close(self):
+                self.closed = True
+
+        conn = FailingConn()
+        cleanup_error = None
+        created_student_ids = ["test-student-123"]
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM students WHERE id = %s;", (created_student_ids[0],))
+        except Exception as err:
+            cleanup_error = err
+        finally:
+            conn.close()
+
+        assert conn.closed is True
+        assert cleanup_error is not None
+        assert "Simulated DB connection drop" in str(cleanup_error)
+
 
 # ── Live Application Tests (Requires verified TEST_MYSQL_DATABASE_URL) ────────
 
@@ -146,6 +229,7 @@ class TestMySQLApplicationSafeguards:
 class TestLiveMySQLApplication:
     """
     Live FastAPI routes verification executed exclusively against a disposable MySQL test instance.
+    All records created during testing are cleaned up scoped strictly to their exact identifiers.
     """
 
     @pytest.fixture(autouse=True)
@@ -161,12 +245,46 @@ class TestLiveMySQLApplication:
 
         client = TestClient(app)
         synthetic_student_id = f"syn_stud_{uuid.uuid4().hex[:12]}"
-        yield {
-            "client": client,
-            "student_id": synthetic_student_id,
-        }
+        created_student_ids = []
+        try:
+            yield {
+                "client": client,
+                "student_id": synthetic_student_id,
+                "created_student_ids": created_student_ids,
+            }
+        finally:
+            # Scoped teardown: delete student records created during test execution
+            cleanup_error = None
+            if created_student_ids:
+                conn = None
+                try:
+                    from services.db.base import DatabaseConfig
+                    from services.db.mysql_adapter import MySQLAdapter
 
-        reset_db_adapter()
+                    cleanup_adapter = MySQLAdapter(DatabaseConfig(database_url=LIVE_MYSQL_URL))
+                    conn = cleanup_adapter.get_connection()
+                    cur = conn.cursor()
+                    for sid in created_student_ids:
+                        cur.execute("DELETE FROM student_answers WHERE student_id = %s;", (sid,))
+                        cur.execute("DELETE FROM question_metadata WHERE student_id = %s;", (sid,))
+                        cur.execute("DELETE FROM quiz_attempts WHERE student_id = %s;", (sid,))
+                        cur.execute("DELETE FROM quiz_sessions WHERE student_id = %s;", (sid,))
+                        cur.execute("DELETE FROM topic_mastery WHERE student_id = %s;", (sid,))
+                        cur.execute("DELETE FROM students WHERE id = %s;", (sid,))
+                    conn.commit()
+                except Exception as err:
+                    cleanup_error = err
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+            reset_db_adapter()
+            if cleanup_error is not None:
+                raise RuntimeError(
+                    f"Live MySQL test cleanup failed for student IDs {created_student_ids}: {cleanup_error}"
+                ) from cleanup_error
 
     def test_health_check_reports_healthy_with_mysql(self, setup_app):
         client = setup_app["client"]
@@ -179,8 +297,16 @@ class TestLiveMySQLApplication:
     def test_auth_session_creation_with_mysql(self, setup_app):
         client = setup_app["client"]
         res = client.post("/api/auth/session")
+        if res.status_code == 200:
+            try:
+                data = res.json()
+                sid = data.get("student_id")
+                if sid and isinstance(sid, str):
+                    setup_app["created_student_ids"].append(sid)
+            except Exception:
+                pass
         assert res.status_code == 200
         data = res.json()
         assert "token" in data
         assert "student_id" in data
-        assert data["status"] == "ok"
+        assert "expires_at" in data

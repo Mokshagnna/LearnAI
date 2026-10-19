@@ -89,6 +89,28 @@ def mask_connection_url(url: str) -> str:
 PRODUCTION_TARGET_INDICATORS = ("prod", "production")
 
 
+def is_tidb_cloud_gateway_hostname(hostname: str) -> bool:
+    """
+    Recognize documented TiDB Cloud AWS Serverless gateway hostname format:
+    gateway<digits>.<region>.prod.aws.tidbcloud.com
+    - Exactly six DNS labels
+    - First label: 'gateway' followed by digits (e.g., 'gateway01')
+    - Second label: non-empty region (letters, digits, or hyphens)
+    - Final four labels: exactly 'prod', 'aws', 'tidbcloud', 'com'
+    """
+    if not hostname or not isinstance(hostname, str):
+        return False
+    parts = hostname.strip().lower().rstrip(".").split(".")
+    return (
+        len(parts) == 6
+        and parts[0].startswith("gateway")
+        and parts[0][7:].isdigit()
+        and bool(parts[1])
+        and all(char.isalnum() or char == "-" for char in parts[1])
+        and parts[2:] == ["prod", "aws", "tidbcloud", "com"]
+    )
+
+
 def is_production_target(url: str) -> bool:
     """Check if target URL looks like a production database."""
     if not url or not isinstance(url, str) or not url.strip():
@@ -101,7 +123,11 @@ def is_production_target(url: str) -> bool:
     hostname = (parsed.hostname or "").lower()
     path = (parsed.path or "").lower()
     for ind in PRODUCTION_TARGET_INDICATORS:
-        if ind in username or ind in hostname or ind in path:
+        if ind in username or ind in path:
+            return True
+        # "prod" is part of TiDB Cloud's documented AWS gateway domain.
+        # Only exempt hostnames matching the exact gateway pattern.
+        if ind in hostname and not is_tidb_cloud_gateway_hostname(hostname):
             return True
     return False
 
@@ -109,7 +135,8 @@ def is_production_target(url: str) -> bool:
 def is_verified_mysql_test_target(url: str) -> bool:
     """
     Ensure target URL points strictly to an approved disposable MySQL test database.
-    Production-target rejection takes absolute precedence over all acceptance conditions.
+    Production-target rejection takes absolute precedence over all acceptance conditions,
+    including CONFIRM_DISPOSABLE_TEST_TARGET=true.
     """
     if not url or not isinstance(url, str) or not url.strip():
         return False
@@ -131,7 +158,11 @@ def is_verified_mysql_test_target(url: str) -> bool:
         return False
 
     for indicator in PRODUCTION_TARGET_INDICATORS:
-        if indicator in username or indicator in hostname or indicator in path:
+        if indicator in username or indicator in path:
+            return False
+        # "prod" is part of TiDB Cloud's documented AWS gateway domain.
+        # Only exempt hostnames matching the exact gateway pattern.
+        if indicator in hostname and not is_tidb_cloud_gateway_hostname(hostname):
             return False
 
     is_local = hostname in ("localhost", "127.0.0.1", "::1", "test-mysql")

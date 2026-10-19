@@ -63,6 +63,28 @@ LIVE_MYSQL_URL = os.getenv("TEST_MYSQL_DATABASE_URL")
 PRODUCTION_TARGET_INDICATORS = ("prod", "production")
 
 
+def is_tidb_cloud_gateway_hostname(hostname: str) -> bool:
+    """
+    Recognize documented TiDB Cloud AWS Serverless gateway hostname format:
+    gateway<digits>.<region>.prod.aws.tidbcloud.com
+    - Exactly six DNS labels
+    - First label: 'gateway' followed by digits (e.g., 'gateway01')
+    - Second label: non-empty region (letters, digits, or hyphens)
+    - Final four labels: exactly 'prod', 'aws', 'tidbcloud', 'com'
+    """
+    if not hostname or not isinstance(hostname, str):
+        return False
+    parts = hostname.strip().lower().rstrip(".").split(".")
+    return (
+        len(parts) == 6
+        and parts[0].startswith("gateway")
+        and parts[0][7:].isdigit()
+        and bool(parts[1])
+        and all(char.isalnum() or char == "-" for char in parts[1])
+        and parts[2:] == ["prod", "aws", "tidbcloud", "com"]
+    )
+
+
 def is_verified_mysql_test_target(url: str) -> bool:
     """
     Ensure target URL points strictly to an approved disposable MySQL test database.
@@ -93,7 +115,11 @@ def is_verified_mysql_test_target(url: str) -> bool:
     # Neither CONFIRM_DISPOSABLE_TEST_TARGET nor matching test substrings may override this.
     # Note: parsed.password is deliberately NOT checked so passwords containing "prod" do not cause false rejections.
     for indicator in PRODUCTION_TARGET_INDICATORS:
-        if indicator in username or indicator in hostname or indicator in path:
+        if indicator in username or indicator in path:
+            return False
+        # "prod" is part of TiDB Cloud's documented AWS gateway domain.
+        # Only exempt hostnames matching the exact gateway pattern.
+        if indicator in hostname and not is_tidb_cloud_gateway_hostname(hostname):
             return False
 
     # 2. Local disposable test databases (localhost / 127.0.0.1 / test-mysql)
@@ -162,6 +188,97 @@ class TestMySQLTestTargetSafeguards:
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
         url = "mysql://test_user:pwd@remote-mysql-server.net:3306/learnai_test"
         assert is_verified_mysql_test_target(url) is True
+
+    # ── TiDB Cloud Gateway Specific Regression Tests ─────────────────────────
+
+    def test_tidb_cloud_gateway_accepted_with_confirmation_and_test_db(self, monkeypatch):
+        """Verify TiDB Cloud AWS Serverless gateway hostname is accepted when db is test and confirmation enabled."""
+        monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+        url = "mysql://app_user:strong_pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test"
+        assert is_verified_mysql_test_target(url) is True
+
+    def test_tidb_cloud_gateway_rejected_if_username_contains_prod(self, monkeypatch):
+        """Verify TiDB gateway is still rejected if the username contains prod/production."""
+        monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+        url1 = "mysql://prod_admin:strong_pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test"
+        assert is_verified_mysql_test_target(url1) is False
+        url2 = "mysql://app_production_user:strong_pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test"
+        assert is_verified_mysql_test_target(url2) is False
+
+    def test_tidb_cloud_gateway_rejected_if_database_name_contains_prod(self, monkeypatch):
+        """Verify TiDB gateway is still rejected if the database name contains prod/production."""
+        monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+        url1 = "mysql://app_user:strong_pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_prod"
+        assert is_verified_mysql_test_target(url1) is False
+        url2 = "mysql://app_user:strong_pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/prod_test"
+        assert is_verified_mysql_test_target(url2) is False
+
+    def test_unrelated_hostname_with_prod_remains_rejected(self, monkeypatch):
+        """Verify unrelated hostnames containing prod or production remain unconditionally rejected."""
+        monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+        unrelated_urls = [
+            "mysql://app_user:pwd@mysql-production.example.com:3306/test",
+            "mysql://app_user:pwd@prod-mysql.cloud.net:3306/test",
+            "mysql://app_user:pwd@production-cluster.internal:3306/test",
+        ]
+        for u in unrelated_urls:
+            assert is_verified_mysql_test_target(u) is False
+
+    def test_migration_script_production_guard_allows_tidb_gateway(self):
+        """Verify migration script's is_production_target does not classify TiDB gateway as production."""
+        from scripts.migrate_sqlite_to_mysql import is_production_target
+        safe_tidb_url = "mysql://app_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test"
+        assert is_production_target(safe_tidb_url) is False
+
+        # Confirm it still flags production usernames or production databases on TiDB
+        assert is_production_target("mysql://prod_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test") is True
+        assert is_production_target("mysql://app_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_prod") is True
+
+    def test_migration_script_test_target_validator_accepts_tidb_with_confirmation(self, monkeypatch):
+        """Verify migration script's is_verified_mysql_test_target accepts TiDB gateway with confirmation."""
+        from scripts.migrate_sqlite_to_mysql import is_verified_mysql_test_target as mig_is_verified
+        monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+        tidb_url = "mysql://app_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test"
+        assert mig_is_verified(tidb_url) is True
+
+    def test_tidb_cloud_gateway_rejected_without_confirmation(self, monkeypatch):
+        """Verify missing confirmation still rejects the TiDB gateway remote target."""
+        monkeypatch.delenv("CONFIRM_DISPOSABLE_TEST_TARGET", raising=False)
+        tidb_url = "mysql://app_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test"
+        assert is_verified_mysql_test_target(tidb_url) is False
+        from scripts.migrate_sqlite_to_mysql import is_verified_mysql_test_target as mig_is_verified
+        assert mig_is_verified(tidb_url) is False
+
+    def test_malformed_tidb_gateways_not_exempted(self, monkeypatch):
+        """Verify malformed TiDB gateway hostnames do not receive the exception and remain rejected."""
+        monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
+        malformed_gateways = [
+            # Wrong suffixes
+            "mysql://app:pwd@gateway01.us-west-2.prod.aws.tidbcloud.org:4000/test",
+            "mysql://app:pwd@gateway01.us-west-2.prod.azure.tidbcloud.com:4000/test",
+            # Extra labels
+            "mysql://app:pwd@attacker.gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test",
+            "mysql://app:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com.evil.com:4000/test",
+            # Missing region
+            "mysql://app:pwd@gateway01..prod.aws.tidbcloud.com:4000/test",
+            # Non-numeric gateway prefix
+            "mysql://app:pwd@gateway.us-west-2.prod.aws.tidbcloud.com:4000/test",
+            "mysql://app:pwd@gatewayabc.us-west-2.prod.aws.tidbcloud.com:4000/test",
+            # Region with invalid characters
+            "mysql://app:pwd@gateway01.us_west_2.prod.aws.tidbcloud.com:4000/test",
+        ]
+        for url in malformed_gateways:
+            assert is_verified_mysql_test_target(url) is False
+            from scripts.migrate_sqlite_to_mysql import is_production_target
+            assert is_production_target(url) is True
+
+    def test_is_tidb_cloud_gateway_hostname_helper_normalization(self):
+        """Verify is_tidb_cloud_gateway_hostname normalizes case and optional trailing dot."""
+        assert is_tidb_cloud_gateway_hostname("gateway01.us-west-2.prod.aws.tidbcloud.com") is True
+        assert is_tidb_cloud_gateway_hostname("Gateway01.US-West-2.Prod.AWS.TiDBCloud.com.") is True
+        assert is_tidb_cloud_gateway_hostname("gateway2.eu-central-1.prod.aws.tidbcloud.com") is True
+        assert is_tidb_cloud_gateway_hostname("") is False
+        assert is_tidb_cloud_gateway_hostname(None) is False
 
     def test_migration_script_url_parsing_and_adapter_method(self):
         """Verify that MySQLAdapter.parse_connection_params correctly parses target URL used by migrate_sqlite_to_mysql."""
@@ -386,6 +503,7 @@ class TestLiveMySQLIntegration:
         }
 
         # Scoped teardown: delete synthetic records
+        cleanup_error = None
         try:
             cur = conn.cursor()
             cur.execute("DELETE FROM student_answers WHERE student_id = %s;", (synthetic_student_id,))
@@ -395,10 +513,15 @@ class TestLiveMySQLIntegration:
             cur.execute("DELETE FROM topic_mastery WHERE student_id = %s;", (synthetic_student_id,))
             cur.execute("DELETE FROM students WHERE id = %s;", (synthetic_student_id,))
             conn.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            cleanup_error = e
         finally:
             conn.close()
+
+        if cleanup_error is not None:
+            raise RuntimeError(
+                f"Live MySQL integration test cleanup failed for student ID {synthetic_student_id}: {cleanup_error}"
+            ) from cleanup_error
 
     def test_live_mysql_connectivity_and_version(self, setup_and_teardown):
         conn = setup_and_teardown["conn"]
