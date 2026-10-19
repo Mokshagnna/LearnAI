@@ -86,6 +86,141 @@ def mask_connection_url(url: str) -> str:
         return "mysql://***:***@***"
 
 
+PRODUCTION_TARGET_INDICATORS = ("prod", "production")
+
+
+def is_production_target(url: str) -> bool:
+    """Check if target URL looks like a production database."""
+    if not url or not isinstance(url, str) or not url.strip():
+        return False
+    try:
+        parsed = urlparse(url.strip())
+    except Exception:
+        return False
+    username = (parsed.username or "").lower()
+    hostname = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    for ind in PRODUCTION_TARGET_INDICATORS:
+        if ind in username or ind in hostname or ind in path:
+            return True
+    return False
+
+
+def is_verified_mysql_test_target(url: str) -> bool:
+    """
+    Ensure target URL points strictly to an approved disposable MySQL test database.
+    Production-target rejection takes absolute precedence over all acceptance conditions.
+    """
+    if not url or not isinstance(url, str) or not url.strip():
+        return False
+
+    trimmed = url.strip()
+    try:
+        parsed = urlparse(trimmed)
+    except Exception:
+        return False
+
+    if parsed.scheme not in ("mysql", "mysql+pymysql"):
+        return False
+
+    username = (parsed.username or "").lower()
+    hostname = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+
+    if not hostname:
+        return False
+
+    for indicator in PRODUCTION_TARGET_INDICATORS:
+        if indicator in username or indicator in hostname or indicator in path:
+            return False
+
+    is_local = hostname in ("localhost", "127.0.0.1", "::1", "test-mysql")
+    db_name = path.lstrip("/").lower()
+
+    if is_local and ("test" in db_name or "dev" in db_name or os.getenv("CONFIRM_DISPOSABLE_TEST_TARGET") == "true"):
+        return True
+
+    if ("test" in db_name or "dev" in db_name) and os.getenv("CONFIRM_DISPOSABLE_TEST_TARGET") == "true":
+        return True
+
+    return False
+
+
+def validate_migration_arguments(
+    target_url: Optional[str] = None,
+    clean: bool = False,
+    confirm_destructive: bool = False,
+) -> str:
+    """
+    Validate target URL and safety flags before any connection or migration.
+
+    Rules:
+    - If clean is True (destructive operation):
+      - An explicit target_url must be provided (cannot be None or empty string).
+        Implicit fallback to DATABASE_URL or TEST_MYSQL_DATABASE_URL is strictly prohibited.
+      - confirm_destructive must be True.
+      - target_url must not contain production target indicators.
+    - If clean is False (non-destructive):
+      - If target_url is provided, validate it.
+      - If target_url is None, fall back to TEST_MYSQL_DATABASE_URL or DATABASE_URL.
+        If TEST_MYSQL_DATABASE_URL is used, it must not be a production target.
+    - In all cases, URL must use a valid MySQL scheme (mysql:// or mysql+pymysql://).
+
+    Raises:
+        ValueError: If validation fails.
+    Returns:
+        The validated target_url string.
+    """
+    if clean:
+        if not target_url or not str(target_url).strip():
+            raise ValueError(
+                "Destructive operation (--clean) requires an explicit --target-url. "
+                "Implicit fallback to environment variables (DATABASE_URL / TEST_MYSQL_DATABASE_URL) is prohibited."
+            )
+        resolved_url = str(target_url).strip()
+        if not confirm_destructive:
+            raise ValueError(
+                "Destructive operation (--clean) requires explicit confirmation flag --confirm-destructive."
+            )
+        if is_production_target(resolved_url):
+            raise ValueError(
+                f"Destructive operation (--clean) cannot be executed against a production target: "
+                f"{mask_connection_url(resolved_url)}"
+            )
+    else:
+        if target_url and str(target_url).strip():
+            resolved_url = str(target_url).strip()
+        else:
+            test_url = os.getenv("TEST_MYSQL_DATABASE_URL")
+            if test_url and test_url.strip():
+                resolved_url = test_url.strip()
+                if is_production_target(resolved_url):
+                    raise ValueError(
+                        f"TEST_MYSQL_DATABASE_URL contains production target indicators: "
+                        f"{mask_connection_url(resolved_url)}"
+                    )
+            else:
+                db_url = os.getenv("DATABASE_URL")
+                if db_url and db_url.strip():
+                    resolved_url = db_url.strip()
+                else:
+                    raise ValueError(
+                        "No target MySQL URL provided. Pass --target-url or set TEST_MYSQL_DATABASE_URL / DATABASE_URL."
+                    )
+
+    try:
+        parsed = urlparse(resolved_url)
+    except Exception as e:
+        raise ValueError(f"Invalid target URL format: {e}")
+
+    if parsed.scheme not in ("mysql", "mysql+pymysql"):
+        raise ValueError(
+            f"Unsupported target URL scheme '{parsed.scheme}'. Target must be a MySQL URL (mysql:// or mysql+pymysql://)."
+        )
+
+    return resolved_url
+
+
 def verify_sqlite_source(sqlite_path: Path) -> Dict[str, Any]:
     """Verify SQLite source database integrity in read-only mode and count rows across all tables."""
     if not sqlite_path.is_file():
@@ -174,11 +309,18 @@ def migrate_data(
     """Execute or rehearse data migration from SQLite to MySQL."""
     import pymysql
 
+    masked_url = mask_connection_url(target_url)
+
+    # 0. Defense-in-depth safety check: reject destructive execution against production targets
+    if clean_target and is_production_target(target_url):
+        raise ValueError(
+            f"Refusing to execute destructive migration (--clean) against production target: {masked_url}"
+        )
+
     # 1. Source verification (strictly read-only)
     source_counts = verify_sqlite_source(sqlite_path)
 
     # 2. Target connection
-    masked_url = mask_connection_url(target_url)
     logger.info("Connecting to target MySQL at %s...", masked_url)
 
     connect_kwargs = MySQLAdapter.parse_connection_params(target_url)
@@ -370,8 +512,13 @@ def main():
     parser.add_argument(
         "--target-url",
         type=str,
-        default=os.getenv("TEST_MYSQL_DATABASE_URL") or os.getenv("DATABASE_URL"),
-        help="Target MySQL connection string (defaults to TEST_MYSQL_DATABASE_URL or DATABASE_URL)."
+        default=None,
+        help="Target MySQL connection string. Required if --clean is specified. Defaults to TEST_MYSQL_DATABASE_URL or DATABASE_URL for non-destructive operations."
+    )
+    parser.add_argument(
+        "--confirm-destructive",
+        action="store_true",
+        help="Confirmation flag required when using --clean to truncate target tables."
     )
     parser.add_argument(
         "--batch-size",
@@ -387,7 +534,7 @@ def main():
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Truncate target tables before migration."
+        help="Truncate target tables before migration (requires explicit --target-url and --confirm-destructive)."
     )
     parser.add_argument(
         "--skip-existing",
@@ -398,10 +545,15 @@ def main():
     args = parser.parse_args()
 
     sqlite_path = Path(args.sqlite_path).resolve()
-    target_url = args.target_url
 
-    if not target_url:
-        logger.error("No target MySQL URL provided. Set TEST_MYSQL_DATABASE_URL or pass --target-url.")
+    try:
+        target_url = validate_migration_arguments(
+            target_url=args.target_url,
+            clean=args.clean,
+            confirm_destructive=args.confirm_destructive,
+        )
+    except ValueError as val_err:
+        logger.error("Target validation error: %s", val_err)
         sys.exit(1)
 
     try:

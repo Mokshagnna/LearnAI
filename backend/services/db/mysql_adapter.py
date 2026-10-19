@@ -6,6 +6,7 @@ Uses PyMySQL with DBUtils.PooledDB connection pooling, fail-fast error handling,
 parameter placeholder translation, and CompatibleRow mapping.
 """
 
+import ssl
 import logging
 import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -189,18 +190,37 @@ class MySQLAdapter:
         }
 
         # SSL Configuration
-        ssl_mode = qs.get("ssl_mode", qs.get("ssl-mode", [""]))[0].upper()
-        ssl_enabled = qs.get("ssl", [""])[0].lower() in ("true", "1", "required")
+        # Supported options:
+        # - ssl_mode=VERIFY_IDENTITY: Full TLS verification (CA cert + hostname) via ssl.create_default_context()
+        # - ssl_mode=VERIFY_CA: Validates certificate chain against CA bundle, disables hostname check
+        # - ssl_mode=REQUIRED or ssl=true: Encrypted wire transport (PyMySQL default: verify_mode=CERT_NONE)
+        # - ssl_mode=DISABLED or ssl=false: Plaintext connection
+        # - ssl_ca=/path/to/ca.pem: Custom CA bundle file
+        # - ssl_cert=/path/to/cert.pem, ssl_key=/path/to/key.pem: Client TLS authentication
+        # - ssl_verify_cert=true: Enforces CERT_REQUIRED via ssl.SSLContext
+        ssl_mode = qs.get("ssl_mode", qs.get("ssl-mode", [""]))[0].upper().replace("-", "_")
+        ssl_val = qs.get("ssl", [""])[0].lower()
+        ssl_enabled = ssl_val in ("true", "1", "required") or ssl_mode in ("REQUIRED", "VERIFY_CA", "VERIFY_IDENTITY")
+        ssl_disabled = ssl_val in ("false", "0", "disabled") or ssl_mode == "DISABLED"
+        ssl_verify = qs.get("ssl_verify_cert", [""])[0].lower() in ("true", "1")
 
-        if ssl_mode in ("REQUIRED", "VERIFY_CA", "VERIFY_IDENTITY") or ssl_enabled:
-            ssl_kwargs: Dict[str, Any] = {}
-            if "ssl_ca" in qs:
-                ssl_kwargs["ca"] = qs["ssl_ca"][0]
-            if "ssl_cert" in qs:
-                ssl_kwargs["cert"] = qs["ssl_cert"][0]
-            if "ssl_key" in qs:
-                ssl_kwargs["key"] = qs["ssl_key"][0]
-            params["ssl"] = ssl_kwargs if ssl_kwargs else {"check_hostname": False}
+        ca_file = qs.get("ssl_ca", [None])[0]
+        cert_file = qs.get("ssl_cert", [None])[0]
+        key_file = qs.get("ssl_key", [None])[0]
+
+        if not ssl_disabled and (ssl_enabled or ca_file or ssl_verify or ssl_mode in ("VERIFY_IDENTITY", "VERIFY_CA")):
+            if ssl_mode in ("VERIFY_IDENTITY", "VERIFY_CA") or ssl_verify or ca_file:
+                ctx = ssl.create_default_context(cafile=ca_file)
+                if ssl_mode == "VERIFY_CA":
+                    ctx.check_hostname = False
+                else:
+                    ctx.check_hostname = True
+                ctx.verify_mode = ssl.CERT_REQUIRED
+                if cert_file and key_file:
+                    ctx.load_cert_chain(certfile=cert_file, keyfile=key_file)
+                params["ssl"] = ctx
+            else:
+                params["ssl"] = {"check_hostname": False}
 
         return params
 
