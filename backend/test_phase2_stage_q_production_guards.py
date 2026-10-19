@@ -415,3 +415,56 @@ class TestExplicitSqlitePathRejectedInProduction:
             init_db(fake_sqlite_path)
 
         assert "Explicit SQLite path is prohibited in production mode" in str(exc_info.value)
+
+
+# ── 10. Production MySQL Configuration & URI Safeguards ───────────────────────
+
+class TestProductionMySqlConfiguration:
+
+    def test_mysql_scheme_accepted_in_production(self, monkeypatch):
+        """mysql:// URI scheme must be accepted in production mode."""
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
+        monkeypatch.setenv("DATABASE_URL", "mysql://learnai_user:secret_pass@mysql.host.internal:3306/learnai_prod")
+
+        # Must not raise
+        validate_production_environment()
+
+    def test_mysql_pymysql_scheme_accepted_in_production(self, monkeypatch):
+        """mysql+pymysql:// URI scheme must be accepted in production mode."""
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
+        monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://learnai_user:secret_pass@mysql.host.internal:3306/learnai_prod")
+
+        # Must not raise
+        validate_production_environment()
+
+    def test_unsupported_mongodb_scheme_rejected_in_production(self, monkeypatch):
+        """Unsupported database URI scheme (e.g. mongodb://) must be rejected in production."""
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
+        monkeypatch.setenv("DATABASE_URL", "mongodb://localhost:27017/learnai")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            validate_production_environment()
+
+        err_msg = str(exc_info.value)
+        assert "must be a PostgreSQL connection URI or MySQL connection URI" in err_msg
+
+    def test_database_config_detects_mysql(self):
+        """DatabaseConfig must properly identify MySQL dialect and flags."""
+        from services.db.base import DatabaseConfig
+        cfg = DatabaseConfig(database_url="mysql://app_user:pwd@db.host.io:3306/app_db")
+        assert cfg.dialect == "mysql"
+        assert cfg.is_mysql is True
+        assert cfg.is_postgres is False
+        assert cfg.is_sqlite is False
+
+    def test_database_config_detects_mysql_pymysql_driver_prefix(self):
+        """DatabaseConfig must properly identify mysql+pymysql dialect and flags."""
+        from services.db.base import DatabaseConfig
+        cfg = DatabaseConfig(database_url="mysql+pymysql://app_user:pwd@db.host.io:3306/app_db")
+        assert cfg.dialect == "mysql"
+        assert cfg.is_mysql is True
+        assert cfg.is_postgres is False
+        assert cfg.is_sqlite is False

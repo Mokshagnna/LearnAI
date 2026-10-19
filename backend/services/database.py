@@ -24,6 +24,11 @@ from services.db.postgres_adapter import (
     PostgresConnectionWrapper,
     PostgresCursorWrapper,
 )
+from services.db.mysql_adapter import (
+    MySQLAdapter,
+    MySQLConnectionWrapper,
+    MySQLCursorWrapper,
+)
 from services.db.migrations import apply_migrations
 
 logger = logging.getLogger("learnai.database")
@@ -31,6 +36,7 @@ logger = logging.getLogger("learnai.database")
 _db_config = DatabaseConfig()
 _sqlite_adapter = SQLiteAdapter(_db_config)
 _postgres_adapter: Optional[PostgresAdapter] = None
+_mysql_adapter: Optional[MySQLAdapter] = None
 
 
 def get_db_config() -> DatabaseConfig:
@@ -42,8 +48,25 @@ def is_postgres_active() -> bool:
     return _db_config.is_postgres
 
 
+def is_mysql_active() -> bool:
+    return _db_config.is_mysql
+
+
 def is_pg_conn(conn: Any) -> bool:
-    return isinstance(conn, PostgresConnectionWrapper) or hasattr(conn, "_pool")
+    if isinstance(conn, PostgresConnectionWrapper):
+        return True
+    if hasattr(conn, "_is_mysql") or getattr(conn, "dialect", None) == "mysql" or isinstance(conn, MySQLConnectionWrapper):
+        return False
+    return hasattr(conn, "_pool")
+
+
+def is_mysql_conn(conn: Any) -> bool:
+    return (
+        isinstance(conn, MySQLConnectionWrapper)
+        or getattr(conn, "_is_mysql", False)
+        or getattr(conn, "dialect", None) == "mysql"
+        or type(conn).__name__ == "MySQLConnectionWrapper"
+    )
 
 
 def get_utc_now() -> datetime:
@@ -115,29 +138,36 @@ def normalise_text(text: str) -> str:
 
 
 def reset_db_adapter() -> None:
-    """Reset cached PostgreSQL adapter and pool for test isolation."""
-    global _postgres_adapter
+    """Reset cached PostgreSQL and MySQL adapters and pools for test isolation."""
+    global _postgres_adapter, _mysql_adapter
     if _postgres_adapter is not None:
         try:
             PostgresAdapter.close_pool()
         except Exception:
             pass
         _postgres_adapter = None
+    if _mysql_adapter is not None:
+        try:
+            MySQLAdapter.close_pool()
+        except Exception:
+            pass
+        _mysql_adapter = None
 
 
 def get_connection(db_path: Optional[Path] = None) -> Any:
     """
     Acquire database connection.
     If running in production:
-        Requires PostgreSQL via DATABASE_URL; explicit SQLite db_path or missing
-        PostgreSQL configuration raises DatabaseConnectionError (no silent fallback).
+        Requires PostgreSQL or MySQL via DATABASE_URL; explicit SQLite db_path or missing
+        production database configuration raises DatabaseConnectionError (no silent fallback).
     If db_path is explicitly provided in non-production:
         Always uses SQLite for that path (essential for test isolation).
     If db_path is None in non-production:
-        If DATABASE_URL or SUPABASE_DB_URL is set: uses PostgresAdapter with connection pool.
+        If DATABASE_URL or MYSQL_DATABASE_URL is MySQL: uses MySQLAdapter with connection pool.
+        If DATABASE_URL or SUPABASE_DB_URL is PostgreSQL: uses PostgresAdapter with connection pool.
         Else: uses SQLiteAdapter with WAL mode and busy timeout.
     """
-    global _postgres_adapter
+    global _postgres_adapter, _mysql_adapter
 
     if is_production_mode():
         if db_path is not None:
@@ -148,21 +178,31 @@ def get_connection(db_path: Optional[Path] = None) -> Any:
             raise DatabaseConnectionError(
                 "Production configuration error: Explicit SQLite path is prohibited in production mode."
             )
-        if not _db_config.is_postgres:
+        if not (_db_config.is_postgres or _db_config.is_mysql):
             logger.critical(
                 "CRITICAL: get_connection() invoked in production mode without DATABASE_URL configured. "
                 "Silent fallback to SQLite is prohibited in production."
             )
             raise DatabaseConnectionError(
-                "Production configuration error: PostgreSQL connection is required in production. "
+                "Production configuration error: PostgreSQL connection is required in production (or MySQL). "
                 "Silent fallback to SQLite is prohibited."
             )
-        if _postgres_adapter is None:
-            _postgres_adapter = PostgresAdapter(_db_config)
-        return _postgres_adapter.get_connection()
+        if _db_config.is_mysql:
+            if _mysql_adapter is None:
+                _mysql_adapter = MySQLAdapter(_db_config)
+            return _mysql_adapter.get_connection()
+        if _db_config.is_postgres:
+            if _postgres_adapter is None:
+                _postgres_adapter = PostgresAdapter(_db_config)
+            return _postgres_adapter.get_connection()
 
     if db_path is not None:
         return _sqlite_adapter.get_connection(db_path=db_path)
+
+    if _db_config.is_mysql:
+        if _mysql_adapter is None:
+            _mysql_adapter = MySQLAdapter(_db_config)
+        return _mysql_adapter.get_connection()
 
     if _db_config.is_postgres:
         if _postgres_adapter is None:
@@ -185,16 +225,16 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """
     Initialize database schema with idempotent DDL, WAL journal mode, and safe migrations.
     - In production mode:
-      Requires DATABASE_URL and executes Supabase PostgreSQL migrations.
+      Requires DATABASE_URL and executes MySQL or Supabase PostgreSQL migrations.
       Explicit SQLite path or missing DATABASE_URL raises DatabaseConnectionError (no silent fallback).
     - In development/test mode:
-      If PostgreSQL is configured (DATABASE_URL is set) and db_path is None:
-        runs versioned Supabase migrations.
-      If db_path is provided or PostgreSQL is not configured: initializes SQLite.
+      If MySQL is configured: runs versioned MySQL migrations.
+      If PostgreSQL is configured: runs versioned Supabase migrations.
+      If db_path is provided or no production DB is configured: initializes SQLite.
     Preserves all existing data in students, quiz_attempts, and question_metadata.
     Adds quiz_sessions, student_answers, and topic_mastery.
     """
-    global _postgres_adapter
+    global _postgres_adapter, _mysql_adapter
 
     if is_production_mode():
         if db_path is not None:
@@ -205,7 +245,7 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
             raise DatabaseConnectionError(
                 "Production configuration error: Explicit SQLite path is prohibited in production mode."
             )
-        if not _db_config.is_postgres:
+        if not (_db_config.is_postgres or _db_config.is_mysql):
             logger.critical(
                 "CRITICAL: init_db() invoked in production mode without DATABASE_URL configured. "
                 "Silent fallback to SQLite is prohibited in production."
@@ -214,13 +254,35 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
                 "Production configuration error: DATABASE_URL is required in production. "
                 "Silent fallback to SQLite is prohibited."
             )
-        if _postgres_adapter is None:
-            _postgres_adapter = PostgresAdapter(_db_config)
-        conn = _postgres_adapter.get_connection()
+        if _db_config.is_mysql:
+            if _mysql_adapter is None:
+                _mysql_adapter = MySQLAdapter(_db_config)
+            conn = _mysql_adapter.get_connection()
+            try:
+                applied = apply_migrations(conn, dialect="mysql")
+                logger.info("MySQL initialized successfully (applied migrations: %s)", applied)
+                return {"status": "ok", "backend": "mysql", "applied_migrations": applied}
+            finally:
+                conn.close()
+        if _db_config.is_postgres:
+            if _postgres_adapter is None:
+                _postgres_adapter = PostgresAdapter(_db_config)
+            conn = _postgres_adapter.get_connection()
+            try:
+                applied = apply_migrations(conn, is_postgres=True, dialect="postgres")
+                logger.info("Supabase PostgreSQL initialized successfully (applied migrations: %s)", applied)
+                return {"status": "ok", "backend": "postgres", "applied_migrations": applied}
+            finally:
+                conn.close()
+
+    if db_path is None and _db_config.is_mysql:
+        if _mysql_adapter is None:
+            _mysql_adapter = MySQLAdapter(_db_config)
+        conn = _mysql_adapter.get_connection()
         try:
-            applied = apply_migrations(conn, is_postgres=True)
-            logger.info("Supabase PostgreSQL initialized successfully (applied migrations: %s)", applied)
-            return {"status": "ok", "backend": "postgres", "applied_migrations": applied}
+            applied = apply_migrations(conn, dialect="mysql")
+            logger.info("MySQL initialized successfully (applied migrations: %s)", applied)
+            return {"status": "ok", "backend": "mysql", "applied_migrations": applied}
         finally:
             conn.close()
 
@@ -229,7 +291,7 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
             _postgres_adapter = PostgresAdapter(_db_config)
         conn = _postgres_adapter.get_connection()
         try:
-            applied = apply_migrations(conn, is_postgres=True)
+            applied = apply_migrations(conn, is_postgres=True, dialect="postgres")
             logger.info("Supabase PostgreSQL initialized successfully (applied migrations: %s)", applied)
             return {"status": "ok", "backend": "postgres", "applied_migrations": applied}
         finally:
@@ -1180,28 +1242,54 @@ def upsert_topic_mastery(
     next_level = compute_next_adaptive_level(base_level, new_total_q, mastery_score)
 
     mastery_id = str(uuid.uuid4())
-    cursor.execute("""
-        INSERT INTO topic_mastery (
-            id, student_id, course_code, topic_name, attempt_count,
-            total_questions, total_correct, mastery_score, current_level,
-            weak_concepts, strong_concepts, last_practiced_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(student_id, course_code, topic_name) DO UPDATE SET
-            attempt_count = excluded.attempt_count,
-            total_questions = excluded.total_questions,
-            total_correct = excluded.total_correct,
-            mastery_score = excluded.mastery_score,
-            current_level = excluded.current_level,
-            weak_concepts = excluded.weak_concepts,
-            strong_concepts = excluded.strong_concepts,
-            last_practiced_at = excluded.last_practiced_at
-    """, (
-        mastery_id, student_id, course_code, topic_name, new_attempts,
-        new_total_q, new_total_c, mastery_score, next_level,
-        serialize_json_for_db(merged_weak, is_postgres=is_pg_conn(conn)),
-        serialize_json_for_db(merged_strong, is_postgres=is_pg_conn(conn)),
-        now
-    ))
+    use_mysql = is_mysql_conn(conn) or (is_mysql_active() if conn is None else False)
+
+    if use_mysql:
+        cursor.execute("""
+            INSERT INTO topic_mastery (
+                id, student_id, course_code, topic_name, attempt_count,
+                total_questions, total_correct, mastery_score, current_level,
+                weak_concepts, strong_concepts, last_practiced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                attempt_count = VALUES(attempt_count),
+                total_questions = VALUES(total_questions),
+                total_correct = VALUES(total_correct),
+                mastery_score = VALUES(mastery_score),
+                current_level = VALUES(current_level),
+                weak_concepts = VALUES(weak_concepts),
+                strong_concepts = VALUES(strong_concepts),
+                last_practiced_at = VALUES(last_practiced_at)
+        """, (
+            mastery_id, student_id, course_code, topic_name, new_attempts,
+            new_total_q, new_total_c, mastery_score, next_level,
+            serialize_json_for_db(merged_weak, is_postgres=False),
+            serialize_json_for_db(merged_strong, is_postgres=False),
+            now
+        ))
+    else:
+        cursor.execute("""
+            INSERT INTO topic_mastery (
+                id, student_id, course_code, topic_name, attempt_count,
+                total_questions, total_correct, mastery_score, current_level,
+                weak_concepts, strong_concepts, last_practiced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(student_id, course_code, topic_name) DO UPDATE SET
+                attempt_count = excluded.attempt_count,
+                total_questions = excluded.total_questions,
+                total_correct = excluded.total_correct,
+                mastery_score = excluded.mastery_score,
+                current_level = excluded.current_level,
+                weak_concepts = excluded.weak_concepts,
+                strong_concepts = excluded.strong_concepts,
+                last_practiced_at = excluded.last_practiced_at
+        """, (
+            mastery_id, student_id, course_code, topic_name, new_attempts,
+            new_total_q, new_total_c, mastery_score, next_level,
+            serialize_json_for_db(merged_weak, is_postgres=is_pg_conn(conn)),
+            serialize_json_for_db(merged_strong, is_postgres=is_pg_conn(conn)),
+            now
+        ))
 
     if close_conn:
         conn.commit()

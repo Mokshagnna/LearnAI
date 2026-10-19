@@ -9,6 +9,7 @@ from services.db.base import (
     CompatibleRow,
     DatabaseConfig,
     DatabaseConnectionError,
+    translate_placeholders,
     translate_placeholders_to_pg,
     parse_json_safely,
     parse_json_column,
@@ -19,6 +20,11 @@ from services.db.postgres_adapter import (
     PostgresAdapter,
     PostgresConnectionWrapper,
     PostgresCursorWrapper,
+)
+from services.db.mysql_adapter import (
+    MySQLAdapter,
+    MySQLConnectionWrapper,
+    MySQLCursorWrapper,
 )
 from services.db.migrations import (
     apply_migrations,
@@ -31,6 +37,7 @@ __all__ = [
     "CompatibleRow",
     "DatabaseConfig",
     "DatabaseConnectionError",
+    "translate_placeholders",
     "translate_placeholders_to_pg",
     "parse_json_safely",
     "parse_json_column",
@@ -39,6 +46,9 @@ __all__ = [
     "PostgresAdapter",
     "PostgresConnectionWrapper",
     "PostgresCursorWrapper",
+    "MySQLAdapter",
+    "MySQLConnectionWrapper",
+    "MySQLCursorWrapper",
     "apply_migrations",
     "rollback_migration",
     "ensure_migration_table",

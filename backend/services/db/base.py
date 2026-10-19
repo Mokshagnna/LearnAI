@@ -50,9 +50,9 @@ class CompatibleRow(dict):
         return super().items()
 
 
-def translate_placeholders_to_pg(query: str) -> str:
+def translate_placeholders(query: str) -> str:
     """
-    Translate SQLite '?' parameter placeholders to PostgreSQL '%s' placeholders,
+    Translate SQLite '?' parameter placeholders to '%s' placeholders (used by PostgreSQL and MySQL),
     preserving any '?' inside single-quoted string literals and SQL comments (-- and /* */).
     """
     out = []
@@ -107,18 +107,28 @@ def translate_placeholders_to_pg(query: str) -> str:
     return "".join(out)
 
 
+# Backward-compatibility alias
+translate_placeholders_to_pg = translate_placeholders
+
+
 def parse_json_safely(val: Any, default: Any = None) -> Any:
     """
     Safely deserialize JSON columns from database rows.
     Handles:
     - Already deserialized dict or list (from PostgreSQL JSONB via psycopg)
-    - Serialized JSON string (from SQLite TEXT or Postgres TEXT)
+    - Serialized JSON string (from SQLite TEXT, Postgres TEXT, or MySQL JSON)
+    - Raw bytes (from MySQL drivers)
     - None or empty values with fallback default
     """
     if val is None:
         return default
     if isinstance(val, (dict, list)):
         return val
+    if isinstance(val, (bytes, bytearray)):
+        try:
+            val = val.decode("utf-8")
+        except Exception:
+            return default
     if isinstance(val, str):
         stripped = val.strip()
         if not stripped:
@@ -144,17 +154,18 @@ def parse_json_column(row: Any, col: str, default: Any = None) -> Any:
     return parse_json_safely(val, default)
 
 
-def serialize_json_for_db(val: Any, is_postgres: bool = False) -> Any:
+def serialize_json_for_db(val: Any, is_postgres: bool = False, dialect: Optional[str] = None) -> Any:
     """
     Safely serialize JSON columns for database insertion or update.
-    - For SQLite: returns JSON string (TEXT).
+    - For SQLite / MySQL: returns JSON string (TEXT / JSON).
     - For PostgreSQL: returns psycopg Jsonb object if psycopg is available,
       or serialized string if columns are TEXT.
     """
     if val is None:
         return None
 
-    if is_postgres:
+    use_postgres = is_postgres or (dialect == "postgres")
+    if use_postgres:
         try:
             from psycopg.types.json import Jsonb
             if isinstance(val, str):
@@ -167,7 +178,7 @@ def serialize_json_for_db(val: Any, is_postgres: bool = False) -> Any:
         except ImportError:
             pass
 
-    # SQLite or fallback string serialization
+    # SQLite, MySQL, or fallback string serialization
     if isinstance(val, str):
         return val
     return json.dumps(val)
@@ -208,10 +219,11 @@ def is_production_mode() -> bool:
 
 def validate_production_db_config() -> None:
     """
-    Validate that PostgreSQL database configuration is present and properly formatted
+    Validate that database configuration is present and properly formatted
     when running in production mode.
     Strictly requires canonical DATABASE_URL in production (no aliases).
     Fails fast with clear error message; never prints credentials.
+    Supports PostgreSQL and MySQL production URIs.
     """
     if not is_production_mode():
         return
@@ -220,34 +232,41 @@ def validate_production_db_config() -> None:
     if not db_url:
         logger.critical(
             "CRITICAL: Production startup failed: DATABASE_URL is not configured. "
-            "Production mode requires a valid PostgreSQL database connection and will not fall back to SQLite."
+            "Production mode requires a valid PostgreSQL or MySQL database connection and will not fall back to SQLite."
         )
         raise RuntimeError(
             "Production startup error: DATABASE_URL environment variable is required and cannot be empty. "
-            "Production LearnAI must connect to PostgreSQL; silent SQLite fallback is prohibited."
+            "Production LearnAI must connect to PostgreSQL or MySQL; silent SQLite fallback is prohibited."
         )
 
-    if not (db_url.startswith("postgresql://") or db_url.startswith("postgres://")):
+    is_pg = db_url.startswith("postgresql://") or db_url.startswith("postgres://")
+    is_mysql = db_url.startswith("mysql://") or db_url.startswith("mysql+pymysql://")
+
+    if not (is_pg or is_mysql):
         logger.critical(
-            "CRITICAL: Production startup failed: DATABASE_URL must be a PostgreSQL connection URI."
+            "CRITICAL: Production startup failed: DATABASE_URL must be a PostgreSQL or MySQL connection URI."
         )
         raise RuntimeError(
-            "Production configuration error: DATABASE_URL must be a PostgreSQL connection URI "
-            "(starting with postgresql:// or postgres://)."
+            "Production configuration error: DATABASE_URL must be a PostgreSQL connection URI or MySQL connection URI "
+            "(starting with postgresql://, postgres://, or mysql://)."
         )
 
 
 class DatabaseConfig:
     """
     Database configuration manager.
-    Detects whether PostgreSQL or SQLite is active based on environment variables.
+    Detects whether PostgreSQL, MySQL, or SQLite is active based on environment variables.
 
     Precedence:
-    1. DATABASE_URL (production canonical) or SUPABASE_DB_URL (development legacy alias)
-    2. LEARNAI_DB_PATH -> SQLite persistent path
-    3. SQLITE_DB_PATH -> SQLite legacy path
-    4. Default -> backend/data/learnai.db
+    1. Explicit custom database_url passed to constructor (if provided)
+    2. DATABASE_URL (production canonical) or MYSQL_DATABASE_URL or SUPABASE_DB_URL (development legacy alias)
+    3. LEARNAI_DB_PATH -> SQLite persistent path
+    4. SQLITE_DB_PATH -> SQLite legacy path
+    5. Default -> backend/data/learnai.db
     """
+
+    def __init__(self, database_url: Optional[str] = None):
+        self._custom_database_url = database_url
 
     @property
     def is_production(self) -> bool:
@@ -255,17 +274,39 @@ class DatabaseConfig:
         return is_production_mode()
 
     @property
-    def is_postgres(self) -> bool:
-        """True if PostgreSQL / Supabase connection is configured."""
+    def dialect(self) -> str:
         url = self.database_url
-        return bool(url and url.strip())
+        if not url:
+            return "sqlite"
+        if url.startswith("mysql://") or url.startswith("mysql+pymysql://"):
+            return "mysql"
+        if url.startswith("postgresql://") or url.startswith("postgres://"):
+            return "postgres"
+        return "sqlite"
+
+    @property
+    def is_postgres(self) -> bool:
+        """True if PostgreSQL connection is configured."""
+        return self.dialect == "postgres"
+
+    @property
+    def is_mysql(self) -> bool:
+        """True if MySQL connection is configured."""
+        return self.dialect == "mysql"
+
+    @property
+    def is_sqlite(self) -> bool:
+        """True if SQLite is active."""
+        return self.dialect == "sqlite"
 
     @property
     def database_url(self) -> Optional[str]:
+        if getattr(self, "_custom_database_url", None) is not None:
+            return self._custom_database_url.strip() if self._custom_database_url else None
         if self.is_production:
             url = os.getenv("DATABASE_URL")
         else:
-            url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+            url = os.getenv("DATABASE_URL") or os.getenv("MYSQL_DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
         return url.strip() if url else None
 
     @property
