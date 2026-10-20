@@ -177,7 +177,8 @@ def _load_stored_quiz_fallback(
     attempt_number: int,
     adaptive_decision: Dict[str, Any],
     adaptive_explanation: Dict[str, Any],
-    eligible_stored: List[Dict[str, Any]]
+    eligible_stored: List[Dict[str, Any]],
+    adaptive_applied: bool = True
 ) -> Optional[Dict[str, Any]]:
     """Safe fallback to stored validated questions when enabled via ENABLE_STORED_FALLBACK."""
     if os.getenv("ENABLE_STORED_FALLBACK", "false").lower() not in ("true", "1"):
@@ -192,7 +193,7 @@ def _load_stored_quiz_fallback(
             "attempt_id": attempt_id,
             "attempt_number": attempt_number,
             "recommended_difficulty": recommended_difficulty,
-            "adaptive_applied": recommended_difficulty != "mixed",
+            "adaptive_applied": adaptive_applied,
             "adaptive_explanation": adaptive_explanation,
             "adaptive_metadata": adaptive_decision,
             "provider_used": "stored_db"
@@ -206,7 +207,8 @@ def generate_quiz(
     topic_name: str,
     syllabus_context: str,
     student_id: Optional[str] = None,
-    concepts: Optional[List[str]] = None
+    concepts: Optional[List[str]] = None,
+    difficulty: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Multi-provider quiz generation with:
@@ -214,7 +216,7 @@ def generate_quiz(
     - Per-provider timeout budgets
     - Bounded overall deadline
     - Comprehensive Question & Concept Novelty checking (detects text and concept duplicates)
-    - Adaptive difficulty based on student history
+    - Adaptive difficulty based on student history (or optional manual override)
     - Anti-repetition prompt enrichment with previously tested concepts
     - Automatic fallback to local demo questions
     """
@@ -233,19 +235,29 @@ def generate_quiz(
     weak_concepts = list(seen_concepts.keys())
 
     # ── Adaptive difficulty calculation ───────────────────────────────────────
+    from services.adaptive import normalize_level
     adaptive_decision = compute_adaptive_decision(
         student_id=student_id,
         course_code=course_code,
         topic_name=topic_name
     )
-    recommended_difficulty = adaptive_decision["recommended_difficulty"]
+
+    if difficulty and difficulty.strip():
+        recommended_difficulty = normalize_level(difficulty.strip())
+        adaptive_applied = False
+        override_tag = f"[MANUAL OVERRIDE: {recommended_difficulty}]"
+    else:
+        recommended_difficulty = adaptive_decision["recommended_difficulty"]
+        adaptive_applied = True
+        override_tag = f"[ADAPTIVE: {recommended_difficulty}]"
+
     difficulty_dist = get_difficulty_distribution(recommended_difficulty)
 
     # Combine historical weak concepts from attempts and adaptive decision
     combined_weak = list(dict.fromkeys(weak_concepts + adaptive_decision.get("weak_concepts", [])))
 
     logger.info(
-        f"[ADAPTIVE] student={student_id} course={course_code} topic='{topic_name}' "
+        f"{override_tag} student={student_id} course={course_code} topic='{topic_name}' "
         f"attempt=#{attempt_number} recommended={recommended_difficulty} dist={difficulty_dist} "
         f"active={adaptive_decision['is_decision_active']} reason='{adaptive_decision['reason']}'"
     )
@@ -601,7 +613,7 @@ REQUIREMENTS:
                             q["difficulty"] = "Medium"
 
                 validated_quiz["recommended_difficulty"] = recommended_difficulty
-                validated_quiz["adaptive_applied"] = recommended_difficulty != "mixed"
+                validated_quiz["adaptive_applied"] = adaptive_applied
                 validated_quiz["adaptive_explanation"] = adaptive_explanation
                 validated_quiz["adaptive_metadata"] = adaptive_decision
                 validated_quiz["attempt_id"] = attempt_id
@@ -681,7 +693,7 @@ REQUIREMENTS:
         best_quiz["attempt_id"] = attempt_id
         best_quiz["attempt_number"] = attempt_number
         best_quiz["recommended_difficulty"] = recommended_difficulty
-        best_quiz["adaptive_applied"] = recommended_difficulty != "mixed"
+        best_quiz["adaptive_applied"] = adaptive_applied
         best_quiz["adaptive_explanation"] = adaptive_explanation
         best_quiz["adaptive_metadata"] = adaptive_decision
         return best_quiz
@@ -696,7 +708,8 @@ REQUIREMENTS:
         attempt_number=attempt_number,
         adaptive_decision=adaptive_decision,
         adaptive_explanation=adaptive_explanation,
-        eligible_stored=eligible_stored
+        eligible_stored=eligible_stored,
+        adaptive_applied=adaptive_applied
     )
     if stored_fallback:
         total_duration = time.perf_counter() - start_time
@@ -717,7 +730,7 @@ REQUIREMENTS:
         local_quiz["attempt_id"] = attempt_id
         local_quiz["attempt_number"] = attempt_number
         local_quiz["recommended_difficulty"] = recommended_difficulty
-        local_quiz["adaptive_applied"] = recommended_difficulty != "mixed"
+        local_quiz["adaptive_applied"] = adaptive_applied
         local_quiz["adaptive_explanation"] = adaptive_explanation
         local_quiz["adaptive_metadata"] = adaptive_decision
         return local_quiz

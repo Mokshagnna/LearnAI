@@ -160,7 +160,7 @@
     <div class="dashboard-header card">
       <div class="dashboard-header-main">
         <h1 class="dashboard-title">Student Progress &amp; Analytics</h1>
-        <p class="muted">Track your syllabus mastery, performance trends, and recommended practice topics.</p>
+        <p class="muted">Track your syllabus mastery, performance trends, and targeted practice recommendations.</p>
       </div>
       <div class="dashboard-filters">
         <label for="dashboardCourseFilter" class="visually-hidden">Filter by Course</label>
@@ -183,24 +183,52 @@
       <button id="dashboardRetryBtn" type="button">Retry</button>
     </div>
 
-    <!-- Empty State (No Attempts Yet) -->
-    <div id="dashboardEmptyState" class="card empty-card hidden">
-      <div class="empty-icon" aria-hidden="true">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="empty-icon-svg" aria-hidden="true">
-          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-        </svg>
-      </div>
-      <h2>No Quiz Activity Recorded Yet</h2>
-      <p>You haven't completed any quizzes yet. Take your first syllabus quiz to start tracking your topic mastery, difficulty progression, and concept strengths!</p>
-      <div class="empty-actions">
-        <button id="dashboardStartQuizBtn" type="button">Start Your First Quiz</button>
+    <!-- First-Time Student State (No Quizzes Completed) -->
+    <div id="dashboardEmptyState" class="first-time-container hidden">
+      <div class="card first-time-welcome-card">
+        <div class="first-time-badge" aria-hidden="true">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            <path d="M9 7h6"></path>
+            <path d="M9 11h6"></path>
+          </svg>
+        </div>
+        <h2 class="first-time-heading">Your learning journey starts here.</h2>
+        <p class="first-time-lead">Complete your first practice quiz to see your progress and personalized study recommendations.</p>
+        <div class="first-time-actions">
+          <button id="dashboardStartQuizBtn" type="button" class="btn-primary">Start Your First Quiz &rarr;</button>
+        </div>
+
+        <div class="first-time-benefits">
+          <div class="benefit-item">
+            <div class="benefit-num">1</div>
+            <div class="benefit-content">
+              <span class="benefit-title">Adaptive Practice</span>
+              <p class="benefit-desc">Calibrate practice questions to your knowledge level.</p>
+            </div>
+          </div>
+          <div class="benefit-item">
+            <div class="benefit-num">2</div>
+            <div class="benefit-content">
+              <span class="benefit-title">Topic Mastery</span>
+              <p class="benefit-desc">Track cumulative accuracy and progress across each topic.</p>
+            </div>
+          </div>
+          <div class="benefit-item">
+            <div class="benefit-num">3</div>
+            <div class="benefit-content">
+              <span class="benefit-title">Targeted Insights</span>
+              <p class="benefit-desc">Pinpoint specific concepts for focused revision.</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Main Dashboard Content (When Data Exists) -->
+    <!-- Main Dashboard Content (Returning Students With Completed Quizzes) -->
     <div id="dashboardContent" class="hidden">
-      <!-- Overview Metric Cards -->
+      <!-- 1. Overview Metric Cards -->
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-label">Quizzes Completed</div>
@@ -224,55 +252,64 @@
         </div>
       </div>
 
-      <!-- Recommended Practice -->
+      <!-- 2. Recommended Review Section (Topics Needing Review) -->
       <div class="card dashboard-card">
         <div class="section-title-row">
-          <h2 class="section-title">Recommended Practice</h2>
-          <span class="badge">Adaptive Suggestions</span>
+          <div>
+            <h2 class="section-title">Recommended Review</h2>
+            <p class="muted section-subtitle">
+              Prioritized topics based on recent quiz performance and concepts requiring reinforcement.
+            </p>
+          </div>
         </div>
-        <p class="muted section-subtitle">
-          Topics prioritized by recent performance, weak concepts, and syllabus coverage.
-        </p>
-        <div id="recommendedTopicsList" class="recommendations-grid"></div>
+        <div id="reviewTopicsWrap">
+          <div id="reviewTopicsList" class="recommendations-grid"></div>
+        </div>
+        <!-- Hidden alias container for backward compatibility -->
+        <div id="recommendedTopicsList" class="hidden" aria-hidden="true"></div>
       </div>
 
-      <!-- Performance Trends (Visual Chart + Recent List) -->
+      <!-- 3. Performance Trends (Visual Chart + Recent List) -->
       <div class="card dashboard-card">
         <div class="section-title-row">
-          <h2 class="section-title">Recent Performance Trend</h2>
+          <div>
+            <h2 class="section-title">Recent Performance Trend</h2>
+            <p class="muted section-subtitle">Historical score progression and attempt timeline.</p>
+          </div>
           <span id="trendsCountTag" class="tag-chip tag-chip-sm">Recent attempts</span>
         </div>
         <div id="trendChartWrap" class="trend-chart-container"></div>
         <div id="recentAttemptsTableWrap" class="table-wrap"></div>
       </div>
 
-      <!-- Topic Mastery & Progression -->
+      <!-- 5. Topic Mastery & Progression -->
       <div class="card dashboard-card">
         <div class="section-title-row">
-          <h2 class="section-title">Syllabus Topics Mastery</h2>
-          <span class="badge">Step-Wise Adaptive</span>
+          <div>
+            <h2 class="section-title">Syllabus Topic Mastery</h2>
+            <p class="muted section-subtitle">
+              Cumulative accuracy, recent 10-question trajectory, and current adaptive difficulty level.
+            </p>
+          </div>
         </div>
-        <p class="muted section-subtitle">
-          Progress across topics showing cumulative accuracy, recent 10-question accuracy, and current difficulty level.
-        </p>
         <div id="topicProgressList" class="topic-progress-grid"></div>
       </div>
 
-      <!-- Concept Insights Cloud -->
+      <!-- 6. Concept Insights Cloud -->
       <div class="results-grid dashboard-concepts-grid">
         <div class="result-section">
           <h3 class="strong-concepts-header">Strong Concepts</h3>
-          <p class="muted concepts-subtitle">Concepts answered correctly consistently.</p>
+          <p class="muted concepts-subtitle">Concepts consistently answered correctly.</p>
           <div id="dashboardStrongConcepts"></div>
         </div>
         <div class="result-section">
           <h3 class="weak-concepts-header">Concepts Needing Review</h3>
-          <p class="muted concepts-subtitle">Concepts with incorrect responses.</p>
+          <p class="muted concepts-subtitle">Concepts with recent incorrect answers.</p>
           <div id="dashboardWeakConcepts"></div>
         </div>
       </div>
 
-      <!-- Pedagogical Practice Notice -->
+      <!-- 7. Pedagogical Practice Notice -->
       <div class="disclaimer-box">
         <strong>Pedagogical Practice Notice:</strong> Mastery levels, difficulty recommendations, and concept insights are algorithmic practice heuristics intended to guide active revision. They are not accredited psychometric or institutional grading assessments.
       </div>

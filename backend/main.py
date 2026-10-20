@@ -117,6 +117,7 @@ class QuizRequest(BaseModel):
     topic: str = Field(..., min_length=1, max_length=250)
     topic_id: str | None = Field(default=None, max_length=100)
     student_id: str | None = Field(default=None, max_length=100)
+    difficulty: str | None = Field(default=None, max_length=50)
     # retake=True signals frontend is requesting a fresh quiz for the same topic.
     # Backend always generates fresh — this flag is used only for logging.
     retake: bool = False
@@ -125,6 +126,7 @@ class SubmitRequest(BaseModel):
     quiz_id: str = Field(..., min_length=1, max_length=100)
     answers: list[str] = Field(..., min_length=1, max_length=50)
     student_id: str | None = Field(default=None, max_length=100)
+    difficulty: str | None = Field(default=None, max_length=50)
     auth_token: str | None = Field(default=None, max_length=500)
 
 def find_course_and_topic(course_code: str, topic_name: str, topic_id: str | None = None):
@@ -305,7 +307,8 @@ def create_quiz(req: QuizRequest, request: Request):
             topic_name=topic["name"],
             syllabus_context=focused_syllabus,
             student_id=student_id,
-            concepts=concepts_list
+            concepts=concepts_list,
+            difficulty=req.difficulty
         )
     except AIError as e:
         duration = time.perf_counter() - t_start

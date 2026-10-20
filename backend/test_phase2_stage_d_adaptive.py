@@ -292,7 +292,18 @@ class TestAdaptiveDecisionEngine:
         conn = get_connection(db_file)
         student_id = "stud_demo_a_to_m"
 
-        # 10 questions with 3 correct (30% <= 40%) from Advanced
+        # Two consecutive attempts below 5/10 (4/10 and 3/10) from Advanced
+        seed_history(
+            conn=conn,
+            student_id=student_id,
+            course_code="22AM301",
+            topic_name="Optimizers",
+            total_q=10,
+            correct_q=4,
+            level=ADAPTIVE_LEVEL_ADVANCED,
+            session_id="sess_a_m_1",
+            attempt_id="att_a_m_1"
+        )
         seed_history(
             conn=conn,
             student_id=student_id,
@@ -301,8 +312,8 @@ class TestAdaptiveDecisionEngine:
             total_q=10,
             correct_q=3,
             level=ADAPTIVE_LEVEL_ADVANCED,
-            session_id="sess_a_m",
-            attempt_id="att_a_m"
+            session_id="sess_a_m_2",
+            attempt_id="att_a_m_2"
         )
 
         decision = compute_adaptive_decision(
@@ -317,12 +328,12 @@ class TestAdaptiveDecisionEngine:
         assert decision["recommended_difficulty"] == ADAPTIVE_LEVEL_MIXED
         assert "Demoted from Advanced to Mixed" in decision["reason"]
 
-    def test_stepwise_demotion_mixed_to_foundational(self, isolated_db_client):
+    def test_single_low_score_does_not_immediately_demote(self, isolated_db_client):
+        """Rule B: An isolated low score below 5/10 does NOT decrease difficulty immediately."""
         _, db_file = isolated_db_client
         conn = get_connection(db_file)
-        student_id = "stud_demo_m_to_f"
+        student_id = "stud_single_low"
 
-        # 10 questions with 4 correct (40% exactly <= 40% threshold) from Mixed
         seed_history(
             conn=conn,
             student_id=student_id,
@@ -331,8 +342,50 @@ class TestAdaptiveDecisionEngine:
             total_q=10,
             correct_q=4,
             level=ADAPTIVE_LEVEL_MIXED,
-            session_id="sess_m_f",
-            attempt_id="att_m_f"
+            session_id="sess_single_low",
+            attempt_id="att_single_low"
+        )
+
+        decision = compute_adaptive_decision(
+            student_id=student_id,
+            course_code="22AM301",
+            topic_name="Regularization",
+            conn=conn
+        )
+        conn.close()
+
+        assert decision["previous_level"] == ADAPTIVE_LEVEL_MIXED
+        assert decision["recommended_difficulty"] == ADAPTIVE_LEVEL_MIXED
+        assert decision["consecutive_low_streak"] == 1
+        assert "maintaining Mixed difficulty" in decision["reason"]
+
+    def test_stepwise_demotion_mixed_to_foundational(self, isolated_db_client):
+        _, db_file = isolated_db_client
+        conn = get_connection(db_file)
+        student_id = "stud_demo_m_to_f"
+
+        # Two consecutive attempts below 5/10 (4/10 and 3/10) from Mixed
+        seed_history(
+            conn=conn,
+            student_id=student_id,
+            course_code="22AM301",
+            topic_name="Regularization",
+            total_q=10,
+            correct_q=4,
+            level=ADAPTIVE_LEVEL_MIXED,
+            session_id="sess_m_f_1",
+            attempt_id="att_m_f_1"
+        )
+        seed_history(
+            conn=conn,
+            student_id=student_id,
+            course_code="22AM301",
+            topic_name="Regularization",
+            total_q=10,
+            correct_q=3,
+            level=ADAPTIVE_LEVEL_MIXED,
+            session_id="sess_m_f_2",
+            attempt_id="att_m_f_2"
         )
 
         decision = compute_adaptive_decision(
@@ -352,7 +405,7 @@ class TestAdaptiveDecisionEngine:
         conn = get_connection(db_file)
         student_id = "stud_floor_f"
 
-        # 0% accuracy on Foundational remains Foundational
+        # Two consecutive attempts below 5/10 (0/10 and 1/10) on Foundational
         seed_history(
             conn=conn,
             student_id=student_id,
@@ -361,8 +414,19 @@ class TestAdaptiveDecisionEngine:
             total_q=10,
             correct_q=0,
             level=ADAPTIVE_LEVEL_FOUNDATIONAL,
-            session_id="sess_floor",
-            attempt_id="att_floor"
+            session_id="sess_floor_1",
+            attempt_id="att_floor_1"
+        )
+        seed_history(
+            conn=conn,
+            student_id=student_id,
+            course_code="22AM301",
+            topic_name="FloorTopic",
+            total_q=10,
+            correct_q=1,
+            level=ADAPTIVE_LEVEL_FOUNDATIONAL,
+            session_id="sess_floor_2",
+            attempt_id="att_floor_2"
         )
 
         decision = compute_adaptive_decision(
@@ -412,14 +476,14 @@ class TestAdaptiveDecisionEngine:
         conn = get_connection(db_file)
         student_id = "stud_intermediate"
 
-        # 60% accuracy (between 40% and 80%) retains Mixed
+        # 50% accuracy (5/10 benchmark) retains Mixed
         seed_history(
             conn=conn,
             student_id=student_id,
             course_code="22AM301",
             topic_name="MidTopic",
             total_q=10,
-            correct_q=6,
+            correct_q=5,
             level=ADAPTIVE_LEVEL_MIXED,
             session_id="sess_mid",
             attempt_id="att_mid"
@@ -435,7 +499,7 @@ class TestAdaptiveDecisionEngine:
 
         assert decision["previous_level"] == ADAPTIVE_LEVEL_MIXED
         assert decision["recommended_difficulty"] == ADAPTIVE_LEVEL_MIXED
-        assert "Maintained Mixed difficulty" in decision["reason"]
+        assert "maintaining Mixed difficulty" in decision["reason"]
 
     def test_student_and_topic_isolation(self, isolated_db_client):
         _, db_file = isolated_db_client
@@ -700,8 +764,8 @@ class TestAdaptiveSubmissionAndChaining:
         conn.close()
 
         assert next_decision["is_decision_active"] is True
-        assert next_decision["previous_level"] == ADAPTIVE_LEVEL_MIXED
-        assert next_decision["recommended_difficulty"] == ADAPTIVE_LEVEL_ADVANCED
+        assert next_decision["previous_level"] == ADAPTIVE_LEVEL_FOUNDATIONAL
+        assert next_decision["recommended_difficulty"] == ADAPTIVE_LEVEL_MIXED
 
     def test_duplicate_submission_does_not_double_update_mastery(self, isolated_db_client):
         """Duplicate submission returns existing result without inflating topic_mastery total_questions."""

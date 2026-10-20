@@ -84,7 +84,9 @@ class TestDashboardOverviewMetrics:
         assert data["topic_progress"] == []
         assert data["concept_insights"]["weak_concepts"] == []
         assert data["concept_insights"]["strong_concepts"] == []
-        assert len(data["recommended_topics"]) > 0
+        assert data["recommended_topics"] == []
+        assert data["review_topics"] == []
+        assert data["explore_topics"] == []
         assert "algorithmic practice heuristics" in data["disclaimer"]
         conn.close()
 
@@ -527,11 +529,70 @@ class TestDashboardPedagogicalRecommendations:
 
         data = get_student_dashboard_data(student_id=student_id, course_code="22AM301", conn=conn)
 
-        # For a new student with no attempts, curriculum topics should be suggested
-        recs = data["recommended_topics"]
-        assert len(recs) > 0
-        assert all(r["course_code"] == "22AM301" for r in recs)
-        assert any("Unpracticed syllabus topic" in r["reason"] for r in recs)
+        # For a new student with no attempts, personalized recommendations are strictly empty
+        assert data["recommended_topics"] == []
+        assert data["review_topics"] == []
+
+        # Scoped explore_topics suggests unpracticed topics for that course
+        explore = data["explore_topics"]
+        assert len(explore) > 0
+        assert all(r["course_code"] == "22AM301" for r in explore)
+        assert any("Unpracticed syllabus topic" in r["reason"] for r in explore)
+        conn.close()
+
+    def test_first_time_student_has_no_review_topics_and_unpracticed_explore_topics(self, isolated_db_client):
+        client, db_file = isolated_db_client
+        conn = get_connection(db_file)
+        student_id = get_or_create_student("first-time-student-rec", conn=conn)
+
+        # Unscoped view: a new student has no practiced courses, so both review and explore are empty
+        data = get_student_dashboard_data(student_id=student_id, conn=conn)
+
+        assert data["has_completed_quizzes"] is False
+        assert data["overview"]["completed_quizzes"] == 0
+        assert data["review_topics"] == []
+        assert data["recommended_topics"] == []
+        assert data["explore_topics"] == []
+
+        # Scoped view: provides course-specific explore topics
+        scoped_data = get_student_dashboard_data(student_id=student_id, course_code="22AM301", conn=conn)
+        assert len(scoped_data["explore_topics"]) > 0
+        assert all(t["course_code"] == "22AM301" for t in scoped_data["explore_topics"])
+        assert all(t["priority"] == "low" for t in scoped_data["explore_topics"])
+        assert all("Unpracticed syllabus topic" in t["reason"] for t in scoped_data["explore_topics"])
+        conn.close()
+
+    def test_returning_student_distinguishes_review_and_explore_topics(self, isolated_db_client):
+        client, db_file = isolated_db_client
+        conn = get_connection(db_file)
+        student_id = get_or_create_student("returning-student-rec", conn=conn)
+
+        save_quiz_attempt(
+            student_id=student_id,
+            course_code="22AM301",
+            course_name="Deep Learning",
+            topic_name="Vanishing Gradients",
+            quiz_data={"questions": SAMPLE_QUESTIONS},
+            score=2,
+            total=10,
+            percentage=20.0,
+            status="Failed",
+            difficulty_accuracy={},
+            concept_accuracy={},
+            weak_concepts=["Sigmoid Saturation"],
+            strong_concepts=[],
+            conn=conn
+        )
+
+        data = get_student_dashboard_data(student_id=student_id, course_code="22AM301", conn=conn)
+
+        assert data["has_completed_quizzes"] is True
+        assert data["overview"]["completed_quizzes"] == 1
+        assert len(data["review_topics"]) >= 1
+        assert data["review_topics"][0]["topic_name"] == "Vanishing Gradients"
+        assert data["review_topics"][0]["priority"] == "high"
+        # Explore topics should NOT contain the practiced topic
+        assert all(t["topic_name"] != "Vanishing Gradients" for t in data["explore_topics"])
         conn.close()
 
 

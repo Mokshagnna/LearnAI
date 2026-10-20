@@ -21,11 +21,172 @@ from services.database import (
 
 logger = logging.getLogger("learnai.adaptive")
 
-# Configurable policy constants
+# Policy constants
+ADAPTIVE_BENCHMARK_PERCENTAGE = 50.0                       # 50% benchmark (5/10)
 ADAPTIVE_MIN_QUESTIONS = ADAPTIVE_MIN_QUESTIONS_THRESHOLD  # 5 questions
 ADAPTIVE_DEFAULT_HISTORY_WINDOW = 10                       # Recent 10 graded questions
 PROMOTION_THRESHOLD = ADAPTIVE_PROMOTION_THRESHOLD         # 0.80 (80%)
 DEMOTION_THRESHOLD = ADAPTIVE_DEMOTION_THRESHOLD           # 0.40 (40%)
+
+# Canonical difficulty level ordering: foundational (lowest) <-> mixed <-> advanced (highest)
+ADAPTIVE_LEVEL_ORDER = [
+    ADAPTIVE_LEVEL_FOUNDATIONAL,
+    ADAPTIVE_LEVEL_MIXED,
+    ADAPTIVE_LEVEL_ADVANCED
+]
+
+LEVEL_ALIASES = {
+    "foundational": ADAPTIVE_LEVEL_FOUNDATIONAL,
+    "easy": ADAPTIVE_LEVEL_FOUNDATIONAL,
+    "mixed": ADAPTIVE_LEVEL_MIXED,
+    "medium": ADAPTIVE_LEVEL_MIXED,
+    "moderate": ADAPTIVE_LEVEL_MIXED,
+    "advanced": ADAPTIVE_LEVEL_ADVANCED,
+    "hard": ADAPTIVE_LEVEL_ADVANCED,
+}
+
+LEVEL_DISPLAY_NAMES = {
+    ADAPTIVE_LEVEL_FOUNDATIONAL: "Foundational",
+    ADAPTIVE_LEVEL_MIXED: "Mixed",
+    ADAPTIVE_LEVEL_ADVANCED: "Advanced",
+}
+
+
+def normalize_level(level: Optional[str], default: str = ADAPTIVE_LEVEL_MIXED) -> str:
+    """Normalize input difficulty string or alias to canonical application level."""
+    if not level:
+        return default
+    clean = str(level).strip().lower()
+    return LEVEL_ALIASES.get(clean, default)
+
+
+def increase_level(current: str) -> str:
+    """Increase difficulty by one level, bounded at application ceiling (Advanced)."""
+    norm = normalize_level(current)
+    idx = ADAPTIVE_LEVEL_ORDER.index(norm)
+    if idx < len(ADAPTIVE_LEVEL_ORDER) - 1:
+        return ADAPTIVE_LEVEL_ORDER[idx + 1]
+    return ADAPTIVE_LEVEL_ORDER[idx]
+
+
+def decrease_level(current: str) -> str:
+    """Decrease difficulty by one level, bounded at application floor (Foundational)."""
+    norm = normalize_level(current)
+    idx = ADAPTIVE_LEVEL_ORDER.index(norm)
+    if idx > 0:
+        return ADAPTIVE_LEVEL_ORDER[idx - 1]
+    return ADAPTIVE_LEVEL_ORDER[0]
+
+
+def calculate_adaptive_progression(
+    attempts: List[Dict[str, Any]],
+    initial_level: str = ADAPTIVE_LEVEL_MIXED
+) -> Dict[str, Any]:
+    """
+    Step-Wise Adaptive Difficulty Progression Engine.
+    
+    Evaluates completed, graded attempts chronologically based on a 50% benchmark:
+    - Rule A: Score > 50% on a topic increases difficulty by 1 level for the next quiz.
+    - Rule B: Score < 50% on TWO CONSECUTIVE attempts decreases difficulty by 1 level.
+              A single isolated low score does not decrease difficulty.
+    - Rule C: Score == 50% maintains difficulty and resets the consecutive-low streak.
+    - Rule D: A recovery score >= 50% resets the consecutive-low streak.
+    - Boundaries: Never exceeds highest supported difficulty (Advanced) or falls below
+      lowest supported difficulty (Foundational).
+    """
+    start_lvl = normalize_level(initial_level, default=ADAPTIVE_LEVEL_MIXED)
+    if not attempts:
+        return {
+            "recommended_difficulty": start_lvl,
+            "previous_level": start_lvl,
+            "is_decision_active": False,
+            "consecutive_low_streak": 0,
+            "attempt_count": 0,
+            "reason": "New student or topic without practice history. Starting at Mixed difficulty baseline.",
+            "latest_score": 0,
+            "latest_total": 0,
+            "latest_percentage": 0.0
+        }
+
+    # If the first attempt recorded a specific difficulty, use it as baseline starting level
+    first_diff = attempts[0].get("recommended_difficulty")
+    if first_diff:
+        start_lvl = normalize_level(first_diff, default=start_lvl)
+
+    current_level = start_lvl
+    previous_level = start_lvl
+    consecutive_low_streak = 0
+    reason = "Initial state"
+    latest_score = 0
+    latest_total = 0
+    latest_pct = 0.0
+
+    for idx, att in enumerate(attempts):
+        score = float(att.get("score", 0))
+        total = float(att.get("total", 0))
+        if total <= 0:
+            continue
+
+        latest_score = int(score)
+        latest_total = int(total)
+        latest_pct = round((score / total) * 100.0, 1)
+
+        previous_level = current_level
+
+        if latest_pct > ADAPTIVE_BENCHMARK_PERCENTAGE:
+            # Rule A: Score > 50% increases difficulty by one level
+            current_level = increase_level(current_level)
+            consecutive_low_streak = 0
+            if current_level != previous_level:
+                reason = (
+                    f"High score ({latest_score}/{latest_total} = {latest_pct:.0f}% > 50%). "
+                    f"Promoted from {previous_level.capitalize()} to {current_level.capitalize()}."
+                )
+            else:
+                reason = (
+                    f"High score ({latest_score}/{latest_total} = {latest_pct:.0f}% > 50%). "
+                    f"Maintained {current_level.capitalize()} difficulty at ceiling."
+                )
+        elif latest_pct < ADAPTIVE_BENCHMARK_PERCENTAGE:
+            # Rule B: Score < 50% requires two consecutive low attempts to demote
+            consecutive_low_streak += 1
+            if consecutive_low_streak >= 2:
+                current_level = decrease_level(current_level)
+                consecutive_low_streak = 0
+                if current_level != previous_level:
+                    reason = (
+                        f"Consistently low performance (two consecutive attempts below 50%). "
+                        f"Demoted from {previous_level.capitalize()} to {current_level.capitalize()}."
+                    )
+                else:
+                    reason = (
+                        f"Consistently low performance (two consecutive attempts below 50%). "
+                        f"Maintained {current_level.capitalize()} difficulty at baseline."
+                    )
+            else:
+                reason = (
+                    f"Score below benchmark ({latest_score}/{latest_total} = {latest_pct:.0f}% < 50%). "
+                    f"Single low score recorded; maintaining {current_level.capitalize()} difficulty."
+                )
+        else:
+            # Rule C: Score == 50% benchmark
+            consecutive_low_streak = 0
+            reason = (
+                f"Benchmark score ({latest_score}/{latest_total} = 50%). "
+                f"Consecutive low streak reset; maintaining {current_level.capitalize()} difficulty."
+            )
+
+    return {
+        "recommended_difficulty": current_level,
+        "previous_level": previous_level,
+        "is_decision_active": True,
+        "consecutive_low_streak": consecutive_low_streak,
+        "attempt_count": len(attempts),
+        "reason": reason,
+        "latest_score": latest_score,
+        "latest_total": latest_total,
+        "latest_percentage": latest_pct
+    }
 
 
 def calculate_mastery_level(performance: Dict[str, Dict[str, int]]) -> float:
@@ -50,12 +211,6 @@ def get_recent_topic_performance(
     """
     Retrieve valid graded student performance strictly for (student_id, course_code, topic_name).
     Uses the recent history window from student_answers, with fallback to historical quiz_attempts.
-    
-    Returns:
-        total_graded: Number of valid graded questions in window
-        total_correct: Number of correct answers in window
-        accuracy: Float 0.0 to 1.0 (or 0.0 if total_graded == 0)
-        source: 'student_answers' | 'quiz_attempts' | 'topic_mastery' | 'none'
     """
     # 1. Primary: query recent granular answers
     recent_answers = get_recent_student_answers_for_topic(
@@ -129,104 +284,102 @@ def compute_adaptive_decision(
     """
     Deterministic adaptive difficulty progression engine.
     
-    Policy Rules:
-    1. Topic-Specific Isolation: Only evaluates performance for the selected student & topic.
-    2. Minimum Evidence: Requires >= min_questions (default 5) before evaluating promotion/demotion.
-    3. Step-Wise Transitions:
-       - Foundational <-> Mixed <-> Advanced
-       - Moves at most one level per decision. Never jumps directly between Foundational and Advanced.
-    4. Thresholds:
-       - Recent accuracy >= 80%: Promote 1 level (or stay at Advanced ceiling).
-       - Recent accuracy <= 40%: Demote 1 level (or stay at Foundational floor).
-       - Between 40% and 80%: Retain current level.
-    5. Insufficient History: Retains prior level if established, or starts at 'mixed'.
-    6. Complete Traceability: Returns an audit trail with sample size, accuracy, and reason.
+    Evaluates completed, graded attempts strictly for (student_id, course_code, topic_name).
+    Applies step-wise benchmark (50%) adaptation:
+    - Rule A: > 50% promotes by 1 level.
+    - Rule B: < 50% on 2 consecutive attempts demotes by 1 level.
+    - Rule C: == 50% maintains level, resets low streak.
+    - Rule D: Recovery >= 50% resets consecutive-low streak.
+    - Preserves student and topic isolation.
     """
-    # 1. Fetch existing topic mastery record
-    mastery = get_topic_mastery(student_id, course_code, topic_name, conn=conn)
-    if mastery and mastery.get("current_level") in VALID_ADAPTIVE_LEVELS:
-        prior_level = mastery["current_level"].lower()
-        known_weak = mastery.get("weak_concepts") or []
-        known_strong = mastery.get("strong_concepts") or []
-    else:
-        prior_level = ADAPTIVE_LEVEL_MIXED
-        known_weak = []
-        known_strong = []
+    close_conn = False
+    if conn is None:
+        from services.database import get_connection
+        conn = get_connection()
+        close_conn = True
 
-    # 2. Fetch recent topic performance window
-    perf = get_recent_topic_performance(
-        student_id=student_id,
-        course_code=course_code,
-        topic_name=topic_name,
-        history_window=history_window,
-        conn=conn
-    )
-
-    total_graded = perf["total_graded"]
-    accuracy = perf["accuracy"]
-    now_iso = get_utc_now_iso()
-
-    # 3. Apply Decision Heuristic
-    if total_graded < min_questions:
-        recommended = prior_level
-        is_active = False
-        if not mastery and total_graded == 0:
-            reason = "New student or topic without practice history. Starting at Mixed difficulty baseline."
+    try:
+        # 1. Fetch existing topic mastery record
+        mastery = get_topic_mastery(student_id, course_code, topic_name, conn=conn)
+        if mastery and mastery.get("current_level") in VALID_ADAPTIVE_LEVELS:
+            prior_level = mastery["current_level"].lower()
+            known_weak = mastery.get("weak_concepts") or []
+            known_strong = mastery.get("strong_concepts") or []
         else:
-            reason = (
-                f"Insufficient practice history ({total_graded}/{min_questions} valid graded questions). "
-                f"Retaining current level ({prior_level.capitalize()})."
-            )
-    else:
-        is_active = True
-        recommended = compute_next_adaptive_level(
-            current_level=prior_level,
-            total_questions=total_graded,
-            mastery_score=accuracy,
-            promotion_threshold=PROMOTION_THRESHOLD,
-            demotion_threshold=DEMOTION_THRESHOLD,
-            min_questions=min_questions
+            prior_level = ADAPTIVE_LEVEL_MIXED
+            known_weak = []
+            known_strong = []
+
+        # 2. Fetch completed attempts for this specific student, course, and topic
+        topic_attempts = get_topic_history(student_id, course_code, topic_name, conn=conn)
+        # get_topic_history returns attempts ordered by created_at DESC -> reverse for chronological order
+        chronological = list(reversed(topic_attempts))
+
+        # 3. Calculate step-wise adaptive progression across chronological attempts
+        prog = calculate_adaptive_progression(chronological, initial_level=prior_level)
+
+        total_graded = sum(a.get("total", 0) for a in chronological)
+        total_correct = sum(a.get("score", 0) for a in chronological)
+        overall_accuracy = round(total_correct / total_graded, 4) if total_graded > 0 else 0.0
+
+        if total_graded < min_questions:
+            decision = {
+                "student_id": student_id,
+                "course_code": course_code,
+                "topic_name": topic_name,
+                "previous_level": prior_level,
+                "recommended_difficulty": prior_level,
+                "history_window": len(chronological),
+                "graded_answers_count": total_graded,
+                "accuracy": overall_accuracy,
+                "overall_accuracy": overall_accuracy,
+                "reason": (
+                    f"Insufficient practice history ({total_graded}/{min_questions} valid graded questions). "
+                    f"Retaining current level ({prior_level.capitalize()})."
+                ) if total_graded > 0 else "New student or topic without practice history. Starting at Mixed difficulty baseline.",
+                "is_decision_active": False,
+                "consecutive_low_streak": 0,
+                "attempt_count": len(chronological),
+                "weak_concepts": known_weak,
+                "strong_concepts": known_strong,
+                "policy_version": "1.0-stepwise",
+                "timestamp": get_utc_now_iso()
+            }
+            return decision
+
+        # 3. Calculate step-wise adaptive progression across chronological attempts
+        prog = calculate_adaptive_progression(chronological, initial_level=prior_level)
+        latest_accuracy = (prog["latest_percentage"] / 100.0) if prog["attempt_count"] > 0 else overall_accuracy
+
+        decision = {
+            "student_id": student_id,
+            "course_code": course_code,
+            "topic_name": topic_name,
+            "previous_level": prog["previous_level"],
+            "recommended_difficulty": prog["recommended_difficulty"],
+            "history_window": len(chronological),
+            "graded_answers_count": total_graded,
+            "accuracy": latest_accuracy,
+            "overall_accuracy": overall_accuracy,
+            "reason": prog["reason"],
+            "is_decision_active": prog["is_decision_active"],
+            "consecutive_low_streak": prog["consecutive_low_streak"],
+            "attempt_count": prog["attempt_count"],
+            "weak_concepts": known_weak,
+            "strong_concepts": known_strong,
+            "policy_version": "1.0-stepwise",
+            "timestamp": get_utc_now_iso()
+        }
+
+        logger.info(
+            "[ADAPTIVE DECISION] student=%s course=%s topic='%s' prev=%s next=%s attempts=%d reason='%s'",
+            student_id, course_code, topic_name, prog["previous_level"], prog["recommended_difficulty"],
+            len(chronological), prog["reason"]
         )
-
-        if accuracy >= PROMOTION_THRESHOLD:
-            if prior_level == ADAPTIVE_LEVEL_FOUNDATIONAL:
-                reason = f"High recent accuracy ({accuracy:.0%} >= 80%). Promoted from Foundational to Mixed."
-            elif prior_level == ADAPTIVE_LEVEL_MIXED:
-                reason = f"High recent accuracy ({accuracy:.0%} >= 80%). Promoted from Mixed to Advanced."
-            else:
-                reason = f"Consistent high accuracy ({accuracy:.0%}). Maintained Advanced difficulty at ceiling."
-        elif accuracy <= DEMOTION_THRESHOLD:
-            if prior_level == ADAPTIVE_LEVEL_ADVANCED:
-                reason = f"Recent accuracy ({accuracy:.0%} <= 40%) indicates reinforcement needed. Demoted from Advanced to Mixed."
-            elif prior_level == ADAPTIVE_LEVEL_MIXED:
-                reason = f"Recent accuracy ({accuracy:.0%} <= 40%) indicates foundational review needed. Demoted from Mixed to Foundational."
-            else:
-                reason = f"Low recent accuracy ({accuracy:.0%}). Maintained Foundational difficulty at baseline."
-        else:
-            reason = f"Steady recent accuracy ({accuracy:.0%}). Maintained {prior_level.capitalize()} difficulty."
-
-    decision = {
-        "student_id": student_id,
-        "course_code": course_code,
-        "topic_name": topic_name,
-        "previous_level": prior_level,
-        "recommended_difficulty": recommended,
-        "history_window": history_window,
-        "graded_answers_count": total_graded,
-        "accuracy": accuracy,
-        "reason": reason,
-        "is_decision_active": is_active,
-        "weak_concepts": known_weak,
-        "strong_concepts": known_strong,
-        "policy_version": "1.0-stepwise",
-        "timestamp": now_iso
-    }
-
-    logger.info(
-        "[ADAPTIVE DECISION] student=%s topic='%s' prev=%s next=%s graded=%d acc=%.2f reason='%s'",
-        student_id, topic_name, prior_level, recommended, total_graded, accuracy, reason
-    )
-    return decision
+        return decision
+    finally:
+        if close_conn:
+            conn.close()
 
 
 def get_recommended_difficulty(

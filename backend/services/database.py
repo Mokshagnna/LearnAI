@@ -1241,7 +1241,23 @@ def upsert_topic_mastery(
         merged_strong = list(dict.fromkeys(strong_concepts))
 
     mastery_score = round(new_total_c / new_total_q, 4) if new_total_q > 0 else 0.0
-    next_level = compute_next_adaptive_level(base_level, new_total_q, mastery_score)
+
+    # Derive next_level according to step-wise adaptive rules (50% benchmark)
+    cursor.execute("""
+        SELECT score, total, percentage, recommended_difficulty, created_at
+        FROM quiz_attempts
+        WHERE student_id = ? AND course_code = ? AND topic_name = ?
+        ORDER BY created_at ASC
+    """, (student_id, course_code, topic_name))
+    attempts_rows = [dict(r) for r in cursor.fetchall()]
+
+    from services.adaptive import calculate_adaptive_progression
+    if attempts_rows:
+        prog = calculate_adaptive_progression(attempts_rows, initial_level=base_level)
+        next_level = prog["recommended_difficulty"]
+    else:
+        # Standalone invocation without historical quiz_attempts rows (e.g. unit tests / migrations)
+        next_level = compute_next_adaptive_level(base_level, new_total_q, mastery_score)
 
     mastery_id = str(uuid.uuid4())
     use_mysql = is_mysql_conn(conn) or (is_mysql_active() if conn is None else False)
@@ -2007,61 +2023,81 @@ def get_student_dashboard_data(
         }
 
         # 4. Recommended Topics (Pedagogical Practice Heuristics)
-        recommendations = []
+        # Personalized recommendations are strictly derived from verified student performance:
+        # - Topics with low recent accuracy (< 60%) or weak concepts (High Priority - Review)
+        # - Topics with high mastery (>= 80%) ready for difficulty advancement (Medium Priority - Review)
+        review_topics = []
 
         # Heuristic A: Topics with low recent accuracy (< 60%) or weak concepts (High Priority - Review)
         for tp in topic_progress:
             if tp["recent_accuracy"] < 60.0 or len(tp["weak_concepts"]) > 0:
                 rec_diff = "foundational" if tp["current_level"] == "foundational" else "mixed"
                 weak_hint = f" ({', '.join(tp['weak_concepts'][:2])})" if tp["weak_concepts"] else ""
-                recommendations.append({
+                review_topics.append({
                     "course_code": tp["course_code"],
                     "topic_name": tp["topic_name"],
                     "priority": "high",
                     "reason": f"Needs review: recent accuracy is {tp['recent_accuracy']}%{weak_hint}. Reinforce key concepts.",
-                    "recommended_difficulty": rec_diff
+                    "recommended_difficulty": rec_diff,
+                    "recent_accuracy": tp["recent_accuracy"],
+                    "weak_concepts": tp["weak_concepts"][:3]
                 })
 
-        # Heuristic B: Topics with high mastery (>= 80%) ready for advancement (Medium Priority)
+        # Heuristic B: Topics with high mastery (>= 80%) ready for advancement (Medium Priority - Review)
         for tp in topic_progress:
             if tp["recent_accuracy"] >= 80.0 and tp["current_level"] != "advanced":
                 rec_diff = "advanced" if tp["current_level"] == "mixed" else "mixed"
-                recommendations.append({
+                review_topics.append({
                     "course_code": tp["course_code"],
                     "topic_name": tp["topic_name"],
                     "priority": "medium",
                     "reason": f"Strong mastery ({tp['recent_accuracy']}%)! Ready to advance to {rec_diff} difficulty.",
-                    "recommended_difficulty": rec_diff
+                    "recommended_difficulty": rec_diff,
+                    "recent_accuracy": tp["recent_accuracy"],
+                    "weak_concepts": []
                 })
 
-        # Heuristic C: Unpracticed Syllabus Topics (Explore New Topics)
+        review_topics = review_topics[:4]
+
+        # Personalized recommendations are strictly review_topics (never unpracticed topics)
+        recommended_topics = list(review_topics)
+
+        # Explore topics (syllabus unpracticed topics) - ONLY relevant to the requested course_code
+        # or courses the student has actually practiced. Never leak unrelated curriculum courses!
+        explore_topics = []
         try:
             from services.curriculum_service import curriculum_service
             curriculum_data = curriculum_service.get_curriculum()
-            target_courses = [c for c in curriculum_data.get("courses", []) if not course_code or c.get("code") == course_code]
+
+            if course_code:
+                target_courses = [c for c in curriculum_data.get("courses", []) if c.get("code") == course_code]
+            else:
+                practiced_courses = {tp["course_code"] for tp in topic_progress}
+                target_courses = [c for c in curriculum_data.get("courses", []) if c.get("code") in practiced_courses]
 
             unpracticed_count = 0
+            max_unpracticed = 4
             for c in target_courses:
                 c_code = c.get("code", "")
                 for t in c.get("topics", []):
                     t_name = t.get("name", "")
                     if (c_code, t_name) not in practiced_topic_keys:
-                        recommendations.append({
+                        explore_topics.append({
                             "course_code": c_code,
                             "topic_name": t_name,
-                            "priority": "medium" if completed_quizzes == 0 else "low",
-                            "reason": "Unpracticed syllabus topic. Begin practice with foundational/mixed questions.",
+                            "priority": "low",
+                            "reason": "Unpracticed syllabus topic. Begin practice with mixed-difficulty questions.",
                             "recommended_difficulty": "mixed"
                         })
                         unpracticed_count += 1
-                        if unpracticed_count >= (4 if completed_quizzes == 0 else 2):
+                        if unpracticed_count >= max_unpracticed:
                             break
-                if unpracticed_count >= (4 if completed_quizzes == 0 else 2):
+                if unpracticed_count >= max_unpracticed:
                     break
         except Exception as e:
             logger.warning("Could not fetch curriculum for dashboard recommendations: %s", e)
 
-        recommendations = recommendations[:6]
+        explore_topics = explore_topics[:4]
 
         disclaimer = (
             "Difficulty recommendations and mastery insights are algorithmic practice heuristics "
@@ -2075,7 +2111,10 @@ def get_student_dashboard_data(
             "recent_trends": recent_trends,
             "topic_progress": topic_progress,
             "concept_insights": concept_insights,
-            "recommended_topics": recommendations,
+            "review_topics": review_topics,
+            "explore_topics": explore_topics,
+            "recommended_topics": recommended_topics,
+            "has_completed_quizzes": completed_quizzes > 0,
             "disclaimer": disclaimer
         }
 

@@ -927,22 +927,31 @@ function renderDashboard(data) {
 
   const overview = data.overview || {};
   const completed = overview.completed_quizzes || 0;
+  const hasCompleted = (data.has_completed_quizzes !== undefined)
+    ? Boolean(data.has_completed_quizzes)
+    : (completed > 0);
 
-  if (completed === 0) {
-    if (emptyEl) emptyEl.classList.remove("hidden");
+  if (!hasCompleted || completed === 0) {
     if (contentEl) contentEl.classList.add("hidden");
+    if (emptyEl) emptyEl.classList.remove("hidden");
     return;
   }
 
   if (emptyEl) emptyEl.classList.add("hidden");
   if (contentEl) contentEl.classList.remove("hidden");
 
+  renderReturningDashboard(data);
+}
+
+function renderReturningDashboard(data) {
+  const overview = data.overview || {};
+
   // 1. Overview Metrics
-  if ($("statCompletedQuizzes")) $("statCompletedQuizzes").textContent = overview.completed_quizzes;
-  if ($("statTotalQuestions")) $("statTotalQuestions").textContent = overview.total_questions;
-  if ($("statTotalCorrectSub")) $("statTotalCorrectSub").textContent = `${overview.total_correct} correct`;
-  if ($("statOverallAccuracy")) $("statOverallAccuracy").textContent = `${overview.overall_accuracy}%`;
-  if ($("statTopicsPracticed")) $("statTopicsPracticed").textContent = overview.topics_practiced;
+  if ($("statCompletedQuizzes")) $("statCompletedQuizzes").textContent = overview.completed_quizzes || 0;
+  if ($("statTotalQuestions")) $("statTotalQuestions").textContent = overview.total_questions || 0;
+  if ($("statTotalCorrectSub")) $("statTotalCorrectSub").textContent = `${overview.total_correct || 0} correct`;
+  if ($("statOverallAccuracy")) $("statOverallAccuracy").textContent = `${overview.overall_accuracy || 0}%`;
+  if ($("statTopicsPracticed")) $("statTopicsPracticed").textContent = overview.topics_practiced || 0;
   if ($("statLastPracticed")) {
     if (overview.last_practiced_at) {
       const d = new Date(overview.last_practiced_at);
@@ -952,28 +961,37 @@ function renderDashboard(data) {
     }
   }
 
-  // 2. Recommended Topics Next
-  const recListEl = $("recommendedTopicsList");
-  if (recListEl) {
-    const recs = data.recommended_topics || [];
-    if (!recs.length) {
-      recListEl.innerHTML = "<p class='muted'>No recommendations available at this time.</p>";
+  // 2. Recommended Review (Topics Needing Review)
+  const reviewListEl = $("reviewTopicsList");
+  const reviewTopics = data.review_topics || data.recommended_topics || [];
+
+  if (reviewListEl) {
+    if (!reviewTopics.length) {
+      reviewListEl.innerHTML = `
+        <div class="on-track-card">
+          <div class="on-track-icon" aria-hidden="true">&#x2713;</div>
+          <div>
+            <strong>All Practiced Topics on Track</strong>
+            <p class="muted">You have maintained solid performance across practiced topics. Choose a topic from Practice Quiz to begin a new session.</p>
+          </div>
+        </div>
+      `;
     } else {
-      recListEl.innerHTML = recs.map(r => {
-        const priorityClass = r.priority || "medium";
-        const priorityLabel = r.priority === "high" ? "Focus Area" : (r.priority === "medium" ? "Recommended" : "Explore");
+      reviewListEl.innerHTML = reviewTopics.map(r => {
+        const isHigh = r.priority === "high";
+        const badgeClass = isHigh ? "badge-review-high" : "badge-review-adv";
+        const badgeText = isHigh ? "Needs Review" : "Ready to Advance";
         return `
-          <div class="rec-card ${priorityClass}">
+          <div class="rec-card ${isHigh ? 'card-review-high' : 'card-review-adv'}">
             <div>
               <div class="rec-meta">
-                <span class="rec-priority ${priorityClass}">${escapeHtml(priorityLabel)}</span>
-                <span class="tag-chip tag-chip-sm">${escapeHtml(r.recommended_difficulty || "mixed")}</span>
+                <span class="course-code-pill">${escapeHtml(r.course_code)}</span>
+                <span class="badge ${badgeClass}">${badgeText}</span>
               </div>
               <h3 class="rec-title">${escapeHtml(r.topic_name)}</h3>
-              <div class="quiz-course-label">${escapeHtml(r.course_code)}</div>
-              <div class="rec-reason">${escapeHtml(r.reason)}</div>
+              <p class="rec-reason">${escapeHtml(r.reason)}</p>
             </div>
-            <button type="button" class="practice-topic-btn" data-course="${escapeHtml(r.course_code)}" data-topic="${escapeHtml(r.topic_name)}">
+            <button type="button" class="practice-topic-btn ${isHigh ? 'btn-primary' : 'secondary'}" data-course="${escapeHtml(r.course_code)}" data-topic="${escapeHtml(r.topic_name)}">
               Practice Topic
             </button>
           </div>
@@ -982,7 +1000,13 @@ function renderDashboard(data) {
     }
   }
 
-  // 3. Performance Trends (Chart + List)
+  // Backward compatibility alias for any caller expecting recommendedTopicsList
+  const recListEl = $("recommendedTopicsList");
+  if (recListEl && reviewListEl) {
+    recListEl.innerHTML = reviewListEl.innerHTML;
+  }
+
+  // 4. Performance Trends (Chart + List)
   const trendsWrap = $("trendChartWrap");
   const tableWrap = $("recentAttemptsTableWrap");
   const trends = data.recent_trends || [];
@@ -1050,7 +1074,7 @@ function renderDashboard(data) {
     }
   }
 
-  // 4. Topic Progress & Mastery
+  // 5. Topic Progress & Mastery
   const topicListEl = $("topicProgressList");
   if (topicListEl) {
     const topics = data.topic_progress || [];
@@ -1111,7 +1135,7 @@ function renderDashboard(data) {
     }
   }
 
-  // 5. Concept Insights
+  // 6. Concept Insights
   const ci = data.concept_insights || {};
   if ($("dashboardStrongConcepts")) {
     const sc = ci.strong_concepts || [];
@@ -1124,7 +1148,7 @@ function renderDashboard(data) {
     const wc = ci.weak_concepts || [];
     $("dashboardWeakConcepts").innerHTML = wc.length
       ? wc.map(c => `<span class="tag-chip tag-chip-weak">${escapeHtml(c)}</span>`).join("")
-      : "<span class='muted'>No active weak concepts! Great work.</span>";
+      : "<span class='muted'>No active weak concepts identified. Great work!</span>";
   }
 
   attachPracticeTopicListeners();
