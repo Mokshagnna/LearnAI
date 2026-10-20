@@ -977,23 +977,136 @@ function renderReturningDashboard(data) {
         </div>
       `;
     } else {
-      reviewListEl.innerHTML = reviewTopics.map(r => {
+      reviewListEl.innerHTML = reviewTopics.map((r, idx) => {
         const isHigh = r.priority === "high";
         const badgeClass = isHigh ? "badge-review-high" : "badge-review-adv";
         const badgeText = isHigh ? "Needs Review" : "Ready to Advance";
+        const cardId = `rec-card-${idx}`;
+
+        const latestScore = (r.latest_score !== undefined && r.latest_score !== null) ? r.latest_score : null;
+        const latestTotal = (r.latest_total !== undefined && r.latest_total !== null) ? r.latest_total : null;
+        const latestAcc = (r.latest_accuracy !== undefined && r.latest_accuracy !== null)
+          ? r.latest_accuracy
+          : (r.recent_accuracy || 0);
+
+        const hasComparison = Boolean(r.attempt_count > 1 && r.score_change !== null && r.score_change !== undefined);
+        let deltaHtml = "";
+        if (hasComparison) {
+          const changeVal = r.score_change;
+          const prevAcc = (r.previous_accuracy !== undefined && r.previous_accuracy !== null) ? r.previous_accuracy : "--";
+          if (r.change_type === "improved" || changeVal > 0) {
+            deltaHtml = `
+              <span class="rec-delta rec-delta-improved" title="Improved by ${changeVal}% compared to previous attempt (${prevAcc}%)">
+                <span class="delta-arrow" aria-hidden="true">&uarr;</span> +${changeVal}% vs prev (${prevAcc}%)
+              </span>
+            `;
+          } else if (r.change_type === "declined" || changeVal < 0) {
+            deltaHtml = `
+              <span class="rec-delta rec-delta-declined" title="Declined by ${Math.abs(changeVal)}% compared to previous attempt (${prevAcc}%)">
+                <span class="delta-arrow" aria-hidden="true">&darr;</span> ${changeVal}% vs prev (${prevAcc}%)
+              </span>
+            `;
+          } else {
+            deltaHtml = `
+              <span class="rec-delta rec-delta-neutral" title="Score unchanged compared to previous attempt">
+                No change (${prevAcc}%)
+              </span>
+            `;
+          }
+        } else if (r.attempt_count === 1) {
+          deltaHtml = `<span class="rec-delta rec-delta-single">First attempt</span>`;
+        }
+
+        const attemptsBadge = (r.attempt_count && r.attempt_count > 1)
+          ? `<span class="rec-attempts-pill">${r.attempt_count} attempts</span>`
+          : `<span class="rec-attempts-pill">1 attempt</span>`;
+
+        const historyItems = (Array.isArray(r.history) && r.history.length > 1) ? r.history : [];
+        const hasHistory = historyItems.length > 1;
+
+        let historyHtml = "";
+        if (hasHistory) {
+          const rows = historyItems.map((h, hIdx) => {
+            const isLatest = hIdx === 0;
+            const dateStr = h.created_at ? new Date(h.created_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "--";
+            const rowClass = isLatest ? "history-row-current" : "";
+            const attemptLabel = isLatest ? "Latest" : `#${historyItems.length - hIdx}`;
+            return `
+              <tr class="${rowClass}">
+                <td>${isLatest ? `<strong>${attemptLabel}</strong>` : attemptLabel}</td>
+                <td><strong>${h.score}/${h.total}</strong></td>
+                <td>${h.accuracy}%</td>
+                <td><span class="level-chip">${escapeHtml(h.recommended_difficulty || "mixed")}</span></td>
+                <td>${dateStr}</td>
+              </tr>
+            `;
+          }).join("");
+
+          historyHtml = `
+            <div id="history-panel-${cardId}" class="topic-history-panel hidden" aria-hidden="true">
+              <div class="topic-history-header">Attempt History</div>
+              <div class="table-container">
+                <table class="history-table" aria-label="Attempt history for ${escapeHtml(r.topic_name)}">
+                  <thead>
+                    <tr>
+                      <th scope="col">Attempt</th>
+                      <th scope="col">Score</th>
+                      <th scope="col">Accuracy</th>
+                      <th scope="col">Level</th>
+                      <th scope="col">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${rows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+        }
+
         return `
-          <div class="rec-card ${isHigh ? 'card-review-high' : 'card-review-adv'}">
-            <div>
+          <div class="rec-card ${isHigh ? 'card-review-high' : 'card-review-adv'}" id="${cardId}">
+            <div class="rec-card-body">
               <div class="rec-meta">
-                <span class="course-code-pill">${escapeHtml(r.course_code)}</span>
+                <div class="rec-meta-left">
+                  <span class="course-code-pill">${escapeHtml(r.course_code)}</span>
+                  ${attemptsBadge}
+                </div>
                 <span class="badge ${badgeClass}">${badgeText}</span>
               </div>
               <h3 class="rec-title">${escapeHtml(r.topic_name)}</h3>
+
+              <!-- Primary Score & Progress Section -->
+              <div class="rec-score-box">
+                <div class="rec-score-header">
+                  <div class="rec-score-primary">
+                    <span class="rec-score-pct">${latestAcc}%</span>
+                    ${latestScore !== null && latestTotal !== null ? `<span class="rec-score-fraction">(${latestScore}/${latestTotal})</span>` : ""}
+                  </div>
+                  ${deltaHtml}
+                </div>
+                <div class="rec-progress-track" role="progressbar" aria-valuenow="${latestAcc}" aria-valuemin="0" aria-valuemax="100" aria-label="Latest score: ${latestAcc}%">
+                  <div class="rec-progress-fill ${isHigh ? 'fill-warning' : 'fill-brand'}" style="width: ${Math.min(100, Math.max(0, latestAcc))}%"></div>
+                </div>
+              </div>
+
               <p class="rec-reason">${escapeHtml(r.reason)}</p>
             </div>
-            <button type="button" class="practice-topic-btn ${isHigh ? 'btn-primary' : 'secondary'}" data-course="${escapeHtml(r.course_code)}" data-topic="${escapeHtml(r.topic_name)}">
-              Practice Topic
-            </button>
+
+            <div class="rec-card-footer">
+              <div class="rec-actions">
+                <button type="button" class="practice-topic-btn ${isHigh ? 'btn-primary' : 'secondary'}" data-course="${escapeHtml(r.course_code)}" data-topic="${escapeHtml(r.topic_name)}">
+                  Practice Topic
+                </button>
+                ${hasHistory ? `
+                  <button type="button" class="secondary topic-history-toggle-btn" aria-expanded="false" aria-controls="history-panel-${cardId}">
+                    View history
+                  </button>
+                ` : ""}
+              </div>
+              ${historyHtml}
+            </div>
           </div>
         `;
       }).join("");
@@ -1152,6 +1265,30 @@ function renderReturningDashboard(data) {
   }
 
   attachPracticeTopicListeners();
+  attachHistoryToggleListeners();
+}
+
+function attachHistoryToggleListeners() {
+  document.querySelectorAll(".topic-history-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const panelId = btn.getAttribute("aria-controls");
+      if (!panelId) return;
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
+      const isHidden = panel.classList.contains("hidden");
+      if (isHidden) {
+        panel.classList.remove("hidden");
+        panel.setAttribute("aria-hidden", "false");
+        btn.setAttribute("aria-expanded", "true");
+        btn.textContent = "Hide history";
+      } else {
+        panel.classList.add("hidden");
+        panel.setAttribute("aria-hidden", "true");
+        btn.setAttribute("aria-expanded", "false");
+        btn.textContent = "View history";
+      }
+    });
+  });
 }
 
 function attachPracticeTopicListeners() {

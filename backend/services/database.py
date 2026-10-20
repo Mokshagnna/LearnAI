@@ -2022,42 +2022,175 @@ def get_student_dashboard_data(
             "strong_concepts": dedup_strong
         }
 
-        # 4. Recommended Topics (Pedagogical Practice Heuristics)
+        # 4. Recommended Topics (Consolidated one card per unique course + topic)
         # Personalized recommendations are strictly derived from verified student performance:
         # - Topics with low recent accuracy (< 60%) or weak concepts (High Priority - Review)
         # - Topics with high mastery (>= 80%) ready for difficulty advancement (Medium Priority - Review)
-        review_topics = []
+        # Strictly one card per unique (course_code, topic_name) to avoid duplicates from repeated quizzes.
+
+        # Query all completed attempts for attempt counts, latest vs previous comparisons, and history
+        if course_code:
+            cursor.execute("""
+                SELECT id, session_id, student_id, course_code, course_name, topic_name,
+                       score, total, percentage, status, recommended_difficulty, created_at
+                FROM quiz_attempts
+                WHERE student_id = ? AND course_code = ?
+                ORDER BY created_at DESC, id DESC
+            """, (student_id, course_code))
+        else:
+            cursor.execute("""
+                SELECT id, session_id, student_id, course_code, course_name, topic_name,
+                       score, total, percentage, status, recommended_difficulty, created_at
+                FROM quiz_attempts
+                WHERE student_id = ?
+                ORDER BY created_at DESC, id DESC
+            """, (student_id,))
+
+        raw_attempts = cursor.fetchall()
+        attempts_by_topic: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        for row in raw_attempts:
+            status_val = (row["status"] or "").lower().strip()
+            total_val = int(row["total"])
+            # Exclude incomplete/abandoned/ungraded/zero-total attempts
+            if status_val in ("abandoned", "incomplete", "ungraded") or total_val <= 0:
+                continue
+
+            t_key = (row["course_code"], row["topic_name"])
+            if t_key not in attempts_by_topic:
+                attempts_by_topic[t_key] = []
+
+            score_val = int(row["score"])
+            acc_val = round((score_val / total_val) * 100, 1)
+
+            attempts_by_topic[t_key].append({
+                "attempt_id": row["id"],
+                "course_code": row["course_code"],
+                "course_name": row["course_name"],
+                "topic_name": row["topic_name"],
+                "score": score_val,
+                "total": total_val,
+                "accuracy": acc_val,
+                "percentage": float(row["percentage"]),
+                "recommended_difficulty": row["recommended_difficulty"] or "mixed",
+                "created_at": row["created_at"],
+                "status": row["status"]
+            })
+
+        def _compute_topic_stats(t_key: Tuple[str, str], fallback_tp: Dict[str, Any]) -> Dict[str, Any]:
+            topic_attempts = attempts_by_topic.get(t_key, [])
+            if not topic_attempts:
+                return {
+                    "latest_score": fallback_tp.get("total_correct"),
+                    "latest_total": fallback_tp.get("total_questions"),
+                    "latest_accuracy": fallback_tp.get("recent_accuracy", 0.0),
+                    "previous_score": None,
+                    "previous_total": None,
+                    "previous_accuracy": None,
+                    "score_change": None,
+                    "change_type": "single_attempt",
+                    "change_label": "First attempt",
+                    "attempt_count": fallback_tp.get("attempt_count", 1),
+                    "history": []
+                }
+
+            latest = topic_attempts[0]
+            latest_score = latest["score"]
+            latest_total = latest["total"]
+            latest_acc = latest["accuracy"]
+            count = len(topic_attempts)
+
+            if count > 1:
+                prev = topic_attempts[1]
+                prev_score = prev["score"]
+                prev_total = prev["total"]
+                prev_acc = prev["accuracy"]
+                score_change = round(latest_acc - prev_acc, 1)
+                if score_change > 0:
+                    change_type = "improved"
+                    change_label = f"+{score_change:g}% vs previous"
+                elif score_change < 0:
+                    change_type = "declined"
+                    change_label = f"{score_change:g}% vs previous"
+                else:
+                    change_type = "no_change"
+                    change_label = "No change"
+            else:
+                prev_score = None
+                prev_total = None
+                prev_acc = None
+                score_change = None
+                change_type = "single_attempt"
+                change_label = "First attempt"
+
+            history_items = [
+                {
+                    "attempt_id": att["attempt_id"],
+                    "score": att["score"],
+                    "total": att["total"],
+                    "accuracy": att["accuracy"],
+                    "recommended_difficulty": att["recommended_difficulty"],
+                    "created_at": att["created_at"],
+                    "status": att["status"]
+                }
+                for att in topic_attempts
+            ]
+
+            return {
+                "latest_score": latest_score,
+                "latest_total": latest_total,
+                "latest_accuracy": latest_acc,
+                "previous_score": prev_score,
+                "previous_total": prev_total,
+                "previous_accuracy": prev_acc,
+                "score_change": score_change,
+                "change_type": change_type,
+                "change_label": change_label,
+                "attempt_count": count,
+                "history": history_items
+            }
+
+        review_dict: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
         # Heuristic A: Topics with low recent accuracy (< 60%) or weak concepts (High Priority - Review)
         for tp in topic_progress:
+            key = (tp["course_code"], tp["topic_name"])
+            if key in review_dict:
+                continue
             if tp["recent_accuracy"] < 60.0 or len(tp["weak_concepts"]) > 0:
                 rec_diff = "foundational" if tp["current_level"] == "foundational" else "mixed"
                 weak_hint = f" ({', '.join(tp['weak_concepts'][:2])})" if tp["weak_concepts"] else ""
-                review_topics.append({
+                stats = _compute_topic_stats(key, tp)
+                review_dict[key] = {
                     "course_code": tp["course_code"],
                     "topic_name": tp["topic_name"],
                     "priority": "high",
                     "reason": f"Needs review: recent accuracy is {tp['recent_accuracy']}%{weak_hint}. Reinforce key concepts.",
                     "recommended_difficulty": rec_diff,
                     "recent_accuracy": tp["recent_accuracy"],
-                    "weak_concepts": tp["weak_concepts"][:3]
-                })
+                    "weak_concepts": tp["weak_concepts"][:3],
+                    **stats
+                }
 
         # Heuristic B: Topics with high mastery (>= 80%) ready for advancement (Medium Priority - Review)
         for tp in topic_progress:
+            key = (tp["course_code"], tp["topic_name"])
+            if key in review_dict:
+                continue
             if tp["recent_accuracy"] >= 80.0 and tp["current_level"] != "advanced":
                 rec_diff = "advanced" if tp["current_level"] == "mixed" else "mixed"
-                review_topics.append({
+                stats = _compute_topic_stats(key, tp)
+                review_dict[key] = {
                     "course_code": tp["course_code"],
                     "topic_name": tp["topic_name"],
                     "priority": "medium",
                     "reason": f"Strong mastery ({tp['recent_accuracy']}%)! Ready to advance to {rec_diff} difficulty.",
                     "recommended_difficulty": rec_diff,
                     "recent_accuracy": tp["recent_accuracy"],
-                    "weak_concepts": []
-                })
+                    "weak_concepts": [],
+                    **stats
+                }
 
-        review_topics = review_topics[:4]
+        review_topics = list(review_dict.values())[:4]
 
         # Personalized recommendations are strictly review_topics (never unpracticed topics)
         recommended_topics = list(review_topics)
