@@ -40,12 +40,59 @@ from scripts.cleanup_orphan_student import (
     REQUIRED_CONFIRMATION_PHRASE,
 )
 
-CA_PATH = r"C:\Users\moksh\LearnAI-secrets\tidb-ca.pem"
-SYNTHETIC_CANDIDATE_UUID = "c7a8b9d0-1e2f-4a3b-8c4d-5e6f7a8b9c0d"
-SYNTHETIC_TARGET_URL = (
-    f"mysql://test_user:strong_pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test"
-    f"?ssl_mode=VERIFY_IDENTITY&ssl_ca={CA_PATH}"
+# Standard public root CA certificate (ISRG Root X1 / Let's Encrypt / TiDB Cloud standard public root CA)
+TEST_CA_CERT_PEM = (
+    "-----BEGIN CERTIFICATE-----\n"
+    "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\n"
+    "-----END CERTIFICATE-----\n"
 )
+
+SYNTHETIC_CANDIDATE_UUID = "c7a8b9d0-1e2f-4a3b-8c4d-5e6f7a8b9c0d"
+
+
+@pytest.fixture
+def ca_cert_path(tmp_path: Path) -> str:
+    """Create a temporary, portable CA certificate file for TLS preflight tests."""
+    ca_file = tmp_path / "test-tidb-ca.pem"
+    ca_file.write_text(TEST_CA_CERT_PEM, encoding="utf-8")
+    return str(ca_file)
+
+
+@pytest.fixture
+def synthetic_target_url(ca_cert_path: str) -> str:
+    """Construct a portable synthetic target URL referencing the temporary CA certificate."""
+    return (
+        f"mysql://test_user:strong_pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test"
+        f"?ssl_mode=VERIFY_IDENTITY&ssl_ca={ca_cert_path}"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -346,9 +393,9 @@ class TestStrictCountParser:
 class TestTargetValidationAndPreflight:
     """Tests for cleanup target URL validation safeguards."""
 
-    def test_valid_target_url_accepted(self, monkeypatch):
+    def test_valid_target_url_accepted(self, monkeypatch, synthetic_target_url):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
-        valid, msg, params = validate_cleanup_target_url(SYNTHETIC_TARGET_URL)
+        valid, msg, params = validate_cleanup_target_url(synthetic_target_url)
         assert valid is True
         assert "successful" in msg
         assert params["host"] == "gateway01.us-west-2.prod.aws.tidbcloud.com"
@@ -365,63 +412,64 @@ class TestTargetValidationAndPreflight:
         valid, msg, _ = validate_cleanup_target_url("")
         assert valid is False
 
-    def test_unsupported_scheme_rejected(self, monkeypatch):
+    def test_unsupported_scheme_rejected(self, monkeypatch, ca_cert_path):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
-        bad_url = f"postgresql://user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={CA_PATH}"
+        bad_url = f"postgresql://user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={ca_cert_path}"
         valid, msg, _ = validate_cleanup_target_url(bad_url)
         assert valid is False
         assert "Invalid database URL scheme" in msg
 
-    def test_production_target_rejected(self, monkeypatch):
+    def test_production_target_rejected(self, monkeypatch, ca_cert_path):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
-        url1 = f"mysql://prod_admin:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={CA_PATH}"
+        url1 = f"mysql://prod_admin:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={ca_cert_path}"
         valid, msg, _ = validate_cleanup_target_url(url1)
         assert valid is False
         assert "production target indicators" in msg
 
-        url2 = f"mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_prod?ssl_mode=VERIFY_IDENTITY&ssl_ca={CA_PATH}"
+        url2 = f"mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_prod?ssl_mode=VERIFY_IDENTITY&ssl_ca={ca_cert_path}"
         valid, msg, _ = validate_cleanup_target_url(url2)
         assert valid is False
 
-        url3 = f"mysql://test_user:pwd@mysql-production.internal:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={CA_PATH}"
+        url3 = f"mysql://test_user:pwd@mysql-production.internal:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={ca_cert_path}"
         valid, msg, _ = validate_cleanup_target_url(url3)
         assert valid is False
 
-    def test_remote_target_without_confirmation_env_rejected(self, monkeypatch):
+    def test_remote_target_without_confirmation_env_rejected(self, monkeypatch, synthetic_target_url):
         monkeypatch.delenv("CONFIRM_DISPOSABLE_TEST_TARGET", raising=False)
-        valid, msg, _ = validate_cleanup_target_url(SYNTHETIC_TARGET_URL)
+        valid, msg, _ = validate_cleanup_target_url(synthetic_target_url)
         assert valid is False
         assert "CONFIRM_DISPOSABLE_TEST_TARGET=true" in msg
 
-    def test_non_gateway_hostname_rejected(self, monkeypatch):
+    def test_non_gateway_hostname_rejected(self, monkeypatch, ca_cert_path):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
-        url = f"mysql://test_user:pwd@custom-server.example.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={CA_PATH}"
+        url = f"mysql://test_user:pwd@custom-server.example.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={ca_cert_path}"
         valid, msg, _ = validate_cleanup_target_url(url)
         assert valid is False
         assert "approved TiDB Cloud Serverless gateway host" in msg
 
-    def test_non_4000_port_rejected(self, monkeypatch):
+    def test_non_4000_port_rejected(self, monkeypatch, ca_cert_path):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
-        url = f"mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:3306/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={CA_PATH}"
+        url = f"mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:3306/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={ca_cert_path}"
         valid, msg, _ = validate_cleanup_target_url(url)
         assert valid is False
         assert "port 4000" in msg
 
-    def test_non_learnai_test_database_rejected(self, monkeypatch):
+    def test_non_learnai_test_database_rejected(self, monkeypatch, ca_cert_path):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
-        url = f"mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/other_test_db?ssl_mode=VERIFY_IDENTITY&ssl_ca={CA_PATH}"
+        url = f"mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/other_test_db?ssl_mode=VERIFY_IDENTITY&ssl_ca={ca_cert_path}"
         valid, msg, _ = validate_cleanup_target_url(url)
         assert valid is False
         assert "only 'learnai_test' is permitted" in msg
 
-    def test_missing_or_invalid_ca_rejected(self, monkeypatch):
+    def test_missing_or_invalid_ca_rejected(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
         url1 = "mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY"
         valid, msg, _ = validate_cleanup_target_url(url1)
         assert valid is False
         assert "ssl_ca parameter is required" in msg
 
-        url2 = "mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca=C:/nonexistent/ca.pem"
+        nonexistent_path = (tmp_path / "nonexistent-ca.pem").as_posix()
+        url2 = f"mysql://test_user:pwd@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/learnai_test?ssl_mode=VERIFY_IDENTITY&ssl_ca={nonexistent_path}"
         valid, msg, _ = validate_cleanup_target_url(url2)
         assert valid is False
         assert "CA certificate file does not exist" in msg
@@ -448,9 +496,9 @@ class TestAttributionAndIsolationGuards:
         assert check_candidate_attribution()[0] is False
         assert check_operational_isolation()[0] is False
 
-    def test_inspect_candidate_marks_deletion_disallowed(self, monkeypatch):
+    def test_inspect_candidate_marks_deletion_disallowed(self, monkeypatch, synthetic_target_url):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
-        summary = inspect_candidate(SYNTHETIC_TARGET_URL, SYNTHETIC_CANDIDATE_UUID)
+        summary = inspect_candidate(synthetic_target_url, SYNTHETIC_CANDIDATE_UUID)
         assert summary["status"] == "OFFLINE_PREFLIGHT_PASS"
         assert summary["mode"] == "OFFLINE PREFLIGHT ONLY"
         assert summary["target_valid"] is True
@@ -468,14 +516,14 @@ class TestAttributionAndIsolationGuards:
 class TestDeletionRefusal:
     """Tests proving live deletion is unconditionally refused."""
 
-    def test_execute_cleanup_returns_nonzero_and_refuses(self):
-        code = execute_cleanup(SYNTHETIC_TARGET_URL, SYNTHETIC_CANDIDATE_UUID)
+    def test_execute_cleanup_returns_nonzero_and_refuses(self, synthetic_target_url):
+        code = execute_cleanup(synthetic_target_url, SYNTHETIC_CANDIDATE_UUID)
         assert code == 1
 
-    def test_cli_execute_flag_returns_code_1_and_refuses(self, monkeypatch, capsys):
+    def test_cli_execute_flag_returns_code_1_and_refuses(self, monkeypatch, capsys, synthetic_target_url):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
         argv = [
-            "--target-url", SYNTHETIC_TARGET_URL,
+            "--target-url", synthetic_target_url,
             "--candidate-id", SYNTHETIC_CANDIDATE_UUID,
             "--execute",
         ]
@@ -485,13 +533,13 @@ class TestDeletionRefusal:
         assert "[REFUSED] Live deletion is explicitly UNAVAILABLE" in captured.out
         assert "ON DELETE CASCADE" in captured.out
 
-    def test_cli_execute_refuses_even_with_force_environment_variables(self, monkeypatch, capsys):
+    def test_cli_execute_refuses_even_with_force_environment_variables(self, monkeypatch, capsys, synthetic_target_url):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
         monkeypatch.setenv("FORCE_DELETE", "true")
         monkeypatch.setenv("CONFIRM_DELETION", "true")
         monkeypatch.setenv("OPERATIONAL_FREEZE_VERIFIED", "true")
         argv = [
-            "--target-url", SYNTHETIC_TARGET_URL,
+            "--target-url", synthetic_target_url,
             "--candidate-id", SYNTHETIC_CANDIDATE_UUID,
             "--execute",
         ]
@@ -791,10 +839,10 @@ class TestCliEntryPoint:
             cleanup_main([])
         assert exc_info.value.code != 0
 
-    def test_cli_inspect_exact_safety_critical_output(self, monkeypatch, capsys):
+    def test_cli_inspect_exact_safety_critical_output(self, monkeypatch, capsys, synthetic_target_url):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
         argv = [
-            "--target-url", SYNTHETIC_TARGET_URL,
+            "--target-url", synthetic_target_url,
             "--candidate-id", SYNTHETIC_CANDIDATE_UUID,
             "--inspect",
         ]
@@ -812,12 +860,12 @@ class TestCliEntryPoint:
         assert "Deletion Allowed:               NO" in captured.out
         assert "INSPECT_COMPLETE" not in captured.out
 
-    def test_cli_inspect_opens_no_connections_and_executes_no_sql(self, monkeypatch):
+    def test_cli_inspect_opens_no_connections_and_executes_no_sql(self, monkeypatch, synthetic_target_url):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
         # Ensure any connection attempt raises immediately
         with patch("pymysql.connect") as mock_connect:
             argv = [
-                "--target-url", SYNTHETIC_TARGET_URL,
+                "--target-url", synthetic_target_url,
                 "--candidate-id", SYNTHETIC_CANDIDATE_UUID,
                 "--inspect",
             ]
@@ -825,11 +873,11 @@ class TestCliEntryPoint:
             assert code == 0
             assert mock_connect.call_count == 0
 
-    def test_cli_execute_opens_no_connections_and_executes_no_sql(self, monkeypatch):
+    def test_cli_execute_opens_no_connections_and_executes_no_sql(self, monkeypatch, synthetic_target_url):
         monkeypatch.setenv("CONFIRM_DISPOSABLE_TEST_TARGET", "true")
         with patch("pymysql.connect") as mock_connect:
             argv = [
-                "--target-url", SYNTHETIC_TARGET_URL,
+                "--target-url", synthetic_target_url,
                 "--candidate-id", SYNTHETIC_CANDIDATE_UUID,
                 "--execute",
             ]
