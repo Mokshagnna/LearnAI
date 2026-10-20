@@ -95,6 +95,16 @@ function showScreen(screenId) {
   const isDashboard = screenId === "dashboardSection";
   $("navDashboardBtn")?.classList.toggle("active", isDashboard);
   $("navPracticeBtn")?.classList.toggle("active", !isDashboard);
+
+  // Safe programmatic focus on screen heading for screen readers & keyboard navigation
+  const activeEl = $(screenId);
+  if (activeEl) {
+    const heading = activeEl.querySelector("h1, h2");
+    if (heading) {
+      heading.setAttribute("tabindex", "-1");
+      heading.focus({ preventScroll: true });
+    }
+  }
 }
 
 // ── Session State Persistence across Browser Refresh ─────────────────────────
@@ -164,7 +174,7 @@ async function loadCourses() {
     curriculum = data.courses || [];
 
     if (!curriculum.length) {
-      $("setupMsg").innerHTML = '<span style="color:#b4493a;font-weight:600;">No courses available in curriculum.</span>';
+      $("setupMsg").innerHTML = '<span class="error-msg">No courses available in curriculum.</span>';
       return;
     }
 
@@ -181,7 +191,7 @@ async function loadCourses() {
     if (courseSelect) {
       courseSelect.innerHTML = '<option value="">Error loading courses</option>';
     }
-    $("setupMsg").innerHTML = '<span style="color:#b4493a;font-weight:600;">Unable to load courses. Please check if the server is running.</span>';
+    $("setupMsg").innerHTML = '<span class="error-msg">Unable to load courses. Please check if the server is running.</span>';
   }
 }
 
@@ -233,7 +243,7 @@ $("generateBtn").addEventListener("click", () => {
   const topicId = selectedOption?.dataset?.topicId || "";
 
   if (!courseCode || !topic) {
-    $("setupMsg").innerHTML = '<span style="color:#b4493a;font-weight:600;">Please select both course and topic.</span>';
+    $("setupMsg").innerHTML = '<span class="error-msg">Please select both course and topic.</span>';
     return;
   }
   $("setupMsg").innerHTML = "";
@@ -252,7 +262,7 @@ $("nextBtn").addEventListener("click", async () => {
   if (!answers[currentIndex]) {
     const alertEl = $("quizAlert");
     if (alertEl) {
-      alertEl.textContent = "⚠️ Please choose an answer to proceed.";
+      alertEl.textContent = "Please choose an answer to proceed.";
       const optEl = $("options");
       if (optEl) {
         optEl.classList.remove("shake");
@@ -293,7 +303,7 @@ $("retakeBtn").addEventListener("click", async () => {
     alert("Unable to detect course and topic for retake. Please choose from setup.");
     goToHome();
     retakeBtn.disabled = false;
-    retakeBtn.textContent = "🔄 Retake with New AI Questions";
+    retakeBtn.textContent = "Retake with New AI Questions";
     retakeBtn.dataset.processing = "false";
     return;
   }
@@ -317,7 +327,7 @@ $("retakeBtn").addEventListener("click", async () => {
   await startQuizGeneration(courseCode, topic, true, topicId);
 
   retakeBtn.disabled = false;
-  retakeBtn.textContent = "🔄 Retake with New AI Questions";
+  retakeBtn.textContent = "Retake with New AI Questions";
   retakeBtn.dataset.processing = "false";
 });
 
@@ -343,7 +353,7 @@ $("loadingCancelBtn")?.addEventListener("click", () => {
   if (generateBtn) generateBtn.disabled = false;
   if (retakeBtn) {
     retakeBtn.disabled = false;
-    retakeBtn.textContent = "🔄 Retake with New AI Questions";
+    retakeBtn.textContent = "Retake with New AI Questions";
     retakeBtn.dataset.processing = "false";
   }
   goToHome();
@@ -489,7 +499,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
       friendlyMsg = e.message;
     }
 
-    if ($("loadingErrorMsg")) $("loadingErrorMsg").textContent = `⚠️ ${friendlyMsg}`;
+    if ($("loadingErrorMsg")) $("loadingErrorMsg").textContent = friendlyMsg;
     if ($("loadingErrorBox")) $("loadingErrorBox").classList.remove("hidden");
 
     // Configure retry button
@@ -821,11 +831,11 @@ async function loadAttemptHistory() {
         month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
       });
       const isCurrent = idx === 0;
-      const rowStyle = isCurrent ? "font-weight:700; background:#f0f7f3;" : "";
+      const rowClass = isCurrent ? "history-row-current" : "";
 
       tableHtml += `
-        <tr style="${rowStyle}">
-          <td>${isCurrent ? '⭐ Current (#' + attemptNum + ')' : 'Attempt #' + attemptNum}</td>
+        <tr class="${rowClass}">
+          <td>${isCurrent ? 'Current (#' + attemptNum + ')' : 'Attempt #' + attemptNum}</td>
           <td>${dateStr}</td>
           <td>${att.score} / ${att.total}</td>
           <td>${att.percentage}%</td>
@@ -957,10 +967,10 @@ function renderDashboard(data) {
             <div>
               <div class="rec-meta">
                 <span class="rec-priority ${priorityClass}">${escapeHtml(priorityLabel)}</span>
-                <span class="tag-chip" style="font-size:11px; margin:0;">${escapeHtml(r.recommended_difficulty || "mixed")}</span>
+                <span class="tag-chip tag-chip-sm">${escapeHtml(r.recommended_difficulty || "mixed")}</span>
               </div>
               <h3 class="rec-title">${escapeHtml(r.topic_name)}</h3>
-              <div class="quiz-course-label" style="margin-bottom:8px;">${escapeHtml(r.course_code)}</div>
+              <div class="quiz-course-label">${escapeHtml(r.course_code)}</div>
               <div class="rec-reason">${escapeHtml(r.reason)}</div>
             </div>
             <button type="button" class="practice-topic-btn" data-course="${escapeHtml(r.course_code)}" data-topic="${escapeHtml(r.topic_name)}">
@@ -1005,7 +1015,7 @@ function renderDashboard(data) {
       tableWrap.innerHTML = "";
     } else {
       let tHtml = `
-        <table class="history-table" style="margin-top:0;">
+        <table class="history-table">
           <thead>
             <tr>
               <th>Date</th>
@@ -1053,11 +1063,11 @@ function renderDashboard(data) {
         const recPct = Math.min(100, Math.max(0, tp.recent_accuracy));
 
         const weakChips = (tp.weak_concepts && tp.weak_concepts.length)
-          ? tp.weak_concepts.map(w => `<span class="tag-chip" style="background:#fdeeee; color:#b4493a; font-size:11px;">⚠️ ${escapeHtml(w)}</span>`).join("")
+          ? tp.weak_concepts.map(w => `<span class="tag-chip tag-chip-weak">${escapeHtml(w)}</span>`).join("")
           : "";
 
         const strongChips = (tp.strong_concepts && tp.strong_concepts.length)
-          ? tp.strong_concepts.map(s => `<span class="tag-chip" style="background:#e7f4ed; color:#103f2d; font-size:11px;">✓ ${escapeHtml(s)}</span>`).join("")
+          ? tp.strong_concepts.map(s => `<span class="tag-chip tag-chip-strong">${escapeHtml(s)}</span>`).join("")
           : "";
 
         return `
@@ -1076,17 +1086,17 @@ function renderDashboard(data) {
                   <span class="accuracy-dual-label">Cumulative (${tp.total_questions} Qs)</span>
                   <span class="accuracy-dual-val">${tp.cumulative_accuracy}%</span>
                 </div>
-                <div class="accuracy-dual-item" style="text-align:right;">
+                <div class="accuracy-dual-item accuracy-dual-right">
                   <span class="accuracy-dual-label">Recent (${tp.recent_questions_count} Qs)</span>
-                  <span class="accuracy-dual-val" style="color:${recPct >= 70 ? '#16794f' : (recPct < 50 ? '#b4493a' : '#e67e22')}">${tp.recent_accuracy}%</span>
+                  <span class="accuracy-dual-val ${recPct >= 70 ? 'acc-high' : (recPct < 50 ? 'acc-low' : 'acc-mid')}">${tp.recent_accuracy}%</span>
                 </div>
               </div>
 
-              <div class="progress" style="margin-bottom:12px;" role="progressbar" aria-valuenow="${cumPct}" aria-valuemin="0" aria-valuemax="100">
-                <div style="width:${cumPct}%; height:100%; background:#136b49;"></div>
+              <div class="progress topic-progress-bar" role="progressbar" aria-valuenow="${cumPct}" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar-fill" style="width:${cumPct}%;"></div>
               </div>
 
-              <div style="margin-bottom:14px;">
+              <div class="topic-chips-wrap">
                 ${weakChips}
                 ${strongChips}
               </div>
@@ -1106,14 +1116,14 @@ function renderDashboard(data) {
   if ($("dashboardStrongConcepts")) {
     const sc = ci.strong_concepts || [];
     $("dashboardStrongConcepts").innerHTML = sc.length
-      ? sc.map(c => `<span class="tag-chip" style="background:#e7f4ed; color:#103f2d;">✓ ${escapeHtml(c)}</span>`).join("")
+      ? sc.map(c => `<span class="tag-chip tag-chip-strong">${escapeHtml(c)}</span>`).join("")
       : "<span class='muted'>No strong concepts identified yet. Complete quizzes to showcase strengths.</span>";
   }
 
   if ($("dashboardWeakConcepts")) {
     const wc = ci.weak_concepts || [];
     $("dashboardWeakConcepts").innerHTML = wc.length
-      ? wc.map(c => `<span class="tag-chip" style="background:#fdeeee; color:#b4493a;">⚠️ ${escapeHtml(c)}</span>`).join("")
+      ? wc.map(c => `<span class="tag-chip tag-chip-weak">${escapeHtml(c)}</span>`).join("")
       : "<span class='muted'>No active weak concepts! Great work.</span>";
   }
 
