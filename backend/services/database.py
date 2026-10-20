@@ -178,23 +178,27 @@ def get_connection(db_path: Optional[Path] = None) -> Any:
             raise DatabaseConnectionError(
                 "Production configuration error: Explicit SQLite path is prohibited in production mode."
             )
-        if not (_db_config.is_postgres or _db_config.is_mysql):
+        if _db_config.is_postgres:
             logger.critical(
-                "CRITICAL: get_connection() invoked in production mode without DATABASE_URL configured. "
+                "CRITICAL: PostgreSQL connection configured in production mode. "
+                "This deployment requires MySQL exclusively."
+            )
+            raise DatabaseConnectionError(
+                "Production configuration error: PostgreSQL is prohibited in production. "
+                "MySQL connection is required."
+            )
+        if not _db_config.is_mysql:
+            logger.critical(
+                "CRITICAL: get_connection() invoked in production mode without valid MySQL DATABASE_URL configured. "
                 "Silent fallback to SQLite is prohibited in production."
             )
             raise DatabaseConnectionError(
-                "Production configuration error: PostgreSQL connection is required in production (or MySQL). "
+                "Production configuration error: MySQL connection is required in production. "
                 "Silent fallback to SQLite is prohibited."
             )
-        if _db_config.is_mysql:
-            if _mysql_adapter is None:
-                _mysql_adapter = MySQLAdapter(_db_config)
-            return _mysql_adapter.get_connection()
-        if _db_config.is_postgres:
-            if _postgres_adapter is None:
-                _postgres_adapter = PostgresAdapter(_db_config)
-            return _postgres_adapter.get_connection()
+        if _mysql_adapter is None:
+            _mysql_adapter = MySQLAdapter(_db_config)
+        return _mysql_adapter.get_connection()
 
     if db_path is not None:
         return _sqlite_adapter.get_connection(db_path=db_path)
@@ -245,7 +249,16 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
             raise DatabaseConnectionError(
                 "Production configuration error: Explicit SQLite path is prohibited in production mode."
             )
-        if not (_db_config.is_postgres or _db_config.is_mysql):
+        if _db_config.is_postgres:
+            logger.critical(
+                "CRITICAL: PostgreSQL connection configured in production mode for init_db(). "
+                "This deployment requires MySQL exclusively."
+            )
+            raise DatabaseConnectionError(
+                "Production configuration error: PostgreSQL is prohibited in production. "
+                "MySQL connection is required."
+            )
+        if not _db_config.is_mysql:
             logger.critical(
                 "CRITICAL: init_db() invoked in production mode without DATABASE_URL configured. "
                 "Silent fallback to SQLite is prohibited in production."
@@ -254,26 +267,15 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
                 "Production configuration error: DATABASE_URL is required in production. "
                 "Silent fallback to SQLite is prohibited."
             )
-        if _db_config.is_mysql:
-            if _mysql_adapter is None:
-                _mysql_adapter = MySQLAdapter(_db_config)
-            conn = _mysql_adapter.get_connection()
-            try:
-                applied = apply_migrations(conn, dialect="mysql")
-                logger.info("MySQL initialized successfully (applied migrations: %s)", applied)
-                return {"status": "ok", "backend": "mysql", "applied_migrations": applied}
-            finally:
-                conn.close()
-        if _db_config.is_postgres:
-            if _postgres_adapter is None:
-                _postgres_adapter = PostgresAdapter(_db_config)
-            conn = _postgres_adapter.get_connection()
-            try:
-                applied = apply_migrations(conn, is_postgres=True, dialect="postgres")
-                logger.info("Supabase PostgreSQL initialized successfully (applied migrations: %s)", applied)
-                return {"status": "ok", "backend": "postgres", "applied_migrations": applied}
-            finally:
-                conn.close()
+        if _mysql_adapter is None:
+            _mysql_adapter = MySQLAdapter(_db_config)
+        conn = _mysql_adapter.get_connection()
+        try:
+            applied = apply_migrations(conn, dialect="mysql")
+            logger.info("MySQL initialized successfully (applied migrations: %s)", applied)
+            return {"status": "ok", "backend": "mysql", "applied_migrations": applied}
+        finally:
+            conn.close()
 
     if db_path is None and _db_config.is_mysql:
         if _mysql_adapter is None:

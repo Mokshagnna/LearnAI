@@ -223,7 +223,7 @@ def validate_production_db_config() -> None:
     when running in production mode.
     Strictly requires canonical DATABASE_URL in production (no aliases).
     Fails fast with clear error message; never prints credentials.
-    Supports PostgreSQL and MySQL production URIs.
+    Enforces MySQL exclusively in production; PostgreSQL and SQLite are prohibited.
     """
     if not is_production_mode():
         return
@@ -232,23 +232,32 @@ def validate_production_db_config() -> None:
     if not db_url:
         logger.critical(
             "CRITICAL: Production startup failed: DATABASE_URL is not configured. "
-            "Production mode requires a valid PostgreSQL or MySQL database connection and will not fall back to SQLite."
+            "Production mode requires a valid MySQL database connection and will not fall back to SQLite."
         )
         raise RuntimeError(
             "Production startup error: DATABASE_URL environment variable is required and cannot be empty. "
-            "Production LearnAI must connect to PostgreSQL or MySQL; silent SQLite fallback is prohibited."
+            "Production LearnAI must connect to MySQL; silent SQLite fallback is prohibited."
         )
 
     is_pg = db_url.startswith("postgresql://") or db_url.startswith("postgres://")
-    is_mysql = db_url.startswith("mysql://") or db_url.startswith("mysql+pymysql://")
-
-    if not (is_pg or is_mysql):
+    if is_pg:
         logger.critical(
-            "CRITICAL: Production startup failed: DATABASE_URL must be a PostgreSQL or MySQL connection URI."
+            "CRITICAL: Production startup failed: PostgreSQL is not supported for this deployment. "
+            "Production LearnAI requires a MySQL connection URI."
         )
         raise RuntimeError(
-            "Production configuration error: DATABASE_URL must be a PostgreSQL connection URI or MySQL connection URI "
-            "(starting with postgresql://, postgres://, or mysql://)."
+            "Production configuration error: PostgreSQL is not supported for this deployment. "
+            "Production LearnAI requires a MySQL connection URI (starting with mysql:// or mysql+pymysql://)."
+        )
+
+    is_mysql = db_url.startswith("mysql://") or db_url.startswith("mysql+pymysql://")
+    if not is_mysql:
+        logger.critical(
+            "CRITICAL: Production startup failed: DATABASE_URL must be a MySQL connection URI."
+        )
+        raise RuntimeError(
+            "Production configuration error: DATABASE_URL must be a MySQL connection URI "
+            "(starting with mysql:// or mysql+pymysql://)."
         )
 
 

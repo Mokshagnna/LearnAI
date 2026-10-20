@@ -125,7 +125,7 @@ class TestMissingDatabaseUrlInProduction:
             get_connection()
 
         err_msg = str(exc_info.value)
-        assert "PostgreSQL connection is required in production" in err_msg
+        assert "MySQL connection is required in production" in err_msg
         assert "Silent fallback to SQLite is prohibited" in err_msg
 
 
@@ -136,7 +136,7 @@ class TestMissingSessionSecretKeyInProduction:
     def test_production_startup_fails_fast_when_session_secret_key_missing(self, monkeypatch):
         """Production startup must raise RuntimeError when SESSION_SECRET_KEY is missing."""
         monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/learnai")
+        monkeypatch.setenv("DATABASE_URL", "mysql://user:pass@localhost:3306/learnai")
         monkeypatch.delenv("SESSION_SECRET_KEY", raising=False)
         monkeypatch.delenv("LEARNAI_SECRET_KEY", raising=False)
 
@@ -149,7 +149,7 @@ class TestMissingSessionSecretKeyInProduction:
     def test_production_rejects_learnai_secret_key_alias(self, monkeypatch):
         """In production, LEARNAI_SECRET_KEY is not accepted as an alias for SESSION_SECRET_KEY."""
         monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/learnai")
+        monkeypatch.setenv("DATABASE_URL", "mysql://user:pass@localhost:3306/learnai")
         monkeypatch.delenv("SESSION_SECRET_KEY", raising=False)
         monkeypatch.setenv("LEARNAI_SECRET_KEY", "legacy-key-that-must-be-rejected-in-prod")
 
@@ -199,7 +199,7 @@ class TestKnownDevelopmentFallbackSecretInProduction:
     def test_production_rejects_known_insecure_secrets(self, monkeypatch, fallback_secret):
         """Production mode must reject template or development fallback secrets."""
         monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/learnai")
+        monkeypatch.setenv("DATABASE_URL", "mysql://user:pass@localhost:3306/learnai")
         monkeypatch.setenv("SESSION_SECRET_KEY", fallback_secret)
 
         with pytest.raises(RuntimeError) as exc_info:
@@ -229,9 +229,9 @@ class TestKnownDevelopmentFallbackSecretInProduction:
 class TestValidProductionConfiguration:
 
     def test_valid_production_passes_all_checks(self, monkeypatch):
-        """With valid PostgreSQL URL and strong secret, all production checks pass."""
+        """With valid MySQL URL and strong secret, all production checks pass."""
         monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.setenv("DATABASE_URL", "postgresql://appuser:apppass@db.example.com:5432/proddb")
+        monkeypatch.setenv("DATABASE_URL", "mysql://appuser:apppass@db.example.com:3306/proddb")
         strong_secret = "k8V#mP2$wL9@aR4!yU1*bE5%zC7&jF3(qH6)"
         monkeypatch.setenv("SESSION_SECRET_KEY", strong_secret)
 
@@ -292,18 +292,57 @@ class TestLocalDevelopmentAndTestFixtures:
         assert get_session_secret() == b"legacy-dev-secret-key-for-test"
 
 
-# ── 6. PostgreSQL Connection Failure Without SQLite Fallback ──────────────────
+# ── 6. Database Connection Failure Without SQLite Fallback ────────────────────
 
-class TestPostgresFailureWithoutFallback:
+class TestPostgresProhibitedInProduction:
 
-    def test_unreachable_postgres_fails_fast_in_production(self, monkeypatch):
+    def test_postgres_in_production_fails_fast_in_get_connection(self, monkeypatch):
         """
-        When PostgreSQL connection fails in production mode:
+        When PostgreSQL is configured in production mode:
+        get_connection() must raise DatabaseConnectionError and NEVER connect or fall back.
+        """
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SESSION_SECRET_KEY", "strong-prod-secret-key-12345678901234567890")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://learnai:secret@127.0.0.1:5432/learnai")
+
+        reset_db_adapter()
+
+        with pytest.raises(DatabaseConnectionError) as exc_info:
+            get_connection()
+
+        err_msg = str(exc_info.value)
+        assert "PostgreSQL is prohibited in production" in err_msg
+        assert "MySQL connection is required" in err_msg
+
+    def test_postgres_in_production_fails_fast_in_init_db(self, monkeypatch):
+        """
+        When PostgreSQL is configured in production mode:
+        init_db() must raise DatabaseConnectionError and NEVER connect or fall back.
+        """
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SESSION_SECRET_KEY", "strong-prod-secret-key-12345678901234567890")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://learnai:secret@127.0.0.1:5432/learnai")
+
+        reset_db_adapter()
+
+        with pytest.raises(DatabaseConnectionError) as exc_info:
+            init_db()
+
+        err_msg = str(exc_info.value)
+        assert "PostgreSQL is prohibited in production" in err_msg
+        assert "MySQL connection is required" in err_msg
+
+
+class TestMySQLFailureWithoutFallback:
+
+    def test_unreachable_mysql_fails_fast_in_production(self, monkeypatch):
+        """
+        When MySQL connection fails in production mode:
         Must raise DatabaseConnectionError and NEVER fall back silently to SQLite.
         """
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("SESSION_SECRET_KEY", "strong-prod-secret-key-12345678901234567890")
-        monkeypatch.setenv("DATABASE_URL", "postgresql://learnai:secret@127.0.0.1:59999/learnai?sslmode=disable")
+        monkeypatch.setenv("DATABASE_URL", "mysql://learnai:secret@127.0.0.1:59999/learnai?connect_timeout=1")
         monkeypatch.setenv("DB_CONNECT_TIMEOUT", "1.0")
 
         reset_db_adapter()
@@ -312,7 +351,7 @@ class TestPostgresFailureWithoutFallback:
             get_connection()
 
         err_msg = str(exc_info.value)
-        assert "PostgreSQL connection to Supabase failed" in err_msg or "failed" in err_msg.lower()
+        assert "MySQL connection failed" in err_msg or "failed" in err_msg.lower()
 
         with pytest.raises(DatabaseConnectionError):
             init_db()
@@ -382,8 +421,8 @@ class TestRenderEnvironmentDetectionAndPrecedence:
 
 class TestInvalidDatabaseUrlScheme:
 
-    def test_non_postgres_scheme_rejected_in_production(self, monkeypatch):
-        """DATABASE_URL pointing to SQLite or non-Postgres scheme must fail fast."""
+    def test_non_mysql_scheme_rejected_in_production(self, monkeypatch):
+        """DATABASE_URL pointing to SQLite or non-MySQL scheme must fail fast."""
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
         monkeypatch.setenv("DATABASE_URL", "sqlite:///backend/data/learnai.db")
@@ -391,7 +430,18 @@ class TestInvalidDatabaseUrlScheme:
         with pytest.raises(RuntimeError) as exc_info:
             validate_production_environment()
 
-        assert "must be a PostgreSQL connection URI" in str(exc_info.value)
+        assert "must be a MySQL connection URI" in str(exc_info.value)
+
+    def test_unsupported_schemes_rejected_in_production(self, monkeypatch):
+        """Unsupported database URI schemes (mongodb, redis, etc.) must be rejected."""
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
+
+        for bad_url in ("mongodb://localhost:27017/learnai", "redis://localhost:6379/0", "oracle://localhost/db"):
+            monkeypatch.setenv("DATABASE_URL", bad_url)
+            with pytest.raises(RuntimeError) as exc_info:
+                validate_production_environment()
+            assert "must be a MySQL connection URI" in str(exc_info.value)
 
 
 # ── 9. Explicit SQLite Path Rejected in Production Mode ───────────────────────
@@ -402,7 +452,7 @@ class TestExplicitSqlitePathRejectedInProduction:
         """Passing an explicit SQLite path in production mode must be rejected immediately."""
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
-        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/learnai")
+        monkeypatch.setenv("DATABASE_URL", "mysql://user:pass@localhost:3306/learnai")
 
         fake_sqlite_path = tmp_path / "sqlite_prohibited.db"
 
@@ -417,7 +467,49 @@ class TestExplicitSqlitePathRejectedInProduction:
         assert "Explicit SQLite path is prohibited in production mode" in str(exc_info.value)
 
 
-# ── 10. Production MySQL Configuration & URI Safeguards ───────────────────────
+# ── 10. Production PostgreSQL Rejection (MySQL-Only Requirement) ───────────────
+
+class TestProductionPostgresRejection:
+
+    def test_postgres_standard_scheme_rejected_in_production(self, monkeypatch):
+        """postgresql:// URI scheme must be explicitly rejected in production mode."""
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://appuser:apppass@db.example.com:5432/proddb")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            validate_production_environment()
+
+        err_msg = str(exc_info.value)
+        assert "PostgreSQL is not supported for this deployment" in err_msg
+        assert "Production LearnAI requires a MySQL connection URI" in err_msg
+
+    def test_postgres_alias_scheme_rejected_in_production(self, monkeypatch):
+        """postgres:// URI scheme must be explicitly rejected in production mode."""
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
+        monkeypatch.setenv("DATABASE_URL", "postgres://appuser:apppass@db.example.com:5432/proddb")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            validate_production_environment()
+
+        err_msg = str(exc_info.value)
+        assert "PostgreSQL is not supported for this deployment" in err_msg
+        assert "Production LearnAI requires a MySQL connection URI" in err_msg
+
+    def test_postgres_rejected_by_validate_production_db_config(self, monkeypatch):
+        """validate_production_db_config must fail fast when postgresql is configured."""
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://appuser:apppass@db.example.com:5432/proddb")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            validate_production_db_config()
+
+        err_msg = str(exc_info.value)
+        assert "PostgreSQL is not supported for this deployment" in err_msg
+
+
+# ── 11. Production MySQL Configuration, URL Parsing, & Driver Safeguards ───────
 
 class TestProductionMySqlConfiguration:
 
@@ -439,18 +531,6 @@ class TestProductionMySqlConfiguration:
         # Must not raise
         validate_production_environment()
 
-    def test_unsupported_mongodb_scheme_rejected_in_production(self, monkeypatch):
-        """Unsupported database URI scheme (e.g. mongodb://) must be rejected in production."""
-        monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.setenv("SESSION_SECRET_KEY", "prod-secret-key-998877665544332211")
-        monkeypatch.setenv("DATABASE_URL", "mongodb://localhost:27017/learnai")
-
-        with pytest.raises(RuntimeError) as exc_info:
-            validate_production_environment()
-
-        err_msg = str(exc_info.value)
-        assert "must be a PostgreSQL connection URI or MySQL connection URI" in err_msg
-
     def test_database_config_detects_mysql(self):
         """DatabaseConfig must properly identify MySQL dialect and flags."""
         from services.db.base import DatabaseConfig
@@ -468,3 +548,63 @@ class TestProductionMySqlConfiguration:
         assert cfg.is_mysql is True
         assert cfg.is_postgres is False
         assert cfg.is_sqlite is False
+
+    def test_mysql_adapter_parses_url_encoded_credentials(self):
+        """Passwords and usernames containing URL-encoded special characters must be properly decoded."""
+        from services.db.mysql_adapter import MySQLAdapter
+        url = "mysql://user%40domain:p%40ss%23word%25123%21@db.example.com:3307/learnai_db"
+        params = MySQLAdapter.parse_connection_params(url)
+        assert params["user"] == "user@domain"
+        assert params["password"] == "p@ss#word%123!"
+        assert params["host"] == "db.example.com"
+        assert params["port"] == 3307
+        assert params["database"] == "learnai_db"
+        assert params["charset"] == "utf8mb4"
+
+    def test_mysql_adapter_rejects_non_mysql_configuration(self):
+        """MySQLAdapter must fail fast if instantiated with a non-MySQL DatabaseConfig."""
+        from services.db.mysql_adapter import MySQLAdapter
+        sqlite_cfg = DatabaseConfig(database_url=None)
+        with pytest.raises(DatabaseConnectionError) as exc_info:
+            MySQLAdapter(sqlite_cfg)
+        assert "is not a MySQL connection string" in str(exc_info.value)
+
+        pg_cfg = DatabaseConfig(database_url="postgresql://user:pass@localhost:5432/db")
+        with pytest.raises(DatabaseConnectionError) as exc_info:
+            MySQLAdapter(pg_cfg)
+        assert "is not a MySQL connection string" in str(exc_info.value)
+
+    def test_mysql_adapter_tls_mode_parsing(self, tmp_path):
+        """MySQLAdapter must correctly configure TLS Context for VERIFY_IDENTITY, VERIFY_CA, and REQUIRED."""
+        import ssl
+        from services.db.mysql_adapter import MySQLAdapter
+
+        # Case 1: VERIFY_IDENTITY with CA file
+        fake_ca = tmp_path / "ca.pem"
+        fake_ca.write_text("-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n")
+        ca_url = f"mysql://u:p@host:3306/db?ssl_mode=VERIFY_IDENTITY&ssl_ca={fake_ca}"
+        with patch("ssl.create_default_context") as mock_ctx_factory:
+            mock_ctx = mock_ctx_factory.return_value
+            params = MySQLAdapter.parse_connection_params(ca_url)
+            mock_ctx_factory.assert_called_with(cafile=str(fake_ca))
+            assert mock_ctx.check_hostname is True
+            assert mock_ctx.verify_mode == ssl.CERT_REQUIRED
+            assert params["ssl"] is mock_ctx
+
+        # Case 2: VERIFY_CA disables check_hostname
+        with patch("ssl.create_default_context") as mock_ctx_factory:
+            mock_ctx = mock_ctx_factory.return_value
+            ca_url2 = f"mysql://u:p@host:3306/db?ssl_mode=VERIFY_CA&ssl_ca={fake_ca}"
+            MySQLAdapter.parse_connection_params(ca_url2)
+            assert mock_ctx.check_hostname is False
+            assert mock_ctx.verify_mode == ssl.CERT_REQUIRED
+
+        # Case 3: ssl_mode=REQUIRED (wire encryption without custom CA)
+        req_url = "mysql://u:p@host:3306/db?ssl_mode=REQUIRED"
+        params_req = MySQLAdapter.parse_connection_params(req_url)
+        assert params_req["ssl"] == {"check_hostname": False}
+
+        # Case 4: ssl_mode=DISABLED
+        dis_url = "mysql://u:p@host:3306/db?ssl_mode=DISABLED"
+        params_dis = MySQLAdapter.parse_connection_params(dis_url)
+        assert "ssl" not in params_dis
