@@ -877,11 +877,58 @@ function populateDashboardCourseFilter() {
   });
 }
 
+let currentDashboardRequestId = 0;
+
+function onDashboardCourseFilterChange() {
+  const filterVal = $("dashboardCourseFilter")?.value || "";
+  const graphCard = $("performanceGraphCard");
+  const trendsWrap = $("trendChartWrap");
+
+  // Immediate UI update upon user action:
+  // If switching to 'All Courses', immediately hide the graph card and clear stale chart content.
+  // If switching to a specific course, immediately clear previous chart content so it cannot linger while loading.
+  if (!filterVal) {
+    if (graphCard) {
+      graphCard.classList.add("hidden");
+      graphCard.setAttribute("aria-hidden", "true");
+    }
+    if (trendsWrap) {
+      trendsWrap.innerHTML = "";
+    }
+  } else {
+    if (trendsWrap) {
+      trendsWrap.innerHTML = "";
+    }
+  }
+
+  loadDashboard();
+}
+
 async function loadDashboard() {
+  const requestId = ++currentDashboardRequestId;
   const loadingEl = $("dashboardLoading");
   const errorEl = $("dashboardError");
   const emptyEl = $("dashboardEmptyState");
   const contentEl = $("dashboardContent");
+  const graphCard = $("performanceGraphCard");
+  const trendsWrap = $("trendChartWrap");
+
+  const courseFilter = $("dashboardCourseFilter")?.value || "";
+
+  // Ensure graph is immediately hidden if 'All Courses' is selected, or clear stale chart if specific course
+  if (!courseFilter) {
+    if (graphCard) {
+      graphCard.classList.add("hidden");
+      graphCard.setAttribute("aria-hidden", "true");
+    }
+    if (trendsWrap) {
+      trendsWrap.innerHTML = "";
+    }
+  } else {
+    if (trendsWrap) {
+      trendsWrap.innerHTML = "";
+    }
+  }
 
   if (loadingEl) loadingEl.classList.remove("hidden");
   if (errorEl) errorEl.classList.add("hidden");
@@ -894,7 +941,6 @@ async function loadDashboard() {
     if (!sId) {
       throw new Error("Unable to establish authenticated student session.");
     }
-    const courseFilter = $("dashboardCourseFilter")?.value || "";
     let url = `/api/student/${encodeURIComponent(sId)}/dashboard?limit=20`;
     if (courseFilter) {
       url += `&course_code=${encodeURIComponent(courseFilter)}`;
@@ -906,9 +952,21 @@ async function loadDashboard() {
     }
 
     const data = await res.json();
+    // Guard against race conditions if rapid course changes occurred
+    if (requestId !== currentDashboardRequestId) {
+      return;
+    }
     renderDashboard(data);
   } catch (err) {
     console.error("Dashboard load error:", err);
+    // On error, guarantee stale graph data is removed and graph card is hidden
+    if (graphCard) {
+      graphCard.classList.add("hidden");
+      graphCard.setAttribute("aria-hidden", "true");
+    }
+    if (trendsWrap) {
+      trendsWrap.innerHTML = "";
+    }
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) {
       errorEl.classList.remove("hidden");
@@ -1119,57 +1177,101 @@ function renderReturningDashboard(data) {
     recListEl.innerHTML = reviewListEl.innerHTML;
   }
 
-  // 4. Performance Trends (Chart + List)
+  // 4. Performance Trends (Conditional Course-Specific Graph + Attempts List)
+  const graphCard = $("performanceGraphCard");
   const trendsWrap = $("trendChartWrap");
   const tableWrap = $("recentAttemptsTableWrap");
-  const trends = data.recent_trends || [];
+  const countTag = $("trendsCountTag");
+  const subtitleEl = $("performanceGraphSubtitle");
 
-  if (trendsWrap) {
-    if (!trends.length) {
-      trendsWrap.innerHTML = "<p class='muted'>No recent attempts.</p>";
-    } else {
-      const chronological = [...trends].reverse();
-      let chartHtml = `<div class="trend-chart" role="img" aria-label="Recent quiz performance chart">`;
-      chronological.forEach((t, i) => {
-        const pct = Math.max(6, Math.min(100, Math.round(t.percentage)));
-        const barClass = t.percentage >= 70 ? "high" : (t.percentage >= 50 ? "medium" : "low");
-        const tooltip = `${escapeHtml(t.topic_name)}: ${t.score}/${t.total} (${t.percentage}%)`;
-        chartHtml += `
-          <div class="trend-bar-wrap" title="${tooltip}">
-            <span class="trend-bar-score">${t.percentage}%</span>
-            <div class="trend-bar ${barClass}" style="height:${pct}%;"></div>
-            <span class="trend-bar-label">#${i + 1}</span>
+  // Determine current active course filter from dropdown or response
+  const activeCourse = $("dashboardCourseFilter")?.value || data.course_code || "";
+
+  if (!activeCourse) {
+    // Rule 1 & 3: When 'All Courses' is selected, hide the performance graph completely
+    if (graphCard) {
+      graphCard.classList.add("hidden");
+      graphCard.setAttribute("aria-hidden", "true");
+    }
+    if (trendsWrap) {
+      trendsWrap.innerHTML = "";
+    }
+  } else {
+    // Rule 2: When a specific course is selected, display the performance graph for that course only
+    if (graphCard) {
+      graphCard.classList.remove("hidden");
+      graphCard.setAttribute("aria-hidden", "false");
+    }
+
+    if (subtitleEl) {
+      subtitleEl.textContent = `Historical score progression for ${activeCourse}.`;
+    }
+
+    const rawTrends = data.recent_trends || [];
+    // Ensure the graph uses data belonging exclusively to the selected course
+    const courseTrends = rawTrends.filter(t => t.course_code === activeCourse);
+
+    if (trendsWrap) {
+      if (!courseTrends.length) {
+        if (countTag) countTag.textContent = "0 attempts";
+        trendsWrap.innerHTML = `
+          <div class="trend-empty-state" role="status">
+            <p class="muted">No quiz attempts recorded yet for <strong>${escapeHtml(activeCourse)}</strong>. Complete a quiz to view performance trends.</p>
           </div>
         `;
-      });
-      chartHtml += `</div>`;
-      trendsWrap.innerHTML = chartHtml;
+      } else {
+        if (countTag) {
+          countTag.textContent = `${courseTrends.length} attempt${courseTrends.length > 1 ? "s" : ""}`;
+        }
+        const chronological = [...courseTrends].reverse();
+        let chartHtml = `<div class="trend-chart" role="img" aria-label="Recent quiz performance chart for ${escapeHtml(activeCourse)}">`;
+        chronological.forEach((t, i) => {
+          const pct = Math.max(6, Math.min(100, Math.round(t.percentage)));
+          const barClass = t.percentage >= 70 ? "high" : (t.percentage >= 50 ? "medium" : "low");
+          const tooltip = `${escapeHtml(t.topic_name)}: ${t.score}/${t.total} (${t.percentage}%)`;
+          chartHtml += `
+            <div class="trend-bar-wrap" title="${tooltip}">
+              <span class="trend-bar-score">${t.percentage}%</span>
+              <div class="trend-bar ${barClass}" style="height:${pct}%;"></div>
+              <span class="trend-bar-label">#${i + 1}</span>
+            </div>
+          `;
+        });
+        chartHtml += `</div>`;
+        trendsWrap.innerHTML = chartHtml;
+      }
     }
   }
 
+  // Attempts table: displays scoped course attempts if a course is selected, or all attempts if 'All Courses'
   if (tableWrap) {
-    if (!trends.length) {
-      tableWrap.innerHTML = "";
+    const rawTrends = data.recent_trends || [];
+    const tableTrends = activeCourse
+      ? rawTrends.filter(t => t.course_code === activeCourse)
+      : rawTrends;
+
+    if (!tableTrends.length) {
+      tableWrap.innerHTML = "<p class='muted' style='padding: var(--space-4) var(--space-2);'>No recent attempts recorded.</p>";
     } else {
       let tHtml = `
-        <table class="history-table">
+        <table class="history-table" aria-label="Recent quiz attempts">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Topic</th>
-              <th>Course</th>
-              <th>Difficulty</th>
-              <th>Score</th>
-              <th>Accuracy</th>
-              <th>Status</th>
+              <th scope="col">Date</th>
+              <th scope="col">Topic</th>
+              <th scope="col">Course</th>
+              <th scope="col">Difficulty</th>
+              <th scope="col">Score</th>
+              <th scope="col">Accuracy</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody>
       `;
-      trends.forEach(t => {
-        const dateStr = new Date(t.created_at).toLocaleString([], {
+      tableTrends.forEach(t => {
+        const dateStr = t.created_at ? new Date(t.created_at).toLocaleString([], {
           month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
-        });
+        }) : "--";
         tHtml += `
           <tr>
             <td>${dateStr}</td>
@@ -1333,7 +1435,7 @@ $("viewDashboardFromResultBtn")?.addEventListener("click", openDashboard);
 $("dashboardStartQuizBtn")?.addEventListener("click", goToHome);
 $("dashboardRefreshBtn")?.addEventListener("click", loadDashboard);
 $("dashboardRetryBtn")?.addEventListener("click", loadDashboard);
-$("dashboardCourseFilter")?.addEventListener("change", loadDashboard);
+$("dashboardCourseFilter")?.addEventListener("change", onDashboardCourseFilterChange);
 
 // ── App Initialization ──────────────────────────────────────────────────────
 async function initApp() {

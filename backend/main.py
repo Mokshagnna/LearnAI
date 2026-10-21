@@ -651,7 +651,8 @@ def get_dashboard(student_id: str, request: Request, course_code: str | None = N
         raise HTTPException(status_code=403, detail="Access denied: cannot view another student's dashboard.")
 
     try:
-        data = get_student_dashboard_data(student_id=clean_id, course_code=course_code, limit=limit)
+        clean_course = course_code.strip() if course_code and course_code.strip() else None
+        data = get_student_dashboard_data(student_id=clean_id, course_code=clean_course, limit=limit)
         return data
     except Exception as e:
         logger.error(f"Failed to get student dashboard: {e}", exc_info=True)

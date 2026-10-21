@@ -269,16 +269,26 @@
         <div id="recommendedTopicsList" class="hidden" aria-hidden="true"></div>
       </div>
 
-      <!-- 3. Performance Trends (Visual Chart + Recent List) -->
-      <div class="card dashboard-card">
+      <!-- 3. Course Performance Graph (Visible only when a specific course is selected) -->
+      <div id="performanceGraphCard" class="card dashboard-card hidden" aria-hidden="true">
         <div class="section-title-row">
           <div>
-            <h2 class="section-title">Recent Performance Trend</h2>
-            <p class="muted section-subtitle">Historical score progression and attempt timeline.</p>
+            <h2 class="section-title" id="performanceGraphTitle">Course Performance Trend</h2>
+            <p class="muted section-subtitle" id="performanceGraphSubtitle">Historical score progression for the selected course.</p>
           </div>
           <span id="trendsCountTag" class="tag-chip tag-chip-sm">Recent attempts</span>
         </div>
         <div id="trendChartWrap" class="trend-chart-container"></div>
+      </div>
+
+      <!-- 4. Recent Quiz Attempts Log -->
+      <div id="recentAttemptsCard" class="card dashboard-card">
+        <div class="section-title-row">
+          <div>
+            <h2 class="section-title">Recent Quiz Attempts</h2>
+            <p class="muted section-subtitle">Historical quiz submissions and performance details.</p>
+          </div>
+        </div>
         <div id="recentAttemptsTableWrap" class="table-wrap"></div>
       </div>
 

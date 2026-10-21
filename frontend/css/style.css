@@ -1503,6 +1503,17 @@ button.secondary:hover:not(:disabled) {
   -webkit-overflow-scrolling: touch;
 }
 
+.trend-empty-state {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.trend-empty-state p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
 .history-table {
   width: 100%;
   border-collapse: collapse;
