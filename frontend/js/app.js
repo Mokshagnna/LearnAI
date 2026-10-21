@@ -1307,23 +1307,83 @@ function renderReturningDashboard(data) {
           countTag.textContent = `${courseTrends.length} attempt${courseTrends.length > 1 ? "s" : ""}`;
         }
         const chronological = [...courseTrends].reverse();
-        let chartHtml = `<div class="trend-chart" role="img" aria-label="Recent quiz performance chart for ${escapeHtml(activeCourse)}">`;
+        let chartHtml = `
+          <div class="trend-chart-wrapper">
+            <div class="trend-y-axis" aria-hidden="true">
+              <span class="trend-y-tick">100%</span>
+              <span class="trend-y-tick">50%</span>
+              <span class="trend-y-tick">0%</span>
+            </div>
+            <div class="trend-plot-area">
+              <div class="trend-grid" aria-hidden="true">
+                <div class="trend-grid-line line-100"></div>
+                <div class="trend-grid-line line-50"></div>
+                <div class="trend-grid-line line-0"></div>
+              </div>
+              <div class="trend-chart" role="region" aria-label="Recent quiz performance chart for ${escapeHtml(activeCourse)}">
+        `;
+
         chronological.forEach((t, i) => {
           const rawScore = Number(t.percentage) || 0;
           const pct = Math.max(0, Math.min(100, Math.round(rawScore)));
           const maxBarHeight = 64;
           const barHeight = Math.max(6, Math.min(maxBarHeight, Math.round((pct / 100) * maxBarHeight)));
           const barClass = t.percentage >= 70 ? "high" : (t.percentage >= 50 ? "medium" : "low");
-          const tooltip = `${escapeHtml(t.topic_name)}: ${t.score}/${t.total} (${t.percentage}%)`;
+
+          // Calculate score change from previous consecutive attempt
+          let deltaHtml = "";
+          let deltaAria = "";
+          let tooltipDeltaHtml = "";
+
+          if (i === 0) {
+            deltaHtml = `<span class="trend-delta-badge initial" aria-hidden="true">1st</span>`;
+            deltaAria = "Initial attempt for this course.";
+            tooltipDeltaHtml = `<div class="tooltip-detail"><span class="tooltip-delta neu">First recorded attempt</span></div>`;
+          } else {
+            const prevScore = Number(chronological[i - 1].percentage) || 0;
+            const diff = Math.round((pct - prevScore) * 10) / 10;
+            if (diff > 0) {
+              deltaHtml = `<span class="trend-delta-badge positive" aria-hidden="true">↑ ${diff} pp</span>`;
+              deltaAria = `Score change: +${diff} percentage points compared to attempt #${i}.`;
+              tooltipDeltaHtml = `<div class="tooltip-detail">Score change: <span class="tooltip-delta pos">+${diff} percentage points vs #${i}</span></div>`;
+            } else if (diff < 0) {
+              const absDiff = Math.abs(diff);
+              deltaHtml = `<span class="trend-delta-badge negative" aria-hidden="true">↓ ${absDiff} pp</span>`;
+              deltaAria = `Score change: -${absDiff} percentage points compared to attempt #${i}.`;
+              tooltipDeltaHtml = `<div class="tooltip-detail">Score change: <span class="tooltip-delta neg">-${absDiff} percentage points vs #${i}</span></div>`;
+            } else {
+              deltaHtml = `<span class="trend-delta-badge neutral" aria-hidden="true">— 0 pp</span>`;
+              deltaAria = `Score change: 0 percentage points (unchanged) compared to attempt #${i}.`;
+              tooltipDeltaHtml = `<div class="tooltip-detail">Score change: <span class="tooltip-delta neu">0 percentage points vs #${i}</span></div>`;
+            }
+          }
+
+          const topicName = escapeHtml(t.topic_name || "Quiz");
+          const nativeTooltip = `${topicName}: ${t.score}/${t.total} (${t.percentage}%)`;
+          const fullAriaLabel = `Attempt #${i + 1}: ${t.score} out of ${t.total} questions correct, ${t.percentage}% on ${topicName}. ${deltaAria}`;
+
           chartHtml += `
-            <div class="trend-bar-wrap" title="${tooltip}">
+            <div class="trend-bar-wrap" tabindex="0" role="group" aria-label="${fullAriaLabel}" title="${nativeTooltip}">
               <span class="trend-bar-score">${t.percentage}%</span>
               <div class="trend-bar ${barClass}" style="height:${barHeight}px;" data-percentage="${pct}"></div>
-              <span class="trend-bar-label">#${i + 1}</span>
+              <div class="trend-column-footer">
+                <span class="trend-bar-label">#${i + 1}</span>
+                ${deltaHtml}
+              </div>
+              <div class="trend-tooltip" role="tooltip">
+                <div class="tooltip-title">Attempt #${i + 1} • ${topicName}</div>
+                <div class="tooltip-sub">${t.score}/${t.total} questions correct (${t.percentage}%)</div>
+                ${tooltipDeltaHtml}
+              </div>
             </div>
           `;
         });
-        chartHtml += `</div>`;
+
+        chartHtml += `
+              </div>
+            </div>
+          </div>
+        `;
         trendsWrap.innerHTML = chartHtml;
       }
     }

@@ -463,23 +463,82 @@ class TestFrontendDOMStructureAndVisibilityRules:
                             countTag.textContent = `${courseTrends.length} attempt${courseTrends.length > 1 ? 's' : ''}`;
                         }
                         const chronological = [...courseTrends].reverse();
-                        let chartHtml = `<div class="trend-chart" role="img" aria-label="Recent quiz performance chart for ${escapeHtml(activeCourse)}">`;
+                        let chartHtml = `
+                          <div class="trend-chart-wrapper">
+                            <div class="trend-y-axis" aria-hidden="true">
+                              <span class="trend-y-tick">100%</span>
+                              <span class="trend-y-tick">50%</span>
+                              <span class="trend-y-tick">0%</span>
+                            </div>
+                            <div class="trend-plot-area">
+                              <div class="trend-grid" aria-hidden="true">
+                                <div class="trend-grid-line line-100"></div>
+                                <div class="trend-grid-line line-50"></div>
+                                <div class="trend-grid-line line-0"></div>
+                              </div>
+                              <div class="trend-chart" role="region" aria-label="Recent quiz performance chart for ${escapeHtml(activeCourse)}">
+                        `;
+
                         chronological.forEach((t, i) => {
                             const rawScore = Number(t.percentage) || 0;
                             const pct = Math.max(0, Math.min(100, Math.round(rawScore)));
                             const maxBarHeight = 64;
                             const barHeight = Math.max(6, Math.min(maxBarHeight, Math.round((pct / 100) * maxBarHeight)));
                             const barClass = t.percentage >= 70 ? 'high' : (t.percentage >= 50 ? 'medium' : 'low');
-                            const tooltip = `${escapeHtml(t.topic_name)}: ${t.score}/${t.total} (${t.percentage}%)`;
+
+                            let deltaHtml = "";
+                            let deltaAria = "";
+                            let tooltipDeltaHtml = "";
+
+                            if (i === 0) {
+                                deltaHtml = `<span class="trend-delta-badge initial" aria-hidden="true">1st</span>`;
+                                deltaAria = "Initial attempt for this course.";
+                                tooltipDeltaHtml = `<div class="tooltip-detail"><span class="tooltip-delta neu">First recorded attempt</span></div>`;
+                            } else {
+                                const prevScore = Number(chronological[i - 1].percentage) || 0;
+                                const diff = Math.round((pct - prevScore) * 10) / 10;
+                                if (diff > 0) {
+                                    deltaHtml = `<span class="trend-delta-badge positive" aria-hidden="true">↑ ${diff} pp</span>`;
+                                    deltaAria = `Score change: +${diff} percentage points compared to attempt #${i}.`;
+                                    tooltipDeltaHtml = `<div class="tooltip-detail">Score change: <span class="tooltip-delta pos">+${diff} percentage points vs #${i}</span></div>`;
+                                } else if (diff < 0) {
+                                    const absDiff = Math.abs(diff);
+                                    deltaHtml = `<span class="trend-delta-badge negative" aria-hidden="true">↓ ${absDiff} pp</span>`;
+                                    deltaAria = `Score change: -${absDiff} percentage points compared to attempt #${i}.`;
+                                    tooltipDeltaHtml = `<div class="tooltip-detail">Score change: <span class="tooltip-delta neg">-${absDiff} percentage points vs #${i}</span></div>`;
+                                } else {
+                                    deltaHtml = `<span class="trend-delta-badge neutral" aria-hidden="true">— 0 pp</span>`;
+                                    deltaAria = `Score change: 0 percentage points (unchanged) compared to attempt #${i}.`;
+                                    tooltipDeltaHtml = `<div class="tooltip-detail">Score change: <span class="tooltip-delta neu">0 percentage points vs #${i}</span></div>`;
+                                }
+                            }
+
+                            const topicName = escapeHtml(t.topic_name || "Quiz");
+                            const nativeTooltip = `${topicName}: ${t.score}/${t.total} (${t.percentage}%)`;
+                            const fullAriaLabel = `Attempt #${i + 1}: ${t.score} out of ${t.total} questions correct, ${t.percentage}% on ${topicName}. ${deltaAria}`;
+
                             chartHtml += `
-                                <div class="trend-bar-wrap" title="${tooltip}">
+                                <div class="trend-bar-wrap" tabindex="0" role="group" aria-label="${fullAriaLabel}" title="${nativeTooltip}">
                                   <span class="trend-bar-score">${t.percentage}%</span>
                                   <div class="trend-bar ${barClass}" style="height:${barHeight}px;" data-percentage="${pct}"></div>
-                                  <span class="trend-bar-label">#${i + 1}</span>
+                                  <div class="trend-column-footer">
+                                    <span class="trend-bar-label">#${i + 1}</span>
+                                    ${deltaHtml}
+                                  </div>
+                                  <div class="trend-tooltip" role="tooltip">
+                                    <div class="tooltip-title">Attempt #${i + 1} • ${topicName}</div>
+                                    <div class="tooltip-sub">${t.score}/${t.total} questions correct (${t.percentage}%)</div>
+                                    ${tooltipDeltaHtml}
+                                  </div>
                                 </div>
                             `;
                         });
-                        chartHtml += `</div>`;
+
+                        chartHtml += `
+                              </div>
+                            </div>
+                          </div>
+                        `;
                         trendsWrap.innerHTML = chartHtml;
                     }
                 }
@@ -611,7 +670,7 @@ class TestFrontendDOMStructureAndVisibilityRules:
             .filter(t => (t.course_code || '').trim().toLowerCase() === normFilter);
         if (matchedTrends.length !== 1) throw new Error('Scenario 8 failed: case insensitive matching failed');
 
-        // Test Scenario 9: Multi-score proportional pixel height rendering (e.g. 22AM201 with 50%, 30%, 0%, 100%)
+        // Test Scenario 9: Multi-score proportional pixel height rendering (e.g. 22AM201 with 50%, 30%)
         elements.dashboardCourseFilter.value = '22AM201';
         renderGraphSection({
             course_code: '22AM201',
@@ -625,6 +684,38 @@ class TestFrontendDOMStructureAndVisibilityRules:
         if (!elements.trendChartWrap.innerHTML.includes('style="height:19px;"')) throw new Error('Scenario 9 failed: 30% attempt must have 19px height');
         if (!elements.trendChartWrap.innerHTML.includes('medium')) throw new Error('Scenario 9 failed: 50% must have medium class');
         if (!elements.trendChartWrap.innerHTML.includes('low')) throw new Error('Scenario 9 failed: 30% must have low class');
+        if (!elements.trendChartWrap.innerHTML.includes('1st')) throw new Error('Scenario 9 failed: attempt 1 must have 1st delta badge');
+        if (!elements.trendChartWrap.innerHTML.includes('↓ 20 pp')) throw new Error('Scenario 9 failed: attempt 2 must have decrease delta badge');
+        if (!elements.trendChartWrap.innerHTML.includes('Score change: -20 percentage points')) throw new Error('Scenario 9 failed: accessible delta text missing');
+
+        // Test Scenario 10: Modern UI elements - Y-axis, Grid lines, Increase delta, Unchanged delta, Zero score & keyboard accessibility
+        elements.dashboardCourseFilter.value = '22CS101';
+        renderGraphSection({
+            course_code: '22CS101',
+            recent_trends: [
+                { course_code: '22CS101', topic_name: 'Recursion', score: 10, total: 10, percentage: 100 },
+                { course_code: '22CS101', topic_name: 'Arrays', score: 8, total: 10, percentage: 80 },
+                { course_code: '22CS101', topic_name: 'Pointers', score: 8, total: 10, percentage: 80 },
+                { course_code: '22CS101', topic_name: 'Variables', score: 0, total: 10, percentage: 0 }
+            ]
+        });
+        // Verify Y-axis scale and grid lines
+        if (!elements.trendChartWrap.innerHTML.includes('trend-y-axis')) throw new Error('Scenario 10 failed: trend-y-axis missing');
+        if (!elements.trendChartWrap.innerHTML.includes('100%') || !elements.trendChartWrap.innerHTML.includes('50%')) throw new Error('Scenario 10 failed: Y-axis ticks missing');
+        if (!elements.trendChartWrap.innerHTML.includes('line-100') || !elements.trendChartWrap.innerHTML.includes('line-0')) throw new Error('Scenario 10 failed: grid lines missing');
+        // Chronological: #1 (0%), #2 (80%), #3 (80%), #4 (100%)
+        // 0% attempt:
+        if (!elements.trendChartWrap.innerHTML.includes('style="height:6px;" data-percentage="0"')) throw new Error('Scenario 10 failed: 0% attempt must have 6px anchor and data-percentage 0');
+        // #2 (80% from 0%): +80 pp
+        if (!elements.trendChartWrap.innerHTML.includes('↑ 80 pp')) throw new Error('Scenario 10 failed: increase delta badge missing');
+        // #3 (80% from 80%): 0 pp unchanged
+        if (!elements.trendChartWrap.innerHTML.includes('— 0 pp')) throw new Error('Scenario 10 failed: unchanged delta badge missing');
+        // #4 (100% from 80%): +20 pp
+        if (!elements.trendChartWrap.innerHTML.includes('↑ 20 pp')) throw new Error('Scenario 10 failed: 100% increase delta badge missing');
+        // Keyboard accessibility and rich tooltips
+        if (!elements.trendChartWrap.innerHTML.includes('tabindex="0"')) throw new Error('Scenario 10 failed: tabindex="0" missing');
+        if (!elements.trendChartWrap.innerHTML.includes('role="group"')) throw new Error('Scenario 10 failed: role="group" missing');
+        if (!elements.trendChartWrap.innerHTML.includes('role="tooltip"')) throw new Error('Scenario 10 failed: role="tooltip" missing');
 
         console.log('ALL_FRONTEND_HARNESS_SCENARIOS_PASSED');
         """
