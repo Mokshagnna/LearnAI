@@ -21,7 +21,10 @@ Validates that:
 18. Dashboard refresh and rendering do not introduce duplicate cards or stale scores.
 """
 
+import json
+import subprocess
 import time
+from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
@@ -941,3 +944,261 @@ class TestReviewCardsConsolidationAndScoreProgress:
             assert card["previous_score"] == 3
             assert card["score_change"] == 20.0
             assert card["attempt_count"] == 2
+
+    def test_case_19_recommended_review_cards_ui_structure_and_badge_removal(self):
+        """
+        Case 19: Verifies that Recommended Review cards in frontend/js/app.js:
+        1. Remove the "NEEDS REVIEW" and "Ready to Advance" status badges completely.
+        2. Remove visible course ID pills (e.g., 22AM201, 22CS104, 22TP103).
+        3. Display prominent course names (e.g., Foundations and Applications, Python Programming).
+        4. Clearly frame the topic information with a "Topic:" label row.
+        5. Display subtle attempt counts (e.g., "4 attempts", "1 attempt").
+        6. Preserve data-course and data-topic attributes on the practice button.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+        app_js_path = repo_root / "frontend" / "js" / "app.js"
+        assert app_js_path.exists(), f"app.js not found at {app_js_path}"
+
+        node_script = f"""
+        const fs = require('fs');
+        const appJsCode = fs.readFileSync({json.dumps(str(app_js_path))}, 'utf8');
+
+        // Mock DOM environment
+        const elements = {{}};
+        function $(id) {{
+            if (!elements[id]) {{
+                elements[id] = {{
+                    id,
+                    innerHTML: '',
+                    textContent: '',
+                    value: '',
+                    classList: {{
+                        _classes: new Set(),
+                        add(c) {{ this._classes.add(c); }},
+                        remove(c) {{ this._classes.delete(c); }},
+                        contains(c) {{ return this._classes.has(c); }}
+                    }},
+                    querySelectorAll(sel) {{ return []; }},
+                    setAttribute(k, v) {{ this[k] = v; }},
+                    getAttribute(k) {{ return this[k]; }}
+                }};
+            }}
+            return elements[id];
+        }}
+        global.$ = $;
+        global.document = {{
+            getElementById: (id) => $(id),
+            querySelectorAll: (sel) => []
+        }};
+        global.window = {{ scrollTo: () => {{}} }};
+        global.attachPracticeTopicListeners = () => {{}};
+        global.attachHistoryToggleListeners = () => {{}};
+        global.escapeHtml = function(str) {{
+            return String(str || '').replace(/[&<>'"]/g, tag => ({{
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }}[tag] || tag));
+        }};
+        global.curriculum = [
+            {{ code: '22AM201', name: 'Artificial Intelligence' }},
+            {{ code: '22CS104', name: 'Python Programming' }},
+            {{ code: '22TP103', name: 'Programming In C' }}
+        ];
+
+        // Evaluate getCourseDisplayName and renderReturningDashboard from app.js
+        const fnStart = appJsCode.indexOf('function getCourseDisplayName(');
+        const fnEnd = appJsCode.indexOf('function attachHistoryToggleListeners()');
+        eval(appJsCode.substring(fnStart, fnEnd));
+
+        const mockData = {{
+            overview: {{ completed_quizzes: 5 }},
+            recent_trends: [
+                {{ course_code: '22CUSTOM01', course_name: 'Advanced Robotics' }}
+            ],
+            review_topics: [
+                {{
+                    course_code: '22AM201',
+                    course_name: 'Foundations and Applications',
+                    topic_name: 'McCulloch-Pitts Neuron Model',
+                    attempt_count: 4,
+                    priority: 'high',
+                    latest_accuracy: 45.0,
+                    latest_score: 9,
+                    latest_total: 20,
+                    previous_accuracy: 30.0,
+                    score_change: 15.0,
+                    change_type: 'improved',
+                    reason: 'Needs review: recent accuracy is 45.0%. Reinforce key concepts.',
+                    history: []
+                }},
+                {{
+                    course_code: '22CS104',
+                    topic_name: 'Lists and Dictionaries',
+                    attempt_count: 1,
+                    priority: 'medium',
+                    latest_accuracy: 85.0,
+                    latest_score: 17,
+                    latest_total: 20,
+                    reason: 'Strong mastery (85.0%)! Ready to advance to advanced difficulty.',
+                    history: []
+                }},
+                {{
+                    course_code: '22CUSTOM01',
+                    topic_name: 'Kinematics',
+                    attempt_count: 2,
+                    priority: 'high',
+                    latest_accuracy: 50.0,
+                    latest_score: 5,
+                    latest_total: 10,
+                    reason: 'Needs review: recent accuracy is 50.0%.',
+                    history: []
+                }}
+            ]
+        }};
+
+        renderReturningDashboard(mockData);
+        const html = $('reviewTopicsList').innerHTML;
+
+        // 1. "NEEDS REVIEW" badge or "Ready to Advance" badge must NOT exist in the card DOM
+        if (html.includes('badge-review-high') || html.includes('badge-review-adv')) {{
+            throw new Error('FAILED: Found status badge class (badge-review-high or badge-review-adv) in rendered HTML');
+        }}
+        if (html.includes('>Needs Review<') || html.includes('>Ready to Advance<')) {{
+            throw new Error('FAILED: Found status badge text in rendered HTML');
+        }}
+
+        // 2. Visible course ID pills (e.g. course-code-pill) must NOT exist
+        if (html.includes('course-code-pill')) {{
+            throw new Error('FAILED: Found course-code-pill in rendered HTML');
+        }}
+
+        // 3. Course names must be prominently rendered
+        if (!html.includes('Foundations and Applications')) {{
+            throw new Error('FAILED: Prominent course name "Foundations and Applications" not found in card');
+        }}
+        if (!html.includes('Python Programming')) {{
+            throw new Error('FAILED: Resolved course name "Python Programming" for 22CS104 not found in card');
+        }}
+        if (!html.includes('Advanced Robotics')) {{
+            throw new Error('FAILED: Resolved course name "Advanced Robotics" from recent_trends not found');
+        }}
+
+        // 4. Topic information must be clearly framed with "Topic:" label
+        if (!html.includes('Topic:')) {{
+            throw new Error('FAILED: "Topic:" label not found in card');
+        }}
+        if (!html.includes('McCulloch-Pitts Neuron Model')) {{
+            throw new Error('FAILED: Topic name "McCulloch-Pitts Neuron Model" not found in card');
+        }}
+        if (!html.includes('Lists and Dictionaries')) {{
+            throw new Error('FAILED: Topic name "Lists and Dictionaries" not found in card');
+        }}
+
+        // 5. Attempt count must be rendered subtly
+        if (!html.includes('4 attempts')) {{
+            throw new Error('FAILED: "4 attempts" not found in card');
+        }}
+        if (!html.includes('1 attempt')) {{
+            throw new Error('FAILED: "1 attempt" not found in card');
+        }}
+
+        // 6. Action button must retain data-course and data-topic
+        if (!html.includes('data-course="22AM201"')) {{
+            throw new Error('FAILED: data-course="22AM201" attribute missing from practice button');
+        }}
+        if (!html.includes('data-topic="McCulloch-Pitts Neuron Model"')) {{
+            throw new Error('FAILED: data-topic attribute missing from practice button');
+        }}
+
+        console.log('CASE_19_PASSED');
+        """
+
+        res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+        assert res.returncode == 0, f"Node verification failed: {res.stderr}"
+        assert "CASE_19_PASSED" in res.stdout
+
+    def test_case_20_recommended_review_cards_empty_topic_and_fallback_handling(self):
+        """
+        Case 20: Verifies graceful degradation for missing topics and unrecognized course codes.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+        app_js_path = repo_root / "frontend" / "js" / "app.js"
+
+        node_script = f"""
+        const fs = require('fs');
+        const appJsCode = fs.readFileSync({json.dumps(str(app_js_path))}, 'utf8');
+
+        const elements = {{}};
+        function $(id) {{
+            if (!elements[id]) {{
+                elements[id] = {{
+                    id,
+                    innerHTML: '',
+                    textContent: '',
+                    value: '',
+                    classList: {{
+                        _classes: new Set(),
+                        add(c) {{ this._classes.add(c); }},
+                        remove(c) {{ this._classes.delete(c); }},
+                        contains(c) {{ return this._classes.has(c); }}
+                    }},
+                    querySelectorAll(sel) {{ return []; }},
+                    setAttribute(k, v) {{ this[k] = v; }},
+                    getAttribute(k) {{ return this[k]; }}
+                }};
+            }}
+            return elements[id];
+        }}
+        global.$ = $;
+        global.document = {{
+            getElementById: (id) => $(id),
+            querySelectorAll: (sel) => []
+        }};
+        global.window = {{ scrollTo: () => {{}} }};
+        global.attachPracticeTopicListeners = () => {{}};
+        global.attachHistoryToggleListeners = () => {{}};
+        global.escapeHtml = function(str) {{
+            return String(str || '').replace(/[&<>'"]/g, tag => ({{
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }}[tag] || tag));
+        }};
+        global.curriculum = [];
+
+        const fnStart = appJsCode.indexOf('function getCourseDisplayName(');
+        const fnEnd = appJsCode.indexOf('function attachHistoryToggleListeners()');
+        eval(appJsCode.substring(fnStart, fnEnd));
+
+        const mockData = {{
+            overview: {{ completed_quizzes: 1 }},
+            review_topics: [
+                {{
+                    course_code: 'UNKNOWN_CODE_888',
+                    topic_name: '',
+                    attempt_count: 0,
+                    priority: 'high',
+                    latest_accuracy: 30.0,
+                    reason: 'Review required.',
+                    history: []
+                }}
+            ]
+        }};
+
+        renderReturningDashboard(mockData);
+        const html = $('reviewTopicsList').innerHTML;
+
+        // Fallback checks
+        if (!html.includes('Course Practice')) {{
+            throw new Error('FAILED: Expected fallback "Course Practice" for unrecognized course code');
+        }}
+        if (!html.includes('Topic unavailable')) {{
+            throw new Error('FAILED: Expected graceful "Topic unavailable" for empty topic');
+        }}
+        if (!html.includes('1 attempt')) {{
+            throw new Error('FAILED: Expected "1 attempt" minimum fallback');
+        }}
+
+        console.log('CASE_20_PASSED');
+        """
+
+        res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+        assert res.returncode == 0, f"Node verification failed: {res.stderr}"
+        assert "CASE_20_PASSED" in res.stdout

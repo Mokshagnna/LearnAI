@@ -1077,6 +1077,69 @@ function renderDashboard(data) {
   renderReturningDashboard(data);
 }
 
+function getCourseDisplayName(courseCode, data = null, fallbackName = "") {
+  if (fallbackName && typeof fallbackName === "string" && fallbackName.trim() && fallbackName.trim().toLowerCase() !== (courseCode || "").trim().toLowerCase()) {
+    return fallbackName.trim();
+  }
+  const cleanCode = (courseCode || "").trim().toLowerCase();
+  if (!cleanCode) return "Course Practice";
+
+  // 1. Check global curriculum array loaded by loadCourses()
+  if (Array.isArray(curriculum) && curriculum.length > 0) {
+    const found = curriculum.find(c => (c.code || "").trim().toLowerCase() === cleanCode);
+    if (found && found.name && found.name.trim()) {
+      return found.name.trim();
+    }
+  }
+
+  // 2. Check data.recent_trends if available in dashboard data
+  if (data && Array.isArray(data.recent_trends)) {
+    const trendMatch = data.recent_trends.find(t => (t.course_code || "").trim().toLowerCase() === cleanCode);
+    if (trendMatch && trendMatch.course_name && trendMatch.course_name.trim()) {
+      return trendMatch.course_name.trim();
+    }
+  }
+
+  // 3. Check dropdown options in #dashboardCourseFilter or #course
+  const selectIds = ["dashboardCourseFilter", "course"];
+  for (const id of selectIds) {
+    const sel = document.getElementById(id);
+    if (!sel || !sel.options) continue;
+    for (const opt of sel.options) {
+      if ((opt.value || "").trim().toLowerCase() === cleanCode) {
+        const text = (opt.textContent || "").trim();
+        if (text.includes(" - ")) {
+          const parts = text.split(" - ");
+          if (parts.length > 1 && parts.slice(1).join(" - ").trim()) {
+            return parts.slice(1).join(" - ").trim();
+          }
+        } else if (text && text.toLowerCase() !== cleanCode) {
+          return text;
+        }
+      }
+    }
+  }
+
+  // 4. Fallback lookup map for common course codes
+  const KNOWN_COURSES = {
+    "22am201": "Artificial Intelligence",
+    "22tp103": "Programming In C",
+    "22cs104": "Python Programming",
+    "22cs101": "Programming In C",
+    "22am301": "Deep Learning",
+    "22am204": "Machine Learning",
+    "22cs201": "Database Management Systems",
+    "22cs207": "Operating Systems",
+    "22cs204": "Computer Networks"
+  };
+  if (KNOWN_COURSES[cleanCode]) {
+    return KNOWN_COURSES[cleanCode];
+  }
+
+  // 5. Default fallback: Never display raw alphanumeric course code like '22AM201'
+  return "Course Practice";
+}
+
 function renderReturningDashboard(data) {
   const overview = data.overview || {};
 
@@ -1113,9 +1176,12 @@ function renderReturningDashboard(data) {
     } else {
       reviewListEl.innerHTML = reviewTopics.map((r, idx) => {
         const isHigh = r.priority === "high";
-        const badgeClass = isHigh ? "badge-review-high" : "badge-review-adv";
-        const badgeText = isHigh ? "Needs Review" : "Ready to Advance";
         const cardId = `rec-card-${idx}`;
+
+        const courseName = getCourseDisplayName(r.course_code, data, r.course_name);
+        const topicName = (r.topic_name || "").trim();
+        const attemptsCount = (typeof r.attempt_count === "number" && r.attempt_count > 0) ? r.attempt_count : 1;
+        const attemptsText = attemptsCount > 1 ? `${attemptsCount} attempts` : "1 attempt";
 
         const latestScore = (r.latest_score !== undefined && r.latest_score !== null) ? r.latest_score : null;
         const latestTotal = (r.latest_total !== undefined && r.latest_total !== null) ? r.latest_total : null;
@@ -1151,9 +1217,7 @@ function renderReturningDashboard(data) {
           deltaHtml = `<span class="rec-delta rec-delta-single">First attempt</span>`;
         }
 
-        const attemptsBadge = (r.attempt_count && r.attempt_count > 1)
-          ? `<span class="rec-attempts-pill">${r.attempt_count} attempts</span>`
-          : `<span class="rec-attempts-pill">1 attempt</span>`;
+
 
         const historyItems = (Array.isArray(r.history) && r.history.length > 1) ? r.history : [];
         const hasHistory = historyItems.length > 1;
@@ -1199,17 +1263,23 @@ function renderReturningDashboard(data) {
           `;
         }
 
+        const topicContentHtml = topicName
+          ? `<strong class="rec-topic-name">${escapeHtml(topicName)}</strong>`
+          : `<span class="rec-topic-name rec-topic-muted">Topic unavailable</span>`;
+
         return `
           <div class="rec-card ${isHigh ? 'card-review-high' : 'card-review-adv'}" id="${cardId}">
             <div class="rec-card-body">
-              <div class="rec-meta">
-                <div class="rec-meta-left">
-                  <span class="course-code-pill">${escapeHtml(r.course_code)}</span>
-                  ${attemptsBadge}
+              <div class="rec-card-header">
+                <h3 class="rec-course-name rec-title">${escapeHtml(courseName)}</h3>
+                <div class="rec-topic-row">
+                  <span class="rec-topic-label">Topic:</span>
+                  ${topicContentHtml}
                 </div>
-                <span class="badge ${badgeClass}">${badgeText}</span>
+                <div class="rec-attempts-wrap">
+                  <span class="rec-attempts-pill">${escapeHtml(attemptsText)}</span>
+                </div>
               </div>
-              <h3 class="rec-title">${escapeHtml(r.topic_name)}</h3>
 
               <!-- Primary Score & Progress Section -->
               <div class="rec-score-box">
