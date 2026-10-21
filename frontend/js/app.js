@@ -1309,13 +1309,16 @@ function renderReturningDashboard(data) {
         const chronological = [...courseTrends].reverse();
         let chartHtml = `<div class="trend-chart" role="img" aria-label="Recent quiz performance chart for ${escapeHtml(activeCourse)}">`;
         chronological.forEach((t, i) => {
-          const pct = Math.max(6, Math.min(100, Math.round(t.percentage)));
+          const rawScore = Number(t.percentage) || 0;
+          const pct = Math.max(0, Math.min(100, Math.round(rawScore)));
+          const maxBarHeight = 64;
+          const barHeight = Math.max(6, Math.min(maxBarHeight, Math.round((pct / 100) * maxBarHeight)));
           const barClass = t.percentage >= 70 ? "high" : (t.percentage >= 50 ? "medium" : "low");
           const tooltip = `${escapeHtml(t.topic_name)}: ${t.score}/${t.total} (${t.percentage}%)`;
           chartHtml += `
             <div class="trend-bar-wrap" title="${tooltip}">
               <span class="trend-bar-score">${t.percentage}%</span>
-              <div class="trend-bar ${barClass}" style="height:${pct}%;"></div>
+              <div class="trend-bar ${barClass}" style="height:${barHeight}px;" data-percentage="${pct}"></div>
               <span class="trend-bar-label">#${i + 1}</span>
             </div>
           `;

@@ -465,13 +465,16 @@ class TestFrontendDOMStructureAndVisibilityRules:
                         const chronological = [...courseTrends].reverse();
                         let chartHtml = `<div class="trend-chart" role="img" aria-label="Recent quiz performance chart for ${escapeHtml(activeCourse)}">`;
                         chronological.forEach((t, i) => {
-                            const pct = Math.max(6, Math.min(100, Math.round(t.percentage)));
+                            const rawScore = Number(t.percentage) || 0;
+                            const pct = Math.max(0, Math.min(100, Math.round(rawScore)));
+                            const maxBarHeight = 64;
+                            const barHeight = Math.max(6, Math.min(maxBarHeight, Math.round((pct / 100) * maxBarHeight)));
                             const barClass = t.percentage >= 70 ? 'high' : (t.percentage >= 50 ? 'medium' : 'low');
                             const tooltip = `${escapeHtml(t.topic_name)}: ${t.score}/${t.total} (${t.percentage}%)`;
                             chartHtml += `
                                 <div class="trend-bar-wrap" title="${tooltip}">
                                   <span class="trend-bar-score">${t.percentage}%</span>
-                                  <div class="trend-bar ${barClass}" style="height:${pct}%;"></div>
+                                  <div class="trend-bar ${barClass}" style="height:${barHeight}px;" data-percentage="${pct}"></div>
                                   <span class="trend-bar-label">#${i + 1}</span>
                                 </div>
                             `;
@@ -502,6 +505,8 @@ class TestFrontendDOMStructureAndVisibilityRules:
         if (elements.performanceGraphCard.getAttribute('aria-hidden') !== 'false') throw new Error('Scenario 2 failed: aria-hidden must be false');
         if (!elements.trendChartWrap.innerHTML.includes('trend-chart')) throw new Error('Scenario 2 failed: trend-chart must be rendered');
         if (!elements.trendChartWrap.innerHTML.includes('80%')) throw new Error('Scenario 2 failed: score must be rendered');
+        if (!elements.trendChartWrap.innerHTML.includes('style="height:51px;"')) throw new Error('Scenario 2 failed: 80% score must render 51px bar height');
+        if (!elements.trendChartWrap.innerHTML.includes('data-percentage="80"')) throw new Error('Scenario 2 failed: data-percentage 80 missing');
 
         // Test Scenario 3: Specific course '22MA201' with 0 attempts shows empty state
         elements.dashboardCourseFilter.value = '22MA201';
@@ -605,6 +610,21 @@ class TestFrontendDOMStructureAndVisibilityRules:
         const matchedTrends = [{ course_code: '22CS101', topic_name: 'Pointers', score: 8, total: 10, percentage: 80 }]
             .filter(t => (t.course_code || '').trim().toLowerCase() === normFilter);
         if (matchedTrends.length !== 1) throw new Error('Scenario 8 failed: case insensitive matching failed');
+
+        // Test Scenario 9: Multi-score proportional pixel height rendering (e.g. 22AM201 with 50%, 30%, 0%, 100%)
+        elements.dashboardCourseFilter.value = '22AM201';
+        renderGraphSection({
+            course_code: '22AM201',
+            recent_trends: [
+                { course_code: '22AM201', topic_name: 'Backprop', score: 3, total: 10, percentage: 30 },
+                { course_code: '22AM201', topic_name: 'Linear', score: 5, total: 10, percentage: 50 }
+            ]
+        });
+        // Chronological order: attempt 1 (50%), attempt 2 (30%)
+        if (!elements.trendChartWrap.innerHTML.includes('style="height:32px;"')) throw new Error('Scenario 9 failed: 50% attempt must have 32px height');
+        if (!elements.trendChartWrap.innerHTML.includes('style="height:19px;"')) throw new Error('Scenario 9 failed: 30% attempt must have 19px height');
+        if (!elements.trendChartWrap.innerHTML.includes('medium')) throw new Error('Scenario 9 failed: 50% must have medium class');
+        if (!elements.trendChartWrap.innerHTML.includes('low')) throw new Error('Scenario 9 failed: 30% must have low class');
 
         console.log('ALL_FRONTEND_HARNESS_SCENARIOS_PASSED');
         """
