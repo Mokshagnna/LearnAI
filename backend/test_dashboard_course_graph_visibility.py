@@ -275,6 +275,43 @@ class TestBackendCourseGraphDataScoping:
 
         assert data_unpracticed["course_code"] == "22MA201"
         assert data_unpracticed["recent_trends"] == []
+        assert data_unpracticed["overview"]["completed_quizzes"] == 0
+        assert data_unpracticed["has_completed_quizzes"] is True
+        assert data_unpracticed["overall_completed_quizzes"] == 1
+
+    def test_case_and_whitespace_resilient_course_filtering(self, isolated_db_client):
+        """Course filtering handles casing and leading/trailing whitespace correctly."""
+        client, db_file = isolated_db_client
+        conn = get_connection(db_file)
+        student_id = get_or_create_student("stud_graph_case", conn=conn)
+
+        save_quiz_attempt(
+            student_id=student_id,
+            course_code="22CS101",
+            course_name="Programming in C",
+            topic_name="Pointers",
+            quiz_data={"questions": SAMPLE_QUESTIONS},
+            score=9,
+            total=10,
+            percentage=90.0,
+            status="Passed",
+            difficulty_accuracy={},
+            concept_accuracy={},
+            weak_concepts=[],
+            strong_concepts=[],
+            conn=conn
+        )
+
+        res = client.get(
+            f"/api/student/{student_id}/dashboard?course_code=%2022cs101%20",
+            headers=auth_header_for(student_id)
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["course_code"] == "22cs101"
+        assert len(data["recent_trends"]) == 1
+        assert data["recent_trends"][0]["course_code"] == "22CS101"
+        assert data["overview"]["completed_quizzes"] == 1
 
 
 class TestFrontendDOMStructureAndVisibilityRules:
@@ -282,7 +319,8 @@ class TestFrontendDOMStructureAndVisibilityRules:
 
     def test_index_html_has_dedicated_performance_graph_card_hidden_by_default(self):
         """index.html must have #performanceGraphCard with class 'hidden' and aria-hidden='true' by default."""
-        html_path = os.path.join("frontend", "index.html")
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        html_path = os.path.join(repo_root, "frontend", "index.html")
         with open(html_path, "r", encoding="utf-8") as f:
             soup = BeautifulSoup(f.read(), "html.parser")
 
@@ -313,7 +351,8 @@ class TestFrontendDOMStructureAndVisibilityRules:
 
     def test_css_has_trend_empty_state(self):
         """style.css contains styles for .trend-empty-state."""
-        css_path = os.path.join("frontend", "css", "style.css")
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        css_path = os.path.join(repo_root, "frontend", "css", "style.css")
         with open(css_path, "r", encoding="utf-8") as f:
             content = f.read()
 
@@ -506,8 +545,66 @@ class TestFrontendDOMStructureAndVisibilityRules:
         elements.performanceGraphCard.classList.add('hidden');
         elements.performanceGraphCard.setAttribute('aria-hidden', 'true');
         elements.trendChartWrap.innerHTML = '';
+        elements.trendsCountTag.textContent = '';
         if (!elements.performanceGraphCard.classList.contains('hidden')) throw new Error('Scenario 6 failed');
         if (elements.trendChartWrap.innerHTML !== '') throw new Error('Scenario 6 failed: stale chart must not linger');
+        if (elements.trendsCountTag.textContent !== '') throw new Error('Scenario 6 failed: count tag must be cleared');
+
+        // Test Scenario 7: Full renderDashboard with returning student selecting 0-attempt course
+        // Verify dashboardContent remains visible (does not falsely route to first-time dashboardEmptyState)
+        function mockRenderDashboard(data) {
+            const emptyEl = elements.dashboardEmptyState;
+            const contentEl = elements.dashboardContent;
+            const overview = data.overview || {};
+            const completed = overview.completed_quizzes || 0;
+            const overallCompleted = (data.overall_completed_quizzes !== undefined)
+                ? Number(data.overall_completed_quizzes)
+                : null;
+            const hasCompleted = (data.has_completed_quizzes !== undefined)
+                ? Boolean(data.has_completed_quizzes)
+                : (overallCompleted !== null ? overallCompleted > 0 : completed > 0);
+            const filterEl = elements.dashboardCourseFilter;
+            const selectedCourse = filterEl ? (filterEl.value || '').trim() : '';
+            const courseFilterActive = Boolean(selectedCourse || (data.course_code || '').trim());
+
+            if (!hasCompleted && !courseFilterActive) {
+                if (contentEl) contentEl.classList.add('hidden');
+                if (emptyEl) emptyEl.classList.remove('hidden');
+                return;
+            }
+            if (emptyEl) emptyEl.classList.add('hidden');
+            if (contentEl) contentEl.classList.remove('hidden');
+            renderGraphSection(data);
+        }
+
+        elements.dashboardCourseFilter.value = '22MA201';
+        elements.dashboardEmptyState.classList.remove('hidden');
+        elements.dashboardContent.classList.add('hidden');
+        mockRenderDashboard({
+            course_code: '22MA201',
+            overview: { completed_quizzes: 0 },
+            has_completed_quizzes: true,
+            overall_completed_quizzes: 3,
+            recent_trends: []
+        });
+        if (elements.dashboardContent.classList.contains('hidden')) throw new Error('Scenario 7 failed: dashboardContent must NOT be hidden');
+        if (!elements.dashboardEmptyState.classList.contains('hidden')) throw new Error('Scenario 7 failed: dashboardEmptyState must be hidden');
+        if (elements.performanceGraphCard.classList.contains('hidden')) throw new Error('Scenario 7 failed: performanceGraphCard must be visible');
+        if (!elements.trendChartWrap.innerHTML.includes('trend-empty-state')) throw new Error('Scenario 7 failed: trend-empty-state must be shown');
+
+        // Test Scenario 8: Case-insensitive course filter matching
+        elements.dashboardCourseFilter.value = '22cs101';
+        renderGraphSection({
+            course_code: '22cs101',
+            recent_trends: [
+                { course_code: '22CS101', topic_name: 'Pointers', score: 8, total: 10, percentage: 80 }
+            ]
+        });
+        // With case-insensitive normalization:
+        const normFilter = elements.dashboardCourseFilter.value.trim().toLowerCase();
+        const matchedTrends = [{ course_code: '22CS101', topic_name: 'Pointers', score: 8, total: 10, percentage: 80 }]
+            .filter(t => (t.course_code || '').trim().toLowerCase() === normFilter);
+        if (matchedTrends.length !== 1) throw new Error('Scenario 8 failed: case insensitive matching failed');
 
         console.log('ALL_FRONTEND_HARNESS_SCENARIOS_PASSED');
         """

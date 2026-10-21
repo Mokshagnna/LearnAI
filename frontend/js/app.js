@@ -186,6 +186,7 @@ async function loadCourses() {
       courseSelect.appendChild(option);
     });
     $("setupMsg").innerHTML = "";
+    populateDashboardCourseFilter();
   } catch (e) {
     console.error("Failed to load courses:", e);
     if (courseSelect) {
@@ -864,17 +865,51 @@ async function openDashboard() {
   await loadDashboard();
 }
 
-function populateDashboardCourseFilter() {
+function populateDashboardCourseFilter(data) {
   const filterSelect = $("dashboardCourseFilter");
-  if (!filterSelect || filterSelect.options.length > 1) return;
+  if (!filterSelect) return;
 
-  filterSelect.innerHTML = '<option value="">All Courses</option>';
-  (curriculum || []).forEach(course => {
-    const opt = document.createElement("option");
-    opt.value = course.code;
-    opt.textContent = `${course.code} - ${course.name}`;
-    filterSelect.appendChild(opt);
-  });
+  const currentVal = filterSelect.value || "";
+  const existingValues = new Set(Array.from(filterSelect.options).map(o => o.value));
+
+  // Initialize with curriculum courses if only default 'All Courses' exists
+  if (existingValues.size <= 1 && Array.isArray(curriculum) && curriculum.length > 0) {
+    filterSelect.innerHTML = '<option value="">All Courses</option>';
+    curriculum.forEach(course => {
+      const opt = document.createElement("option");
+      opt.value = course.code;
+      opt.textContent = `${course.code} - ${course.name}`;
+      filterSelect.appendChild(opt);
+      existingValues.add(course.code);
+    });
+  }
+
+  // Also include any courses present in student data (topic_progress or recent_trends)
+  if (data) {
+    const dataCourses = new Map();
+    (data.topic_progress || []).forEach(tp => {
+      if (tp.course_code && !existingValues.has(tp.course_code)) {
+        dataCourses.set(tp.course_code, tp.course_code);
+      }
+    });
+    (data.recent_trends || []).forEach(rt => {
+      if (rt.course_code && !existingValues.has(rt.course_code)) {
+        const label = rt.course_name ? `${rt.course_code} - ${rt.course_name}` : rt.course_code;
+        dataCourses.set(rt.course_code, label);
+      }
+    });
+    dataCourses.forEach((label, code) => {
+      const opt = document.createElement("option");
+      opt.value = code;
+      opt.textContent = label;
+      filterSelect.appendChild(opt);
+      existingValues.add(code);
+    });
+  }
+
+  if (currentVal && existingValues.has(currentVal)) {
+    filterSelect.value = currentVal;
+  }
 }
 
 let currentDashboardRequestId = 0;
@@ -883,10 +918,12 @@ function onDashboardCourseFilterChange() {
   const filterVal = $("dashboardCourseFilter")?.value || "";
   const graphCard = $("performanceGraphCard");
   const trendsWrap = $("trendChartWrap");
+  const countTag = $("trendsCountTag");
+  const subtitleEl = $("performanceGraphSubtitle");
 
   // Immediate UI update upon user action:
   // If switching to 'All Courses', immediately hide the graph card and clear stale chart content.
-  // If switching to a specific course, immediately clear previous chart content so it cannot linger while loading.
+  // If switching to a specific course, immediately clear previous chart content and metadata so it cannot linger while loading.
   if (!filterVal) {
     if (graphCard) {
       graphCard.classList.add("hidden");
@@ -895,9 +932,18 @@ function onDashboardCourseFilterChange() {
     if (trendsWrap) {
       trendsWrap.innerHTML = "";
     }
+    if (countTag) {
+      countTag.textContent = "";
+    }
   } else {
     if (trendsWrap) {
       trendsWrap.innerHTML = "";
+    }
+    if (countTag) {
+      countTag.textContent = "";
+    }
+    if (subtitleEl) {
+      subtitleEl.textContent = `Historical score progression for ${filterVal}.`;
     }
   }
 
@@ -912,6 +958,8 @@ async function loadDashboard() {
   const contentEl = $("dashboardContent");
   const graphCard = $("performanceGraphCard");
   const trendsWrap = $("trendChartWrap");
+  const countTag = $("trendsCountTag");
+  const subtitleEl = $("performanceGraphSubtitle");
 
   const courseFilter = $("dashboardCourseFilter")?.value || "";
 
@@ -924,9 +972,18 @@ async function loadDashboard() {
     if (trendsWrap) {
       trendsWrap.innerHTML = "";
     }
+    if (countTag) {
+      countTag.textContent = "";
+    }
   } else {
     if (trendsWrap) {
       trendsWrap.innerHTML = "";
+    }
+    if (countTag) {
+      countTag.textContent = "";
+    }
+    if (subtitleEl) {
+      subtitleEl.textContent = `Historical score progression for ${courseFilter}.`;
     }
   }
 
@@ -967,6 +1024,10 @@ async function loadDashboard() {
     if (trendsWrap) {
       trendsWrap.innerHTML = "";
     }
+    const countTag = $("trendsCountTag");
+    if (countTag) {
+      countTag.textContent = "";
+    }
     if (loadingEl) loadingEl.classList.add("hidden");
     if (errorEl) {
       errorEl.classList.remove("hidden");
@@ -983,13 +1044,28 @@ function renderDashboard(data) {
 
   if (loadingEl) loadingEl.classList.add("hidden");
 
+  // Ensure course filter options include all relevant courses
+  populateDashboardCourseFilter(data);
+
   const overview = data.overview || {};
   const completed = overview.completed_quizzes || 0;
+  const overallCompleted = (data.overall_completed_quizzes !== undefined)
+    ? Number(data.overall_completed_quizzes)
+    : null;
+
+  // hasCompleted represents whether the student has completed any quizzes overall
   const hasCompleted = (data.has_completed_quizzes !== undefined)
     ? Boolean(data.has_completed_quizzes)
-    : (completed > 0);
+    : (overallCompleted !== null ? overallCompleted > 0 : completed > 0);
 
-  if (!hasCompleted || completed === 0) {
+  const filterEl = $("dashboardCourseFilter");
+  const selectedCourse = filterEl ? (filterEl.value || "").trim() : "";
+  const courseFilterActive = Boolean(selectedCourse || (data.course_code || "").trim());
+
+  // First-time student screen is shown ONLY when the student has never completed ANY quiz
+  // and no course filter is currently active. When filtering to a specific course that has
+  // 0 attempts, show the course dashboard with its dedicated empty state.
+  if (!hasCompleted && !courseFilterActive) {
     if (contentEl) contentEl.classList.add("hidden");
     if (emptyEl) emptyEl.classList.remove("hidden");
     return;
@@ -1184,8 +1260,11 @@ function renderReturningDashboard(data) {
   const countTag = $("trendsCountTag");
   const subtitleEl = $("performanceGraphSubtitle");
 
-  // Determine current active course filter from dropdown or response
-  const activeCourse = $("dashboardCourseFilter")?.value || data.course_code || "";
+  // Determine current active course filter:
+  // If the course filter element is in the DOM, its value is the user's explicit selection.
+  // When 'All Courses' is selected, activeCourse is empty string.
+  const filterEl = $("dashboardCourseFilter");
+  const activeCourse = filterEl ? (filterEl.value || "").trim() : ((data.course_code || "").trim());
 
   if (!activeCourse) {
     // Rule 1 & 3: When 'All Courses' is selected, hide the performance graph completely
@@ -1195,6 +1274,9 @@ function renderReturningDashboard(data) {
     }
     if (trendsWrap) {
       trendsWrap.innerHTML = "";
+    }
+    if (countTag) {
+      countTag.textContent = "";
     }
   } else {
     // Rule 2: When a specific course is selected, display the performance graph for that course only
@@ -1208,8 +1290,9 @@ function renderReturningDashboard(data) {
     }
 
     const rawTrends = data.recent_trends || [];
-    // Ensure the graph uses data belonging exclusively to the selected course
-    const courseTrends = rawTrends.filter(t => t.course_code === activeCourse);
+    // Ensure the graph uses data belonging exclusively to the selected course (case/whitespace resilient)
+    const normActive = activeCourse.toLowerCase();
+    const courseTrends = rawTrends.filter(t => (t.course_code || "").trim().toLowerCase() === normActive);
 
     if (trendsWrap) {
       if (!courseTrends.length) {
@@ -1246,8 +1329,9 @@ function renderReturningDashboard(data) {
   // Attempts table: displays scoped course attempts if a course is selected, or all attempts if 'All Courses'
   if (tableWrap) {
     const rawTrends = data.recent_trends || [];
+    const normActive = activeCourse.toLowerCase();
     const tableTrends = activeCourse
-      ? rawTrends.filter(t => t.course_code === activeCourse)
+      ? rawTrends.filter(t => (t.course_code || "").trim().toLowerCase() === normActive)
       : rawTrends;
 
     if (!tableTrends.length) {

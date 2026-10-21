@@ -1851,6 +1851,12 @@ def get_student_dashboard_data(
     clean_course = course_code.strip() if course_code and course_code.strip() else None
 
     try:
+        # Check overall completed attempts across all courses for the student
+        cursor.execute("SELECT COUNT(*) as total_attempts FROM quiz_attempts WHERE student_id = ?", (student_id,))
+        total_attempts_row = cursor.fetchone()
+        overall_completed_quizzes = int(total_attempts_row["total_attempts"]) if total_attempts_row else 0
+        has_completed_any = overall_completed_quizzes > 0
+
         # 1. Overview Metrics (Aggregated strictly from completed quiz_attempts)
         if clean_course:
             cursor.execute("""
@@ -1861,8 +1867,8 @@ def get_student_dashboard_data(
                     MAX(created_at) as last_practiced_at,
                     COUNT(DISTINCT topic_name) as topics_practiced
                 FROM quiz_attempts
-                WHERE student_id = ? AND course_code = ?
-            """, (student_id, clean_course))
+                WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?))
+            """, (student_id, clean_course, clean_course))
         else:
             cursor.execute("""
                 SELECT 
@@ -1898,10 +1904,10 @@ def get_student_dashboard_data(
             cursor.execute("""
                 SELECT id, course_code, course_name, topic_name, score, total, percentage, status, recommended_difficulty, created_at
                 FROM quiz_attempts
-                WHERE student_id = ? AND course_code = ?
+                WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?))
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (student_id, clean_course, safe_limit))
+            """, (student_id, clean_course, clean_course, safe_limit))
         else:
             cursor.execute("""
                 SELECT id, course_code, course_name, topic_name, score, total, percentage, status, recommended_difficulty, created_at
@@ -1930,9 +1936,9 @@ def get_student_dashboard_data(
         if clean_course:
             cursor.execute("""
                 SELECT * FROM topic_mastery
-                WHERE student_id = ? AND course_code = ?
+                WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?))
                 ORDER BY last_practiced_at DESC
-            """, (student_id, clean_course))
+            """, (student_id, clean_course, clean_course))
         else:
             cursor.execute("""
                 SELECT * FROM topic_mastery
@@ -1948,9 +1954,9 @@ def get_student_dashboard_data(
             if clean_course:
                 cursor.execute("""
                     SELECT * FROM topic_mastery
-                    WHERE student_id = ? AND course_code = ?
+                    WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?))
                     ORDER BY last_practiced_at DESC
-                """, (student_id, clean_course))
+                """, (student_id, clean_course, clean_course))
             else:
                 cursor.execute("""
                     SELECT * FROM topic_mastery
@@ -2035,9 +2041,9 @@ def get_student_dashboard_data(
                 SELECT id, session_id, student_id, course_code, course_name, topic_name,
                        score, total, percentage, status, recommended_difficulty, created_at
                 FROM quiz_attempts
-                WHERE student_id = ? AND course_code = ?
+                WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?))
                 ORDER BY created_at DESC, id DESC
-            """, (student_id, clean_course))
+            """, (student_id, clean_course, clean_course))
         else:
             cursor.execute("""
                 SELECT id, session_id, student_id, course_code, course_name, topic_name,
@@ -2204,7 +2210,7 @@ def get_student_dashboard_data(
             curriculum_data = curriculum_service.get_curriculum()
 
             if clean_course:
-                target_courses = [c for c in curriculum_data.get("courses", []) if c.get("code") == clean_course]
+                target_courses = [c for c in curriculum_data.get("courses", []) if (c.get("code") or "").strip().lower() == clean_course.lower()]
             else:
                 practiced_courses = {tp["course_code"] for tp in topic_progress}
                 target_courses = [c for c in curriculum_data.get("courses", []) if c.get("code") in practiced_courses]
@@ -2248,7 +2254,8 @@ def get_student_dashboard_data(
             "review_topics": review_topics,
             "explore_topics": explore_topics,
             "recommended_topics": recommended_topics,
-            "has_completed_quizzes": completed_quizzes > 0,
+            "has_completed_quizzes": has_completed_any,
+            "overall_completed_quizzes": overall_completed_quizzes,
             "disclaimer": disclaimer
         }
 
