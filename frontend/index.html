@@ -15,6 +15,7 @@
     </div>
     <nav class="topbar-nav" aria-label="Main Navigation">
       <button id="navPracticeBtn" type="button" class="nav-tab active">Practice Quiz</button>
+      <button id="navNotesBtn" type="button" class="nav-tab">Generate from Notes</button>
       <button id="navDashboardBtn" type="button" class="nav-tab">Student Dashboard</button>
     </nav>
   </header>
@@ -43,6 +44,11 @@
 
     <button id="generateBtn">Generate Questions with AI</button>
     <p id="setupMsg" class="message"></p>
+    <div class="setup-divider"><span>OR</span></div>
+    <button id="setupNotesBtn" type="button" class="btn-notes-cta">
+      <span class="notes-icon" aria-hidden="true">📁</span>
+      <span>Generate Quiz from Notes or Slides</span>
+    </button>
   </section>
 
   <!-- 2. Loading Screen (Calm, Minimal, Academic) -->
@@ -322,6 +328,123 @@
       <!-- 7. Pedagogical Practice Notice -->
       <div class="disclaimer-box">
         <strong>Pedagogical Practice Notice:</strong> Mastery levels, difficulty recommendations, and concept insights are algorithmic practice heuristics intended to guide active revision. They are not accredited psychometric or institutional grading assessments.
+      </div>
+    </div>
+  </section>
+  <!-- 6. Generate Quiz from Notes Screen -->
+  <section id="notesUploadSection" class="hidden">
+    <div class="notes-page-wrapper flex flex-col items-center justify-center py-6 px-4 w-full">
+      <div id="notesUploaderCard" class="bg-white rounded-2xl shadow-xl p-10 w-full max-w-md border border-gray-100 animate-fade-in">
+        <h1 class="text-3xl font-bold mb-8 text-center text-gray-900 tracking-tight">
+          Upload Files
+        </h1>
+
+        <input
+          id="notesFileInput"
+          type="file"
+          class="hidden"
+          aria-label="File input"
+          multiple
+          accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,.txt,.ppt,.pptx,image/jpeg,image/png,image/webp"
+        />
+
+        <div
+          id="notesDropzone"
+          class="w-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all duration-200 mb-5 cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400"
+          style="min-height: 120px;"
+          role="button"
+          tabindex="0"
+          aria-label="Choose files or drag files here"
+        >
+          <div class="flex flex-col items-center py-6">
+            <span class="text-4xl mb-2 animate-bounce">📁</span>
+            <span class="text-gray-700 font-medium text-center">
+              Drag &amp; drop files here, or <span class="text-blue-600 underline">browse</span>
+            </span>
+            <span class="text-xs text-gray-400 mt-1 text-center px-2">
+              Photos, PDF, DOCX, TXT, PPT and PPTX (maximum 5 MB per file)
+            </span>
+          </div>
+        </div>
+
+        <!-- Selected files list (single FilePreview or multi-file pill list) -->
+        <div id="notesFilesList" class="mb-4"></div>
+
+        <!-- Progress bar -->
+        <div id="notesProgressWrap" class="w-full bg-gray-200 rounded-full h-3 mb-4 overflow-hidden animate-fade-in hidden">
+          <div
+            id="notesProgressBar"
+            class="bg-green-500 h-3 rounded-full transition-all duration-300"
+            style="width: 0%;"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          ></div>
+        </div>
+
+        <!-- Upload Action Button -->
+        <button
+          id="notesUploadBtn"
+          type="button"
+          disabled
+          class="w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed"
+          style="min-height: 40px;"
+        >
+          <svg
+            id="notesSpinner"
+            class="animate-spin h-6 w-6 text-white hidden"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          </svg>
+          <span id="notesUploadBtnText">Upload &amp; Find Topics</span>
+        </button>
+      </div>
+
+      <!-- Toast notifications container -->
+      <div id="notesToastContainer" aria-live="polite"></div>
+
+      <!-- Topic Preview & Selection Card -->
+      <div id="notesTopicResultsCard" class="card notes-results-card hidden w-full max-w-2xl mt-6 animate-fade-in">
+        <div class="notes-results-header">
+          <div class="badge badge-success" id="notesResultsBadge">Curriculum Match Found</div>
+          <h2 class="notes-results-title">Matched Syllabus Topics</h2>
+          <p class="muted notes-results-subtitle">
+            We extracted your study notes and matched them to syllabus topics. Choose a topic to generate a grounded 10-question quiz.
+          </p>
+        </div>
+
+        <!-- Partial relevance alert -->
+        <div id="notesPartialAlert" class="notes-alert notes-alert-warning hidden">
+          <span class="notes-alert-icon">⚡</span>
+          <div>
+            <strong>Partial Syllabus Coverage:</strong>
+            <span>Your notes focus on specific concepts within this topic. The AI quiz generator will prioritize those concepts.</span>
+          </div>
+        </div>
+
+        <!-- Irrelevant document notice -->
+        <div id="notesIrrelevantAlert" class="notes-alert notes-alert-error hidden">
+          <span class="notes-alert-icon">⚠️</span>
+          <div>
+            <strong>No Syllabus Match Found:</strong>
+            <span id="notesIrrelevantMsg">We could not identify any matching curriculum courses or topics in these notes.</span>
+          </div>
+        </div>
+
+        <!-- Topic options container -->
+        <div id="notesTopicOptions" class="notes-topics-list"></div>
+
+        <!-- Action buttons -->
+        <div class="notes-actions-row">
+          <button id="notesGenerateQuizBtn" type="button" class="btn-primary">Generate Quiz from Notes</button>
+          <button id="notesResetBtn" type="button" class="secondary">Upload Different Notes</button>
+        </div>
       </div>
     </div>
   </section>

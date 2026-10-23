@@ -8,6 +8,7 @@ let answers = [];
 let activeCourseCode = "";
 let activeTopicName = "";
 let activeTopicId = "";
+let activeNotesSessionId = null;
 let isGenerating = false;
 let activeAbortController = null;
 let studentId = localStorage.getItem("learnai_student_id") || null;
@@ -78,7 +79,7 @@ function escapeHtml(str) {
 
 // ── Mutually Exclusive Screen Management ────────────────────────────────────
 // Ensures EXACTLY ONE screen is visible at any time.
-const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection"];
+const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection"];
 
 function showScreen(screenId) {
   ALL_SCREENS.forEach(id => {
@@ -93,8 +94,10 @@ function showScreen(screenId) {
   });
 
   const isDashboard = screenId === "dashboardSection";
+  const isNotes = screenId === "notesUploadSection";
   $("navDashboardBtn")?.classList.toggle("active", isDashboard);
-  $("navPracticeBtn")?.classList.toggle("active", !isDashboard);
+  $("navNotesBtn")?.classList.toggle("active", isNotes);
+  $("navPracticeBtn")?.classList.toggle("active", !isDashboard && !isNotes);
 
   // Safe programmatic focus on screen heading for screen readers & keyboard navigation
   const activeEl = $(screenId);
@@ -116,13 +119,15 @@ function saveSessionState() {
       answers,
       activeCourseCode,
       activeTopicName,
-      activeTopicId
+      activeTopicId,
+      activeNotesSessionId
     }));
   }
 }
 
 function clearSessionState() {
   sessionStorage.removeItem("learnai_active_quiz");
+  activeNotesSessionId = null;
 }
 
 function restoreSessionState() {
@@ -137,6 +142,7 @@ function restoreSessionState() {
       activeCourseCode = data.activeCourseCode || currentQuiz.course_code;
       activeTopicName = data.activeTopicName || currentQuiz.topic;
       activeTopicId = data.activeTopicId || currentQuiz.topic_id || "";
+      activeNotesSessionId = data.activeNotesSessionId || null;
 
       // Restore select dropdowns
       if ($("course") && activeCourseCode) {
@@ -325,7 +331,7 @@ $("retakeBtn").addEventListener("click", async () => {
   if ($("progressPercent")) $("progressPercent").textContent = "0% completed";
 
   // 4. Launch fresh quiz generation for retake
-  await startQuizGeneration(courseCode, topic, true, topicId);
+  await startQuizGeneration(courseCode, topic, true, topicId, activeNotesSessionId);
 
   retakeBtn.disabled = false;
   retakeBtn.textContent = "Retake with New AI Questions";
@@ -379,9 +385,13 @@ function clearResultDisplay() {
 }
 
 // ── Core Quiz Generation (First Attempt & Retake) ────────────────────────────
-async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null) {
+async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null, notesSessionId = null) {
   if (isGenerating) return;
   isGenerating = true;
+
+  if (notesSessionId) {
+    activeNotesSessionId = notesSessionId;
+  }
 
   const generateBtn = $("generateBtn");
   const retakeBtn = $("retakeBtn");
@@ -414,8 +424,9 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     // Populate course and topic label (small, secondary)
     const courseObj = curriculum.find(c => c.code === courseCode);
     const courseLabel = courseObj ? `${courseObj.code} - ${courseObj.name}` : courseCode;
+    const notesTag = activeNotesSessionId ? " [Notes-Grounded]" : "";
     if ($("loadingTopicLabel")) {
-      $("loadingTopicLabel").textContent = `${courseLabel} • ${topic}`;
+      $("loadingTopicLabel").textContent = `${courseLabel} • ${topic}${notesTag}`;
     }
 
     showScreen("loadingSection");
@@ -424,16 +435,21 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     const timeoutSec = 50;
     timeoutId = setTimeout(() => activeAbortController?.abort(), timeoutSec * 1000);
 
+    const quizPayload = {
+      course_code: courseCode,
+      topic: topic,
+      topic_id: activeTopicId || undefined,
+      student_id: getStudentId() || undefined,
+      retake: isRetake
+    };
+    if (activeNotesSessionId) {
+      quizPayload.notes_session_id = activeNotesSessionId;
+    }
+
     const res = await authenticatedFetch("/api/quiz/generate", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        course_code: courseCode,
-        topic: topic,
-        topic_id: activeTopicId || undefined,
-        student_id: getStudentId() || undefined,
-        retake: isRetake
-      }),
+      body: JSON.stringify(quizPayload),
       signal: activeAbortController.signal
     });
     if (timeoutId) clearTimeout(timeoutId);
@@ -507,7 +523,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     const retryBtn = $("loadingRetryBtn");
     if (retryBtn) {
       retryBtn.onclick = () => {
-        startQuizGeneration(courseCode, topic, isRetake, topicId);
+        startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId);
       };
     }
 
@@ -1654,10 +1670,401 @@ $("dashboardRefreshBtn")?.addEventListener("click", loadDashboard);
 $("dashboardRetryBtn")?.addEventListener("click", loadDashboard);
 $("dashboardCourseFilter")?.addEventListener("change", onDashboardCourseFilterChange);
 
+// ── Notes-to-Quiz Feature State & Handlers ──────────────────────────────────
+let selectedNotesFiles = [];
+let isDraggingNotes = false;
+let isUploadingNotes = false;
+let notesToastTimer = null;
+let lastExtractionResult = null;
+let selectedTopicIndex = 0;
+
+function showNotesToast(message, type = "success") {
+  const container = $("notesToastContainer");
+  if (!container) return;
+  if (notesToastTimer) {
+    clearTimeout(notesToastTimer);
+    notesToastTimer = null;
+  }
+  const isSuccess = type === "success";
+  container.innerHTML = `
+    <div class="fixed top-6 right-6 z-50 px-4 py-3 rounded shadow-lg text-white animate-fade-in ${isSuccess ? 'bg-green-600' : 'bg-red-600'}" role="alert">
+      <div class="flex items-center gap-2">
+        <span>${isSuccess ? '✅' : '❌'}</span>
+        <span>${escapeHtml(message)}</span>
+        <button type="button" class="ml-3 text-white/80 hover:text-white text-lg notes-toast-close" aria-label="Close">×</button>
+      </div>
+    </div>
+  `;
+  container.querySelector(".notes-toast-close")?.addEventListener("click", () => {
+    container.innerHTML = "";
+  });
+  notesToastTimer = setTimeout(() => {
+    container.innerHTML = "";
+    notesToastTimer = null;
+  }, 5000);
+}
+
+function handleNotesFiles(files) {
+  if (!files || files.length === 0) return;
+  const maxBytes = 5 * 1024 * 1024;
+  const allowedExtensions = [".jpg", ".jpeg", ".png", ".webp", ".pdf", ".docx", ".txt", ".ppt", ".pptx"];
+
+  const fileArr = Array.from(files);
+  for (const f of fileArr) {
+    if (f.size > maxBytes) {
+      showNotesToast(`File "${f.name}" exceeds the 5 MB limit.`, "error");
+      return;
+    }
+    const dotIdx = f.name.lastIndexOf(".");
+    const ext = dotIdx >= 0 ? f.name.slice(dotIdx).toLowerCase() : "";
+    if (!allowedExtensions.includes(ext)) {
+      showNotesToast(`Unsupported file type for "${f.name}". Please upload PDF, DOCX, TXT, PPT, PPTX or photos.`, "error");
+      return;
+    }
+  }
+
+  // Deduplicate and append
+  const newFiles = fileArr.filter(
+    f => !selectedNotesFiles.some(p => p.name === f.name && p.size === f.size)
+  );
+  selectedNotesFiles = [...selectedNotesFiles, ...newFiles];
+  renderNotesFilesUI();
+}
+
+function removeNotesFile(index) {
+  selectedNotesFiles.splice(index, 1);
+  if ($("notesFileInput")) {
+    $("notesFileInput").value = "";
+  }
+  renderNotesFilesUI();
+}
+
+function renderNotesFilesUI() {
+  const container = $("notesFilesList");
+  const uploadBtn = $("notesUploadBtn");
+  if (!container || !uploadBtn) return;
+
+  if (selectedNotesFiles.length === 0) {
+    container.innerHTML = "";
+    container.classList.add("hidden");
+    uploadBtn.disabled = true;
+    uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed";
+    return;
+  }
+
+  container.classList.remove("hidden");
+  uploadBtn.disabled = false;
+  uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-700 text-white hover:bg-gray-800 active:scale-95";
+
+  if (selectedNotesFiles.length === 1) {
+    const file = selectedNotesFiles[0];
+    const isImage = file.type.startsWith("image/");
+    const previewUrl = isImage ? URL.createObjectURL(file) : null;
+
+    container.innerHTML = `
+      <div class="flex items-center gap-3 bg-gray-50 rounded-lg p-2 shadow-sm border border-gray-200 mb-2 animate-fade-in">
+        ${isImage ? `
+          <img src="${previewUrl}" alt="Preview" class="w-16 h-16 object-cover rounded-md border border-gray-200" />
+        ` : `
+          <div class="w-16 h-16 flex items-center justify-center bg-gray-200 rounded-md text-gray-500 text-xl">
+            <span role="img" aria-label="file">📄</span>
+          </div>
+        `}
+        <div class="flex-1 truncate">
+          <div class="font-medium text-gray-800 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+          <div class="text-xs text-gray-500">${(file.size / 1024).toFixed(1)} KB</div>
+        </div>
+        <button type="button" class="ml-2 px-2 py-1 text-xs flex items-center gap-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition border border-red-200 shadow-sm notes-single-remove" aria-label="Remove file">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    `;
+    container.querySelector(".notes-single-remove")?.addEventListener("click", () => {
+      removeNotesFile(0);
+    });
+  } else {
+    // Multi-file pill rendering
+    container.innerHTML = `
+      <div style="max-height: 180px; overflow-y: auto;">
+        <div class="flex flex-wrap gap-2">
+          ${selectedNotesFiles.map((f, idx) => `
+            <span class="inline-flex items-center max-w-xs px-3 py-1 rounded-full bg-gray-100 text-gray-800 text-sm font-medium shadow-sm border border-gray-200 truncate" style="min-width: 0;" title="${escapeHtml(f.name)}">
+              <span class="truncate max-w-[120px] text-xs">${escapeHtml(f.name)}</span>
+              <button type="button" class="ml-2 p-0.5 rounded-full hover:bg-red-100 text-red-600 transition border border-transparent focus:outline-none focus:ring-2 focus:ring-red-200 notes-pill-remove" data-index="${idx}" aria-label="Remove ${escapeHtml(f.name)}">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </span>
+          `).join("")}
+        </div>
+      </div>
+    `;
+    container.querySelectorAll(".notes-pill-remove").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.dataset.index, 10);
+        removeNotesFile(idx);
+      });
+    });
+  }
+}
+
+async function handleNotesUpload() {
+  if (selectedNotesFiles.length === 0 || isUploadingNotes) return;
+
+  isUploadingNotes = true;
+  const uploadBtn = $("notesUploadBtn");
+  const spinner = $("notesSpinner");
+  const btnText = $("notesUploadBtnText");
+  const progressWrap = $("notesProgressWrap");
+  const progressBar = $("notesProgressBar");
+
+  if (uploadBtn) uploadBtn.disabled = true;
+  if (spinner) spinner.classList.remove("hidden");
+  if (btnText) btnText.textContent = "Processing...";
+  if (progressWrap) progressWrap.classList.remove("hidden");
+  if (progressBar) progressBar.style.width = "40%";
+
+  try {
+    const formData = new FormData();
+    selectedNotesFiles.forEach(f => {
+      formData.append("files", f);
+    });
+
+    await ensureAuthSession();
+    const headers = {};
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+
+    if (progressBar) progressBar.style.width = "70%";
+
+    const res = await fetch("/api/notes/extract-topics", {
+      method: "POST",
+      headers,
+      body: formData
+    });
+
+    const data = await res.json();
+    if (progressBar) progressBar.style.width = "100%";
+
+    if (!res.ok) {
+      const errMsg = (data && data.detail)
+        ? (typeof data.detail === "object" ? JSON.stringify(data.detail) : data.detail)
+        : "Unable to process files. Please verify file integrity.";
+      throw new Error(errMsg);
+    }
+
+    lastExtractionResult = data;
+    selectedTopicIndex = 0;
+
+    if (data.matched_topics && data.matched_topics.length > 0) {
+      showNotesToast(data.message || `Found ${data.matched_topics.length} matching curriculum topic(s).`, "success");
+    } else {
+      showNotesToast(data.message || "No curriculum topics matched your notes.", "error");
+    }
+
+    renderMatchedTopicsUI(data);
+
+  } catch (err) {
+    showNotesToast(err.message || "Failed to extract notes. Please try again.", "error");
+  } finally {
+    isUploadingNotes = false;
+    if (spinner) spinner.classList.add("hidden");
+    if (btnText) btnText.textContent = "Upload & Find Topics";
+    if (uploadBtn) {
+      uploadBtn.disabled = selectedNotesFiles.length === 0;
+    }
+    setTimeout(() => {
+      if (progressWrap) progressWrap.classList.add("hidden");
+      if (progressBar) progressBar.style.width = "0%";
+    }, 400);
+  }
+}
+
+function renderMatchedTopicsUI(data) {
+  const card = $("notesTopicResultsCard");
+  const listContainer = $("notesTopicOptions");
+  const partialAlert = $("notesPartialAlert");
+  const irrelevantAlert = $("notesIrrelevantAlert");
+  const generateQuizBtn = $("notesGenerateQuizBtn");
+  const badge = $("notesResultsBadge");
+
+  if (!card || !listContainer) return;
+  card.classList.remove("hidden");
+
+  // Scroll smoothly to results card
+  setTimeout(() => {
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 100);
+
+  if (!data || !data.relevant || !data.matched_topics || data.matched_topics.length === 0) {
+    if (badge) {
+      badge.className = "badge badge-error";
+      badge.textContent = "No Match";
+    }
+    if (irrelevantAlert) irrelevantAlert.classList.remove("hidden");
+    if (partialAlert) partialAlert.classList.add("hidden");
+    if (generateQuizBtn) generateQuizBtn.classList.add("hidden");
+    listContainer.innerHTML = "";
+    if ($("notesIrrelevantMsg") && data.message) {
+      $("notesIrrelevantMsg").textContent = data.message;
+    }
+    return;
+  }
+
+  // Relevant match found
+  if (badge) {
+    badge.className = "badge badge-success";
+    badge.textContent = "Curriculum Match Found";
+  }
+  if (irrelevantAlert) irrelevantAlert.classList.add("hidden");
+  if (generateQuizBtn) generateQuizBtn.classList.remove("hidden");
+
+  if (data.partial && partialAlert) {
+    partialAlert.classList.remove("hidden");
+  } else if (partialAlert) {
+    partialAlert.classList.add("hidden");
+  }
+
+  listContainer.innerHTML = data.matched_topics.map((t, idx) => {
+    const isChecked = idx === selectedTopicIndex;
+    const pct = Math.round((t.confidence || 0) * 100);
+    const concepts = (t.matched_concepts || []).map(c => `
+      <span class="notes-concept-chip">${escapeHtml(c)}</span>
+    `).join("");
+
+    return `
+      <div class="notes-topic-item ${isChecked ? 'selected' : ''}" data-index="${idx}" role="button" tabindex="0">
+        <input type="radio" name="matchedTopicRadio" class="notes-topic-radio" id="topicRadio_${idx}" value="${idx}" ${isChecked ? 'checked' : ''} />
+        <div class="notes-topic-body">
+          <div class="notes-topic-header-row">
+            <span class="notes-course-tag">${escapeHtml(t.course_code)} - ${escapeHtml(t.course_name)}</span>
+            <span class="notes-confidence-badge">${pct}% Match</span>
+          </div>
+          <div class="notes-topic-name">${escapeHtml(t.topic_name)}</div>
+          ${concepts ? `<div class="notes-concepts-row">${concepts}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  listContainer.querySelectorAll(".notes-topic-item").forEach(item => {
+    item.addEventListener("click", () => {
+      const idx = parseInt(item.dataset.index, 10);
+      selectedTopicIndex = idx;
+      listContainer.querySelectorAll(".notes-topic-item").forEach((el, i) => {
+        const isSel = i === idx;
+        el.classList.toggle("selected", isSel);
+        const radio = el.querySelector(".notes-topic-radio");
+        if (radio) radio.checked = isSel;
+      });
+    });
+  });
+}
+
+function initNotesUploaderListeners() {
+  const dropzone = $("notesDropzone");
+  const fileInput = $("notesFileInput");
+  const uploadBtn = $("notesUploadBtn");
+  const generateQuizBtn = $("notesGenerateQuizBtn");
+  const resetBtn = $("notesResetBtn");
+
+  if (dropzone) {
+    dropzone.addEventListener("click", () => {
+      if (fileInput) fileInput.click();
+    });
+    dropzone.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if (fileInput) fileInput.click();
+      }
+    });
+    dropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      isDraggingNotes = true;
+      dropzone.classList.remove("border-gray-300", "bg-gray-50");
+      dropzone.classList.add("border-blue-500", "bg-blue-50");
+    });
+    dropzone.addEventListener("dragleave", () => {
+      isDraggingNotes = false;
+      dropzone.classList.remove("border-blue-500", "bg-blue-50");
+      dropzone.classList.add("border-gray-300", "bg-gray-50");
+    });
+    dropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      isDraggingNotes = false;
+      dropzone.classList.remove("border-blue-500", "bg-blue-50");
+      dropzone.classList.add("border-gray-300", "bg-gray-50");
+      if (e.dataTransfer && e.dataTransfer.files) {
+        handleNotesFiles(e.dataTransfer.files);
+      }
+    });
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleNotesFiles(e.target.files);
+      }
+      e.target.value = "";
+    });
+  }
+
+  if (uploadBtn) {
+    uploadBtn.addEventListener("click", handleNotesUpload);
+  }
+
+  if (generateQuizBtn) {
+    generateQuizBtn.addEventListener("click", () => {
+      if (!lastExtractionResult || !lastExtractionResult.matched_topics) return;
+      const topicObj = lastExtractionResult.matched_topics[selectedTopicIndex] || lastExtractionResult.matched_topics[0];
+      if (!topicObj) return;
+
+      startQuizGeneration(
+        topicObj.course_code,
+        topicObj.topic_name,
+        false,
+        topicObj.topic_id,
+        lastExtractionResult.notes_session_id
+      );
+    });
+  }
+
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      selectedNotesFiles = [];
+      lastExtractionResult = null;
+      selectedTopicIndex = 0;
+      renderNotesFilesUI();
+      if ($("notesTopicResultsCard")) {
+        $("notesTopicResultsCard").classList.add("hidden");
+      }
+      if ($("notesUploaderCard")) {
+        $("notesUploaderCard").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }
+
+  $("navNotesBtn")?.addEventListener("click", () => {
+    if (isGenerating) return;
+    showScreen("notesUploadSection");
+  });
+
+  $("setupNotesBtn")?.addEventListener("click", () => {
+    if (isGenerating) return;
+    showScreen("notesUploadSection");
+  });
+}
+
 // ── App Initialization ──────────────────────────────────────────────────────
 async function initApp() {
   await ensureAuthSession();
   await loadCourses();
+  initNotesUploaderListeners();
   restoreSessionState();
 }
 
