@@ -46,7 +46,14 @@
     <p id="setupMsg" class="message"></p>
     <div class="setup-divider"><span>OR</span></div>
     <button id="setupNotesBtn" type="button" class="btn-notes-cta">
-      <span class="notes-icon" aria-hidden="true">📁</span>
+      <span class="notes-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+      </span>
       <span>Generate Quiz from Notes or Slides</span>
     </button>
   </section>
@@ -334,7 +341,7 @@
   <!-- 6. Generate Quiz from Notes Screen -->
   <section id="notesUploadSection" class="hidden">
     <div class="notes-page-wrapper flex flex-col items-center justify-center py-6 px-4 w-full">
-      <div id="notesUploaderCard" class="bg-white rounded-2xl shadow-xl p-10 w-full max-w-md border border-gray-100 animate-fade-in">
+      <div id="notesUploaderCard" class="notes-uploader-card w-full max-w-md animate-fade-in">
         <h1 class="text-3xl font-bold mb-8 text-center text-gray-900 tracking-tight">
           Upload Files
         </h1>
@@ -350,22 +357,38 @@
 
         <div
           id="notesDropzone"
-          class="w-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all duration-200 mb-5 cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400"
+          class="notes-dropzone w-full flex flex-col items-center justify-center transition-all duration-200 mb-5 cursor-pointer"
           style="min-height: 120px;"
           role="button"
           tabindex="0"
           aria-label="Choose files or drag files here"
         >
-          <div class="flex flex-col items-center py-6">
-            <span class="text-4xl mb-2 animate-bounce">📁</span>
+          <div class="flex flex-col items-center py-6 px-4">
+            <div class="notes-dropzone-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="12" y1="18" x2="12" y2="12"></line>
+                <polyline points="9 15 12 12 15 15"></polyline>
+              </svg>
+            </div>
             <span class="text-gray-700 font-medium text-center">
               Drag &amp; drop files here, or <span class="text-blue-600 underline">browse</span>
             </span>
-            <span class="text-xs text-gray-400 mt-1 text-center px-2">
+            <span class="notes-dropzone-subtext text-xs mt-1 text-center px-2">
               Photos, PDF, DOCX, TXT, PPT and PPTX (maximum 5 MB per file)
             </span>
           </div>
         </div>
+
+        <!-- Screen-reader live announcement region for notes staging -->
+        <div
+          id="notesLiveStatus"
+          class="sr-only"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></div>
 
         <!-- Selected files list (single FilePreview or multi-file pill list) -->
         <div id="notesFilesList" class="mb-4"></div>
@@ -421,7 +444,13 @@
 
         <!-- Partial relevance alert -->
         <div id="notesPartialAlert" class="notes-alert notes-alert-warning hidden">
-          <span class="notes-alert-icon">⚡</span>
+          <span class="notes-alert-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+          </span>
           <div>
             <strong>Partial Syllabus Coverage:</strong>
             <span>Your notes focus on specific concepts within this topic. The AI quiz generator will prioritize those concepts.</span>
@@ -430,7 +459,13 @@
 
         <!-- Irrelevant document notice -->
         <div id="notesIrrelevantAlert" class="notes-alert notes-alert-error hidden">
-          <span class="notes-alert-icon">⚠️</span>
+          <span class="notes-alert-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+          </span>
           <div>
             <strong>No Syllabus Match Found:</strong>
             <span id="notesIrrelevantMsg">We could not identify any matching curriculum courses or topics in these notes.</span>

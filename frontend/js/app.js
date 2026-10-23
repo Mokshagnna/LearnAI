@@ -1704,6 +1704,15 @@ function showNotesToast(message, type = "success") {
   }, 5000);
 }
 
+function announceNotesStatus(message) {
+  const statusEl = $("notesLiveStatus");
+  if (!statusEl || !message) return;
+  if (statusEl.textContent === message) {
+    statusEl.textContent = "";
+  }
+  statusEl.textContent = message;
+}
+
 function handleNotesFiles(files) {
   if (!files || files.length === 0) return;
   const maxBytes = 5 * 1024 * 1024;
@@ -1727,16 +1736,50 @@ function handleNotesFiles(files) {
   const newFiles = fileArr.filter(
     f => !selectedNotesFiles.some(p => p.name === f.name && p.size === f.size)
   );
+  if (newFiles.length === 0) {
+    if (fileArr.length > 0) {
+      announceNotesStatus("Selected file is already staged.");
+    }
+    return;
+  }
   selectedNotesFiles = [...selectedNotesFiles, ...newFiles];
   renderNotesFilesUI();
+
+  const total = selectedNotesFiles.length;
+  if (newFiles.length === 1) {
+    announceNotesStatus(`Staged ${newFiles[0].name}. ${total} file${total === 1 ? "" : "s"} ready for upload.`);
+  } else {
+    announceNotesStatus(`Staged ${newFiles.length} files. ${total} files ready for upload.`);
+  }
 }
 
 function removeNotesFile(index) {
+  const removedFile = selectedNotesFiles[index];
   selectedNotesFiles.splice(index, 1);
   if ($("notesFileInput")) {
     $("notesFileInput").value = "";
   }
   renderNotesFilesUI();
+
+  const total = selectedNotesFiles.length;
+  const fileName = removedFile ? removedFile.name : "File";
+  if (total === 0) {
+    announceNotesStatus(`Removed ${fileName}. No files staged.`);
+    const dropzone = $("notesDropzone");
+    if (dropzone && (document.activeElement === document.body || !document.activeElement)) {
+      dropzone.focus?.();
+    }
+  } else {
+    announceNotesStatus(`Removed ${fileName}. ${total} file${total === 1 ? "" : "s"} ready for upload.`);
+    const container = $("notesFilesList");
+    if (container) {
+      const remainingBtns = container.querySelectorAll(".notes-pill-remove, .notes-single-remove");
+      const nextIdx = Math.min(index, remainingBtns.length - 1);
+      if (remainingBtns[nextIdx]) {
+        remainingBtns[nextIdx].focus?.();
+      }
+    }
+  }
 }
 
 function renderNotesFilesUI() {
@@ -1767,15 +1810,20 @@ function renderNotesFilesUI() {
           <img src="${previewUrl}" alt="Preview" class="w-16 h-16 object-cover rounded-md border border-gray-200" />
         ` : `
           <div class="w-16 h-16 flex items-center justify-center bg-gray-200 rounded-md text-gray-500 text-xl">
-            <span role="img" aria-label="file">📄</span>
+            <svg class="w-7 h-7 text-gray-500" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
           </div>
         `}
         <div class="flex-1 truncate">
           <div class="font-medium text-gray-800 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
           <div class="text-xs text-gray-500">${(file.size / 1024).toFixed(1)} KB</div>
         </div>
-        <button type="button" class="ml-2 px-2 py-1 text-xs flex items-center gap-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition border border-red-200 shadow-sm notes-single-remove" aria-label="Remove file">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <button type="button" class="ml-2 px-2 py-1 text-xs flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition border border-red-200 shadow-sm notes-single-remove" aria-label="Remove ${escapeHtml(file.name)}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -1787,13 +1835,13 @@ function renderNotesFilesUI() {
   } else {
     // Multi-file pill rendering
     container.innerHTML = `
-      <div style="max-height: 180px; overflow-y: auto;">
-        <div class="flex flex-wrap gap-2">
+      <div style="max-height: 180px; overflow-y: auto;" class="notes-pills-scroll-wrap">
+        <div class="flex flex-wrap gap-3 items-center">
           ${selectedNotesFiles.map((f, idx) => `
-            <span class="inline-flex items-center max-w-xs px-3 py-1 rounded-full bg-gray-100 text-gray-800 text-sm font-medium shadow-sm border border-gray-200 truncate" style="min-width: 0;" title="${escapeHtml(f.name)}">
+            <span class="notes-pill inline-flex items-center max-w-xs pl-3 pr-1 py-1 rounded-full bg-gray-100 text-gray-800 text-sm font-medium shadow-sm border border-gray-200" style="min-width: 0;" title="${escapeHtml(f.name)}">
               <span class="truncate max-w-[120px] text-xs">${escapeHtml(f.name)}</span>
-              <button type="button" class="ml-2 p-0.5 rounded-full hover:bg-red-100 text-red-600 transition border border-transparent focus:outline-none focus:ring-2 focus:ring-red-200 notes-pill-remove" data-index="${idx}" aria-label="Remove ${escapeHtml(f.name)}">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <button type="button" class="notes-pill-remove ml-1.5 p-0.5 rounded-full hover:bg-red-100 text-red-600 transition border border-transparent focus:outline-none focus:ring-2 focus:ring-red-200" data-index="${idx}" aria-label="Remove ${escapeHtml(f.name)}">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
@@ -2040,6 +2088,7 @@ function initNotesUploaderListeners() {
       lastExtractionResult = null;
       selectedTopicIndex = 0;
       renderNotesFilesUI();
+      announceNotesStatus("Notes files cleared.");
       if ($("notesTopicResultsCard")) {
         $("notesTopicResultsCard").classList.add("hidden");
       }
