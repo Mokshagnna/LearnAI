@@ -92,7 +92,7 @@ def extract_text_from_txt(file_bytes: bytes) -> str:
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extracts text from PDF using pypdf with fallback."""
+    """Extracts text from PDF using pypdf with layout awareness and regex fallback."""
     text_parts = []
     try:
         import pypdf
@@ -107,7 +107,11 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
             except Exception:
                 raise ExtractionError("PDF is password-protected or encrypted. Please remove password protection before uploading.")
         for idx, page in enumerate(reader.pages):
-            page_text = page.extract_text() or ""
+            page_text = ""
+            try:
+                page_text = page.extract_text(extraction_mode="layout") or ""
+            except (TypeError, Exception):
+                page_text = page.extract_text() or ""
             if page_text.strip():
                 text_parts.append(page_text.strip())
     except ExtractionError:
@@ -460,16 +464,85 @@ def extract_text_from_image(file_bytes: bytes, ext: str) -> str:
         return ""
 
 
+UNICODE_LIGATURES = {
+    "\ufb00": "ff",
+    "\ufb01": "fi",
+    "\ufb02": "fl",
+    "\ufb03": "ffi",
+    "\ufb04": "ffl",
+    "\ufb05": "ft",
+    "\ufb06": "st",
+    "\u00a0": " ",
+}
+
+KNOWN_SINGLE_WORDS = {
+    "database", "databases", "network", "networks", "deadlock", "deadlocks",
+    "checkpoint", "checkpoints", "rollback", "rollbacks", "timestamp", "timestamps",
+    "lookup", "lookups", "metadata", "dataset", "datasets", "pipeline", "pipelines",
+    "subquery", "subqueries", "multiset", "multisets", "superkey", "superkeys",
+    "foreign", "primary", "schema", "schemas", "workflow", "workflows", "runtime",
+    "filesystem", "filesystems", "relational", "normalization", "transaction",
+    "concurrency", "serializability", "cardinality", "multivalued", "algorithm",
+    "algorithms", "architecture", "architectures", "optimizing", "optimizer"
+}
+
+COMPOUND_TERMS = {
+    "client-server", "read-only", "key-value", "two-phase", "multi-user",
+    "multi-level", "end-to-end", "cost-effective", "peer-to-peer",
+    "object-oriented", "open-source", "real-time", "top-down", "bottom-up",
+    "write-ahead", "point-to-point", "state-of-the-art", "trade-off", "trade-offs",
+    "b-tree", "b-trees", "b+-tree", "b+-trees", "acid-compliant", "non-relational"
+}
+
+STANDALONE_WORDS = {
+    "client", "server", "read", "only", "key", "value", "two", "phase",
+    "multi", "user", "level", "end", "peer", "object", "oriented", "open",
+    "source", "real", "time", "top", "down", "bottom", "up", "write",
+    "ahead", "cost", "effective", "state", "art", "non"
+}
+
+
+def repair_line_break_hyphenation(text: str) -> str:
+    """
+    Repairs words severed across line breaks by hyphens (e.g. 'rela-\\ntional' -> 'relational')
+    while preserving genuine hyphenated technical terms (e.g. 'client-\\nserver' -> 'client-server').
+    """
+    def _repl(m: re.Match) -> str:
+        w1, w2 = m.group(1), m.group(2)
+        lower_joined = f"{w1.lower()}{w2.lower()}"
+        lower_hyphen = f"{w1.lower()}-{w2.lower()}"
+        if lower_joined in KNOWN_SINGLE_WORDS:
+            return f"{w1}{w2}"
+        if lower_hyphen in COMPOUND_TERMS:
+            return f"{w1}-{w2}"
+        if w1.lower() in STANDALONE_WORDS and w2.lower() in STANDALONE_WORDS:
+            return f"{w1}-{w2}"
+        return f"{w1}{w2}"
+
+    return re.sub(r'(\b[a-zA-Z]{2,})[-‐‑]\s*\n\s*([a-zA-Z]{2,}\b)', _repl, text)
+
+
 def clean_extracted_text(text: str) -> str:
-    """Sanitizes text, removes control characters, and bounds size."""
+    """Sanitizes text, normalizes ligatures, repairs hyphenation, and bounds size."""
     if not text:
         return ""
     # Strip prompt injection and delimiter breakout attempts
     text = text.replace("<student_notes_untrusted>", "").replace("</student_notes_untrusted>", "")
+
+    # Normalize common Unicode ligatures
+    for lig, rep in UNICODE_LIGATURES.items():
+        if lig in text:
+            text = text.replace(lig, rep)
+
+    # Repair words split by line-break hyphenation
+    text = repair_line_break_hyphenation(text)
+
     # Strip null bytes and non-printable control characters
     text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", " ", text)
-    # Collapse excess whitespace while preserving paragraph breaks
+    # Collapse excess horizontal whitespace while preserving paragraph breaks
     text = re.sub(r"[ \t]+", " ", text)
+    # Strip trailing whitespace on lines before newlines
+    text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text[:MAX_EXTRACTED_CHARS]
 
