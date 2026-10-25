@@ -1225,20 +1225,29 @@ def upsert_topic_mastery(
         new_total_c = ex_dict["total_correct"] + score
         base_level = current_level or ex_dict["current_level"]
 
-        # Merge weak concepts and strong concepts
+        # Merge weak concepts and strong concepts safely
         ex_weak = parse_json_safely(ex_dict.get("weak_concepts"), default=[])
+        if not isinstance(ex_weak, list):
+            ex_weak = []
         ex_strong = parse_json_safely(ex_dict.get("strong_concepts"), default=[])
+        if not isinstance(ex_strong, list):
+            ex_strong = []
+
+        safe_weak = [str(c) for c in weak_concepts] if isinstance(weak_concepts, list) else []
+        safe_strong = [str(c) for c in strong_concepts] if isinstance(strong_concepts, list) else []
 
         # Fresh strong concepts supersede older weak concepts
-        merged_weak = [c for c in list(dict.fromkeys(ex_weak + weak_concepts)) if c not in strong_concepts]
-        merged_strong = list(dict.fromkeys(ex_strong + strong_concepts))
+        merged_weak = [c for c in list(dict.fromkeys(ex_weak + safe_weak)) if c not in safe_strong]
+        merged_strong = list(dict.fromkeys(ex_strong + safe_strong))
     else:
         new_attempts = 1
         new_total_q = total
         new_total_c = score
         base_level = current_level or ADAPTIVE_LEVEL_MIXED
-        merged_weak = list(dict.fromkeys(weak_concepts))
-        merged_strong = list(dict.fromkeys(strong_concepts))
+        safe_weak = [str(c) for c in weak_concepts] if isinstance(weak_concepts, list) else []
+        safe_strong = [str(c) for c in strong_concepts] if isinstance(strong_concepts, list) else []
+        merged_weak = list(dict.fromkeys(safe_weak))
+        merged_strong = list(dict.fromkeys(safe_strong))
 
     mastery_score = round(new_total_c / new_total_q, 4) if new_total_q > 0 else 0.0
 
@@ -1357,8 +1366,13 @@ def backfill_topic_mastery_from_attempts(conn: Optional[sqlite3.Connection] = No
 
     processed_count = 0
     for r in rows:
-        wc = parse_json_safely(r.get("weak_concepts"), default=[])
-        sc = parse_json_safely(r.get("strong_concepts"), default=[])
+        r_dict = dict(r)
+        wc = parse_json_safely(r_dict.get("weak_concepts"), default=[])
+        if not isinstance(wc, list):
+            wc = []
+        sc = parse_json_safely(r_dict.get("strong_concepts"), default=[])
+        if not isinstance(sc, list):
+            sc = []
 
         upsert_topic_mastery(
             student_id=r["student_id"],
@@ -2158,7 +2172,51 @@ def get_student_dashboard_data(
 
         review_dict: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
-        # Heuristic A: Topics with low recent accuracy (< 60%) or weak concepts (High Priority - Review)
+        # 4a. Multi-attempt persistent weak-topic detector
+        persistent_weak_list: List[Dict[str, Any]] = []
+        try:
+            from services.adaptive import detect_persistent_weak_topics
+            persistent_weak_list = detect_persistent_weak_topics(
+                student_id=student_id,
+                course_code=clean_course,
+                conn=conn
+            )
+        except Exception as e:
+            logger.warning("Could not compute persistent weak topics for dashboard: %s", e)
+            persistent_weak_list = []
+
+        persistent_weak_map = {
+            (p["course_code"], p["topic_name"]): p
+            for p in persistent_weak_list
+        }
+
+        # 4b. Incorporate persistent weak topics (highest priority)
+        for key, pwt in persistent_weak_map.items():
+            tp_match = next((tp for tp in topic_progress if (tp["course_code"], tp["topic_name"]) == key), None)
+            fallback_tp = tp_match or {
+                "course_code": pwt["course_code"],
+                "topic_name": pwt["topic_name"],
+                "recent_accuracy": pwt["accuracy"],
+                "total_correct": pwt["total_correct"],
+                "total_questions": pwt["total_questions"],
+                "attempt_count": pwt["attempt_count"]
+            }
+            stats = _compute_topic_stats(key, fallback_tp)
+            review_dict[key] = {
+                "course_code": pwt["course_code"],
+                "topic_name": pwt["topic_name"],
+                "priority": "high",
+                "reason": pwt["recommendation"],
+                "recommended_difficulty": pwt.get("suggested_level", "foundational"),
+                "recent_accuracy": fallback_tp.get("recent_accuracy", pwt["accuracy"]),
+                "weak_concepts": pwt.get("chronic_weak_concepts") or (tp_match["weak_concepts"][:3] if tp_match else []),
+                "is_persistent_gap": True,
+                "chronic_weak_concepts": pwt.get("chronic_weak_concepts", []),
+                "severity": pwt.get("severity", "moderate"),
+                **stats
+            }
+
+        # 4c. Heuristic A: Topics with low recent accuracy (< 60%) or weak concepts (Ordinary Review)
         for tp in topic_progress:
             key = (tp["course_code"], tp["topic_name"])
             if key in review_dict:
@@ -2175,10 +2233,12 @@ def get_student_dashboard_data(
                     "recommended_difficulty": rec_diff,
                     "recent_accuracy": tp["recent_accuracy"],
                     "weak_concepts": tp["weak_concepts"][:3],
+                    "is_persistent_gap": False,
+                    "chronic_weak_concepts": [],
                     **stats
                 }
 
-        # Heuristic B: Topics with high mastery (>= 80%) ready for advancement (Medium Priority - Review)
+        # 4d. Heuristic B: Topics with high mastery (>= 80%) ready for advancement (Medium Priority - Review)
         for tp in topic_progress:
             key = (tp["course_code"], tp["topic_name"])
             if key in review_dict:
@@ -2194,10 +2254,22 @@ def get_student_dashboard_data(
                     "recommended_difficulty": rec_diff,
                     "recent_accuracy": tp["recent_accuracy"],
                     "weak_concepts": [],
+                    "is_persistent_gap": False,
+                    "chronic_weak_concepts": [],
                     **stats
                 }
 
-        review_topics = list(review_dict.values())[:4]
+        # Order review topics: persistent learning gaps first (lowest accuracy first),
+        # then other high-priority review topics (lowest accuracy first),
+        # then medium-priority topics.
+        sorted_reviews = sorted(
+            review_dict.values(),
+            key=lambda r: (
+                0 if r.get("is_persistent_gap") else (1 if r.get("priority") == "high" else 2),
+                r.get("latest_accuracy", r.get("recent_accuracy", 0.0))
+            )
+        )
+        review_topics = sorted_reviews[:4]
 
         # Personalized recommendations are strictly review_topics (never unpracticed topics)
         recommended_topics = list(review_topics)
@@ -2251,6 +2323,7 @@ def get_student_dashboard_data(
             "recent_trends": recent_trends,
             "topic_progress": topic_progress,
             "concept_insights": concept_insights,
+            "persistent_weak_topics": persistent_weak_list,
             "review_topics": review_topics,
             "explore_topics": explore_topics,
             "recommended_topics": recommended_topics,

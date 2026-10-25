@@ -522,3 +522,169 @@ def get_adaptive_explanation(
             "description": "Balanced — steady concept progression.",
             "detail": f"Your recent performance (accuracy: {accuracy:.0%}) shows steady progress. This quiz maintains a balanced mix of easy, medium, and hard questions."
         }
+
+
+def detect_persistent_weak_topics(
+    student_id: str,
+    course_code: Optional[str] = None,
+    min_attempts: int = 2,
+    min_questions: int = 15,
+    accuracy_threshold: float = 0.60,
+    conn: Optional[sqlite3.Connection] = None
+) -> List[Dict[str, Any]]:
+    """
+    Multi-attempt persistent weak-topic detector using sample size and recovery guard heuristics.
+
+    Guarantees:
+    - Never labels a topic as persistently weak based on an isolated mistake (requires min_attempts >= 2).
+    - Requires sufficient question history (min_questions >= 15).
+    - Verifies that recent performance has not already recovered above threshold (latest attempt >= 70% suppresses flag).
+    - Extracts recurring weak concepts and maps them to curriculum syllabus revision actions.
+    - Respects student isolation and optional course scoping.
+    - Excludes incomplete, abandoned, ungraded, or zero-total attempts.
+    """
+    close_conn = False
+    if conn is None:
+        from services.database import get_connection
+        conn = get_connection()
+        close_conn = True
+
+    try:
+        cursor = conn.cursor()
+        clean_course = course_code.strip() if course_code and course_code.strip() else None
+
+        if clean_course:
+            cursor.execute("""
+                SELECT id, course_code, course_name, topic_name, score, total, percentage,
+                       status, weak_concepts, strong_concepts, recommended_difficulty, created_at
+                FROM quiz_attempts
+                WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?))
+                ORDER BY created_at ASC, id ASC
+            """, (student_id, clean_course, clean_course))
+        else:
+            cursor.execute("""
+                SELECT id, course_code, course_name, topic_name, score, total, percentage,
+                       status, weak_concepts, strong_concepts, recommended_difficulty, created_at
+                FROM quiz_attempts
+                WHERE student_id = ?
+                ORDER BY created_at ASC, id ASC
+            """, (student_id,))
+
+        rows = cursor.fetchall()
+        if not rows:
+            return []
+
+        # Group attempts by (course_code, topic_name), filtering out incomplete attempts and duplicates
+        from services.database import parse_json_safely
+        topic_groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        seen_ids = set()
+
+        for r in rows:
+            r_dict = dict(r)
+            att_id = r_dict.get("id")
+            if att_id and att_id in seen_ids:
+                continue
+            if att_id:
+                seen_ids.add(att_id)
+
+            status_val = (r_dict.get("status") or "").lower().strip()
+            total_val = int(r_dict.get("total") or 0)
+            if status_val in ("abandoned", "incomplete", "ungraded") or total_val <= 0:
+                continue
+
+            key = (r_dict["course_code"], r_dict["topic_name"])
+            if key not in topic_groups:
+                topic_groups[key] = []
+            topic_groups[key].append(r_dict)
+
+        # Fetch curriculum for syllabus context mapping
+        curriculum_lookup: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        try:
+            from services.curriculum_service import curriculum_service
+            curr_data = curriculum_service.get_curriculum()
+            for c in curr_data.get("courses", []):
+                c_code = c.get("code", "")
+                for t in c.get("topics", []):
+                    t_name = t.get("name", "")
+                    curriculum_lookup[(c_code.lower(), t_name.lower())] = {
+                        "unit": t.get("unit"),
+                        "concepts": t.get("concepts", []),
+                        "syllabus_context": t.get("syllabus_context", "")
+                    }
+        except Exception as e:
+            logger.debug(f"Curriculum lookup skipped in weak-topic detector: {e}")
+
+        persistent_weak_topics: List[Dict[str, Any]] = []
+
+        for (c_code, t_name), attempts in topic_groups.items():
+            attempt_count = len(attempts)
+            total_questions = sum(int(a["total"]) for a in attempts)
+            total_correct = sum(int(a["score"]) for a in attempts)
+
+            # Rule 1: Sample size threshold check
+            if attempt_count < min_attempts or total_questions < min_questions:
+                continue
+
+            aggregate_accuracy = total_correct / total_questions if total_questions > 0 else 0.0
+
+            # Rule 2: Aggregate accuracy below threshold check
+            if aggregate_accuracy >= accuracy_threshold:
+                continue
+
+            # Rule 3: Recovery check — if the latest attempt scored >= 70%, it is actively recovering
+            latest_attempt = attempts[-1]
+            if latest_attempt.get("percentage") is not None:
+                latest_pct = float(latest_attempt["percentage"])
+            else:
+                lat_score = int(latest_attempt.get("score") or 0)
+                lat_total = int(latest_attempt.get("total") or 0)
+                latest_pct = (lat_score / lat_total * 100.0) if lat_total > 0 else 0.0
+
+            if latest_pct >= 70.0:
+                continue
+
+            # Identify recurring weak concepts across multiple attempts
+            concept_miss_counts: Dict[str, int] = {}
+            for a in attempts:
+                weak_list = parse_json_safely(a.get("weak_concepts"), default=[])
+                for wc in weak_list:
+                    wc_clean = str(wc).strip()
+                    if wc_clean and wc_clean.lower() != "general":
+                        concept_miss_counts[wc_clean] = concept_miss_counts.get(wc_clean, 0) + 1
+
+            # Concepts missed in 2+ attempts are chronic gaps
+            chronic_concepts = [c for c, count in concept_miss_counts.items() if count >= 2]
+            if not chronic_concepts:
+                chronic_concepts = list(concept_miss_counts.keys())[:3]
+
+            # Syllabus reference info
+            curr_meta = curriculum_lookup.get((c_code.lower(), t_name.lower()), {})
+            unit = curr_meta.get("unit")
+            unit_label = f"Unit {unit}" if unit else "Syllabus Topic"
+
+            persistent_weak_topics.append({
+                "course_code": c_code,
+                "course_name": attempts[-1].get("course_name", c_code),
+                "topic_name": t_name,
+                "unit": unit,
+                "attempt_count": attempt_count,
+                "total_questions": total_questions,
+                "total_correct": total_correct,
+                "accuracy": round(aggregate_accuracy * 100.0, 1),
+                "latest_score": f"{latest_attempt['score']}/{latest_attempt['total']} ({latest_pct:.0f}%)",
+                "latest_correct": int(latest_attempt["score"]),
+                "latest_total": int(latest_attempt["total"]),
+                "latest_accuracy": round(latest_pct, 1),
+                "severity": "high" if aggregate_accuracy < 0.40 else "moderate",
+                "chronic_weak_concepts": chronic_concepts,
+                "recommendation": f"Persistent learning gap in {unit_label}. Review fundamental principles for {', '.join(chronic_concepts[:3])} before retaking." if chronic_concepts else f"Persistent learning gap in {unit_label}. Revisit lecture notes and core definitions.",
+                "suggested_level": ADAPTIVE_LEVEL_FOUNDATIONAL if aggregate_accuracy < 0.45 else ADAPTIVE_LEVEL_MIXED
+            })
+
+        # Sort by accuracy ascending (lowest mastery first)
+        persistent_weak_topics.sort(key=lambda x: x["accuracy"])
+        return persistent_weak_topics
+
+    finally:
+        if close_conn:
+            conn.close()
