@@ -185,181 +185,6 @@ function restoreSessionState() {
   return false;
 }
 
-let activeDifficulty = "adaptive";
-
-function formatDifficultyLabel(diff) {
-  switch ((diff || "").toLowerCase()) {
-    case "easy": return "Foundational (Easy)";
-    case "medium": return "Mixed Standard (Medium)";
-    case "hard": return "Advanced (Hard)";
-    default: return "Adaptive (Dynamic)";
-  }
-}
-
-function updatePatternDisplay(diff) {
-  const pEasy = $("patternEasy");
-  const pMed = $("patternMedium");
-  const pHard = $("patternHard");
-  if (!pEasy || !pMed || !pHard) return;
-
-  switch ((diff || "").toLowerCase()) {
-    case "easy":
-      pEasy.textContent = "6 Easy";
-      pMed.textContent = "3 Medium";
-      pHard.textContent = "1 Hard";
-      break;
-    case "hard":
-      pEasy.textContent = "2 Easy";
-      pMed.textContent = "4 Medium";
-      pHard.textContent = "4 Hard";
-      break;
-    case "medium":
-    default:
-      pEasy.textContent = "4 Easy";
-      pMed.textContent = "4 Medium";
-      pHard.textContent = "2 Hard";
-      break;
-  }
-}
-
-function setAssessmentDifficulty(difficultyValue) {
-  activeDifficulty = difficultyValue || "adaptive";
-  const buttons = document.querySelectorAll(".difficulty-mode-btn");
-  if (buttons && buttons.length) {
-    buttons.forEach(btn => {
-      const isMatch = (btn.dataset.difficulty || "").toLowerCase() === activeDifficulty.toLowerCase();
-      btn.classList.toggle("active", isMatch);
-      btn.setAttribute("aria-checked", isMatch ? "true" : "false");
-      btn.setAttribute("tabindex", isMatch ? "0" : "-1");
-    });
-  }
-
-  updatePatternDisplay(activeDifficulty);
-
-  const previewDiff = $("previewActiveDifficulty");
-  if (previewDiff) {
-    previewDiff.textContent = formatDifficultyLabel(activeDifficulty);
-  }
-  const modeHint = $("difficultyModeHint");
-  if (modeHint) {
-    modeHint.textContent = activeDifficulty === "adaptive" ? "Recommended" : "Manual Override";
-  }
-}
-
-function initDifficultySelector() {
-  const selector = $("difficultySelector");
-  if (!selector) return;
-
-  const buttons = Array.from(selector.querySelectorAll(".difficulty-mode-btn"));
-  buttons.forEach((btn, idx) => {
-    btn.addEventListener("click", () => {
-      setAssessmentDifficulty(btn.dataset.difficulty);
-      btn.focus();
-    });
-
-    btn.addEventListener("keydown", (e) => {
-      let targetIdx = -1;
-      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-        e.preventDefault();
-        targetIdx = (idx + 1) % buttons.length;
-      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-        e.preventDefault();
-        targetIdx = (idx - 1 + buttons.length) % buttons.length;
-      }
-      if (targetIdx !== -1) {
-        const targetBtn = buttons[targetIdx];
-        setAssessmentDifficulty(targetBtn.dataset.difficulty);
-        targetBtn.focus();
-      }
-    });
-  });
-}
-
-function updateSyllabusPreview() {
-  const courseSelect = $("course");
-  const topicSelect = $("topic");
-  const emptyState = $("previewEmptyState");
-  const contentState = $("previewContentState");
-  const unitTag = $("previewUnitTag");
-
-  if (!courseSelect || !topicSelect || !emptyState || !contentState) return;
-
-  const selectedCourse = (curriculum || []).find(c => c.code === courseSelect.value);
-  const selectedTopicName = (topicSelect.value || "").trim();
-
-  if (!selectedCourse || !selectedTopicName) {
-    emptyState.classList.remove("hidden");
-    contentState.classList.add("hidden");
-    if (unitTag) {
-      unitTag.textContent = selectedCourse ? `${selectedCourse.code} Preview` : "Curriculum Preview";
-    }
-    return;
-  }
-
-  // Find authoritative topic metadata from course.topics or dataset
-  const topicObj = (selectedCourse.topics || []).find(
-    t => (t.name || "").trim().toLowerCase() === selectedTopicName.toLowerCase()
-  );
-
-  const selectedOption = topicSelect.selectedOptions ? topicSelect.selectedOptions[0] : null;
-
-  const topicName = topicObj?.name || selectedOption?.dataset?.topicName || selectedTopicName;
-  const parentTopic = topicObj?.parent_topic || selectedOption?.dataset?.parentTopic || selectedCourse.name || "";
-  const unit = topicObj?.unit || selectedOption?.dataset?.unit || "";
-  const moduleNum = topicObj?.module || selectedOption?.dataset?.module || "";
-  const syllabusContext = topicObj?.syllabus_context || selectedOption?.dataset?.syllabusContext || "";
-
-  let concepts = [];
-  if (Array.isArray(topicObj?.concepts)) {
-    concepts = topicObj.concepts;
-  } else if (selectedOption?.dataset?.concepts) {
-    concepts = selectedOption.dataset.concepts.split("|||").filter(Boolean);
-  }
-
-  // Update DOM
-  if ($("previewTopicName")) $("previewTopicName").textContent = topicName;
-  if ($("previewParentTopic")) {
-    $("previewParentTopic").textContent = parentTopic ? `Module: ${parentTopic}` : "";
-    $("previewParentTopic").style.display = parentTopic ? "block" : "none";
-  }
-
-  if (unitTag) {
-    unitTag.textContent = unit ? `Unit ${unit}` : `${selectedCourse.code}`;
-  }
-  if ($("previewUnitBadge")) {
-    const uBadge = $("previewUnitBadge");
-    uBadge.textContent = unit ? `Unit ${unit}` : "";
-    uBadge.style.display = unit ? "inline-flex" : "none";
-  }
-  if ($("previewModuleBadge")) {
-    const mBadge = $("previewModuleBadge");
-    mBadge.textContent = moduleNum ? `Module ${moduleNum}` : "";
-    mBadge.style.display = moduleNum ? "inline-flex" : "none";
-  }
-
-  if ($("previewConceptsList")) {
-    const listEl = $("previewConceptsList");
-    if (concepts.length > 0) {
-      listEl.innerHTML = concepts.map(c => `<span class="tag-chip tag-chip-strong">${escapeHtml(c)}</span>`).join("");
-    } else {
-      listEl.innerHTML = `<span class="tag-chip tag-chip-sm muted">Curriculum concept assessment</span>`;
-    }
-  }
-
-  if ($("previewSyllabusExcerpt")) {
-    $("previewSyllabusExcerpt").textContent = syllabusContext
-      ? syllabusContext
-      : `Official syllabus topic under ${selectedCourse.code} (${selectedCourse.name}). Assessment strictly bounded by verified course curriculum.`;
-  }
-
-  if ($("previewActiveDifficulty")) {
-    $("previewActiveDifficulty").textContent = formatDifficultyLabel(activeDifficulty);
-  }
-
-  emptyState.classList.add("hidden");
-  contentState.classList.remove("hidden");
-}
-
 // ── Load Curriculum & Course Select ──────────────────────────────────────────
 async function loadCourses() {
   const courseSelect = $("course");
@@ -399,14 +224,10 @@ $("course").addEventListener("change", () => {
   const topicSelect = $("topic");
   topicSelect.innerHTML = "";
 
-  const topicCountBadge = $("topicCountBadge");
-
   if (!course) {
     topicSelect.disabled = true;
     topicSelect.innerHTML = '<option value="">Select a course first</option>';
     topicSelect.value = "";
-    if (topicCountBadge) topicCountBadge.textContent = "Select course first";
-    updateSyllabusPreview();
     return;
   }
 
@@ -415,87 +236,27 @@ $("course").addEventListener("change", () => {
   first.textContent = "Select a topic";
   topicSelect.appendChild(first);
 
-  // Group topics by their actual curriculum Unit (Units 1-5 or general)
-  const unitGroups = new Map();
   const seen = new Set();
-  let totalTopics = 0;
-
   (course.topics || []).forEach(topic => {
     if (!topic || !topic.name) return;
     const name = String(topic.name).trim();
     if (!name || seen.has(name.toLowerCase())) return;
     seen.add(name.toLowerCase());
-    totalTopics++;
 
-    const unitKey = (topic.unit !== undefined && topic.unit !== null && String(topic.unit).trim() !== "")
-      ? String(topic.unit).trim()
-      : "general";
-
-    if (!unitGroups.has(unitKey)) {
-      unitGroups.set(unitKey, []);
-    }
-    unitGroups.get(unitKey).push(topic);
-  });
-
-  if (topicCountBadge) {
-    topicCountBadge.textContent = `${totalTopics} topics available`;
-  }
-
-  // Sort unit keys numerically if possible, with 'general' at the end
-  const sortedUnitKeys = Array.from(unitGroups.keys()).sort((a, b) => {
-    if (a === "general") return 1;
-    if (b === "general") return -1;
-    const numA = parseInt(a, 10);
-    const numB = parseInt(b, 10);
-    if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-    return a.localeCompare(b);
-  });
-
-  sortedUnitKeys.forEach(unitKey => {
-    const topicsInUnit = unitGroups.get(unitKey);
-    let targetParent = topicSelect;
-
-    // Use semantic <optgroup> when units are available
-    if (unitKey !== "general" || sortedUnitKeys.length > 1) {
-      const optgroup = document.createElement("optgroup");
-      const sampleTopic = topicsInUnit[0];
-      const parentLabel = sampleTopic?.parent_topic || sampleTopic?.source_topic_name || "";
-      if (unitKey !== "general") {
-        optgroup.label = parentLabel ? `Unit ${unitKey} — ${parentLabel}` : `Unit ${unitKey}`;
-      } else {
-        optgroup.label = "General Syllabus Topics";
-      }
-      topicSelect.appendChild(optgroup);
-      targetParent = optgroup;
-    }
-
-    topicsInUnit.forEach(topic => {
-      const name = String(topic.name).trim();
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      option.dataset.topicId = topic.id || "";
-      option.dataset.topicName = name;
-      option.dataset.parentTopic = topic.parent_topic || topic.parent_section || topic.source_topic_name || "";
-      option.dataset.module = (topic.module !== undefined && topic.module !== null) ? topic.module : "";
-      option.dataset.unit = (topic.unit !== undefined && topic.unit !== null) ? topic.unit : "";
-      option.dataset.syllabusContext = topic.syllabus_context || "";
-      const conceptsStr = Array.isArray(topic.concepts) ? topic.concepts.join("|||") : (topic.concepts || "");
-      option.dataset.concepts = conceptsStr;
-      targetParent.appendChild(option);
-    });
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    option.dataset.topicId = topic.id || "";
+    option.dataset.topicName = name;
+    option.dataset.parentTopic = topic.parent_topic || topic.parent_section || topic.source_topic_name || "";
+    option.dataset.module = (topic.module !== undefined && topic.module !== null) ? topic.module : "";
+    option.dataset.unit = (topic.unit !== undefined && topic.unit !== null) ? topic.unit : "";
+    topicSelect.appendChild(option);
   });
 
   topicSelect.disabled = false;
   topicSelect.value = "";
-  updateSyllabusPreview();
 });
-
-if ($("topic")) {
-  $("topic").addEventListener("change", () => {
-    updateSyllabusPreview();
-  });
-}
 
 // ── Navigation Buttons ───────────────────────────────────────────────────────
 $("generateBtn").addEventListener("click", () => {
@@ -649,7 +410,7 @@ function clearResultDisplay() {
 }
 
 // ── Core Quiz Generation (First Attempt & Retake) ────────────────────────────
-async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null, notesSessionId = null, difficulty = null) {
+async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null, notesSessionId = null) {
   if (isGenerating) return;
   isGenerating = true;
 
@@ -699,9 +460,6 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     const timeoutSec = 50;
     timeoutId = setTimeout(() => activeAbortController?.abort(), timeoutSec * 1000);
 
-    // If manual difficulty selected (or passed), include it; adaptive mode leaves difficulty undefined for dynamic trajectory
-    const chosenDifficulty = difficulty || (activeDifficulty && activeDifficulty !== "adaptive" ? activeDifficulty : undefined);
-
     const quizPayload = {
       course_code: courseCode,
       topic: topic,
@@ -709,9 +467,6 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
       student_id: getStudentId() || undefined,
       retake: isRetake
     };
-    if (chosenDifficulty) {
-      quizPayload.difficulty = chosenDifficulty;
-    }
     if (activeNotesSessionId) {
       quizPayload.notes_session_id = activeNotesSessionId;
     }
@@ -823,9 +578,7 @@ function renderQuizHeader(quizData) {
   if ($("quizAttemptNumber")) {
     const attempt = quizData.attempt_number || 1;
     const diff = (quizData.recommended_difficulty || "mixed").toUpperCase();
-    const isNotes = Boolean(activeNotesSessionId || quizData.notes_session_id || quizData.generation_mode === "notes");
-    const notesTag = isNotes ? " • Notes-Grounded" : "";
-    $("quizAttemptNumber").textContent = attempt > 1 ? `Attempt #${attempt} • ${diff}${notesTag}` : `Attempt #1 • ${diff}${notesTag}`;
+    $("quizAttemptNumber").textContent = attempt > 1 ? `Attempt #${attempt} • ${diff}` : `Attempt #1 • ${diff}`;
   }
 }
 
@@ -850,7 +603,7 @@ function renderQuestion() {
     const progressEl = $("progressBar").parentElement;
     if (progressEl) progressEl.setAttribute("aria-valuenow", progressPercent);
   }
-  if ($("progressPercent")) $("progressPercent").textContent = `${progressPercent}%`;
+  if ($("progressPercent")) $("progressPercent").textContent = `${progressPercent}% completed`;
 
   if ($("quizAlert")) $("quizAlert").textContent = "";
 
@@ -875,7 +628,7 @@ function renderQuestion() {
 
     const letterSpan = document.createElement("span");
     letterSpan.className = "option-letter";
-    letterSpan.textContent = key;
+    letterSpan.textContent = `${key}.`;
 
     const textSpan = document.createElement("span");
     textSpan.className = "option-text";
@@ -903,14 +656,11 @@ function renderQuestion() {
     options.appendChild(div);
   });
 
-  if ($("prevBtn")) {
-    $("prevBtn").style.visibility = currentIndex === 0 ? "hidden" : "visible";
-    $("prevBtn").disabled = currentIndex === 0;
-  }
+  if ($("prevBtn")) $("prevBtn").style.visibility = currentIndex === 0 ? "hidden" : "visible";
   if ($("nextBtn")) {
     const isLast = currentIndex === totalQuestions - 1;
     $("nextBtn").textContent = isLast ? "Submit Quiz" : "Next";
-    $("nextBtn").setAttribute("aria-label",
+    $("nextBtn").setAttribute("aria-label", 
       isLast ? "Submit quiz" : "Next question");
   }
 }
@@ -947,12 +697,8 @@ document.addEventListener("keydown", (e) => {
 // ── Submit Quiz ─────────────────────────────────────────────────────────────
 async function submitQuiz() {
   const nextBtn = $("nextBtn");
-  if (nextBtn) {
-    if (nextBtn.dataset.submitting === "true") return;
-    nextBtn.dataset.submitting = "true";
-    nextBtn.disabled = true;
-    nextBtn.textContent = "Analyzing answers with AI...";
-  }
+  nextBtn.disabled = true;
+  nextBtn.textContent = "Analyzing answers with AI...";
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 45000);
@@ -992,11 +738,8 @@ async function submitQuiz() {
     }
     alert(msg);
   } finally {
-    if (nextBtn) {
-      nextBtn.dataset.submitting = "false";
-      nextBtn.disabled = false;
-      nextBtn.textContent = "Submit Quiz";
-    }
+    nextBtn.disabled = false;
+    nextBtn.textContent = "Submit Quiz";
   }
 }
 
@@ -1017,7 +760,7 @@ function showResult(data) {
       let scoreClass = "mixed";
       if (acc >= 80) scoreClass = "correct";
       else if (acc < 50) scoreClass = "wrong";
-
+      
       diffHtml += `
         <div class="difficulty-item">
           <span class="difficulty-label">${diff}</span>
@@ -1036,7 +779,7 @@ function showResult(data) {
       let scoreClass = "mixed";
       if (acc >= 80) scoreClass = "correct";
       else if (acc < 50) scoreClass = "wrong";
-
+      
       conceptHtml += `
         <div class="concept-item">
           <span class="concept-label">${concept}</span>
@@ -2074,7 +1817,6 @@ async function selectAndPracticeTopic(courseCode, topicName, topicId = null) {
     if (topicSelect && resolvedTopic) {
       topicSelect.value = resolvedTopic.name;
     }
-    updateSyllabusPreview();
   }
 
   // 5. If topic cannot be resolved from the known curriculum, report actionable error without substituting unrelated topic
@@ -2129,22 +1871,12 @@ function showNotesToast(message, type = "success") {
   }
   const isSuccess = type === "success";
   container.innerHTML = `
-    <div class="notes-toast animate-fade-in ${isSuccess ? 'notes-toast-success' : 'notes-toast-error'}" role="alert">
-      <div class="notes-toast-icon" aria-hidden="true">
-        ${isSuccess ? `
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12"></polyline>
-          </svg>
-        ` : `
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="15" y1="9" x2="9" y2="15"></line>
-            <line x1="9" y1="9" x2="15" y2="15"></line>
-          </svg>
-        `}
+    <div class="fixed top-6 right-6 z-50 px-4 py-3 rounded shadow-lg text-white animate-fade-in ${isSuccess ? 'bg-green-600' : 'bg-red-600'}" role="alert">
+      <div class="flex items-center gap-2">
+        <span>${isSuccess ? '✅' : '❌'}</span>
+        <span>${escapeHtml(message)}</span>
+        <button type="button" class="ml-3 text-white/80 hover:text-white text-lg notes-toast-close" aria-label="Close">×</button>
       </div>
-      <div class="notes-toast-msg">${escapeHtml(message)}</div>
-      <button type="button" class="notes-toast-close" aria-label="Close notification">&times;</button>
     </div>
   `;
   container.querySelector(".notes-toast-close")?.addEventListener("click", () => {
@@ -2163,25 +1895,6 @@ function announceNotesStatus(message) {
     statusEl.textContent = "";
   }
   statusEl.textContent = message;
-}
-
-function getNotesFileCategory(name, type = "") {
-  const dotIdx = name.lastIndexOf(".");
-  const ext = dotIdx >= 0 ? name.slice(dotIdx).toLowerCase() : "";
-  if (type.startsWith("image/") || [".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
-    return { extBadge: "IMG", label: "Lecture Photo" };
-  }
-  if (ext === ".pdf") return { extBadge: "PDF", label: "PDF Document" };
-  if (ext === ".docx") return { extBadge: "DOCX", label: "Word Document" };
-  if (ext === ".ppt" || ext === ".pptx") return { extBadge: "PPT", label: "PowerPoint Slides" };
-  if (ext === ".txt") return { extBadge: "TXT", label: "Plain Text" };
-  return { extBadge: "DOC", label: "Course Document" };
-}
-
-function formatNotesFileSize(bytes) {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
 function handleNotesFiles(files) {
@@ -2262,32 +1975,39 @@ function renderNotesFilesUI() {
     container.innerHTML = "";
     container.classList.add("hidden");
     uploadBtn.disabled = true;
+    uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed";
     return;
   }
 
   container.classList.remove("hidden");
   uploadBtn.disabled = false;
+  uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-700 text-white hover:bg-gray-800 active:scale-95";
 
   if (selectedNotesFiles.length === 1) {
     const file = selectedNotesFiles[0];
-    const { extBadge, label } = getNotesFileCategory(file.name, file.type);
-    const sizeStr = formatNotesFileSize(file.size);
+    const isImage = file.type.startsWith("image/");
+    const previewUrl = isImage ? URL.createObjectURL(file) : null;
 
     container.innerHTML = `
-      <div class="notes-file-row animate-fade-in">
-        <div class="notes-file-left">
-          <div class="notes-file-type-badge">${extBadge}</div>
-          <div class="notes-file-info">
-            <div class="notes-file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
-            <div class="notes-file-meta-row">
-              <span class="notes-file-size">${sizeStr}</span>
-              <span>•</span>
-              <span class="notes-file-status-tag">Staged</span>
-            </div>
+      <div class="flex items-center gap-3 bg-gray-50 rounded-lg p-2 shadow-sm border border-gray-200 mb-2 animate-fade-in">
+        ${isImage ? `
+          <img src="${previewUrl}" alt="Preview" class="w-16 h-16 object-cover rounded-md border border-gray-200" />
+        ` : `
+          <div class="w-16 h-16 flex items-center justify-center bg-gray-200 rounded-md text-gray-500 text-xl">
+            <svg class="w-7 h-7 text-gray-500" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
           </div>
+        `}
+        <div class="flex-1 truncate">
+          <div class="font-medium text-gray-800 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+          <div class="text-xs text-gray-500">${(file.size / 1024).toFixed(1)} KB</div>
         </div>
-        <button type="button" class="notes-single-remove" aria-label="Remove ${escapeHtml(file.name)}">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+        <button type="button" class="ml-2 px-2 py-1 text-xs flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition border border-red-200 shadow-sm notes-single-remove" aria-label="Remove ${escapeHtml(file.name)}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -2297,33 +2017,21 @@ function renderNotesFilesUI() {
       removeNotesFile(0);
     });
   } else {
-    // Multi-file dossier list
+    // Multi-file pill rendering
     container.innerHTML = `
-      <div class="notes-files-container animate-fade-in">
-        ${selectedNotesFiles.map((f, idx) => {
-          const { extBadge, label } = getNotesFileCategory(f.name, f.type);
-          const sizeStr = formatNotesFileSize(f.size);
-          return `
-            <div class="notes-file-row">
-              <div class="notes-file-left">
-                <div class="notes-file-type-badge">${extBadge}</div>
-                <div class="notes-file-info">
-                  <div class="notes-file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
-                  <div class="notes-file-meta-row">
-                    <span class="notes-file-size">${sizeStr}</span>
-                    <span>•</span>
-                    <span class="notes-file-status-tag">Staged</span>
-                  </div>
-                </div>
-              </div>
-              <button type="button" class="notes-pill-remove" data-index="${idx}" aria-label="Remove ${escapeHtml(f.name)}">
-                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+      <div style="max-height: 180px; overflow-y: auto;" class="notes-pills-scroll-wrap">
+        <div class="flex flex-wrap gap-3 items-center">
+          ${selectedNotesFiles.map((f, idx) => `
+            <span class="notes-pill inline-flex items-center max-w-xs pl-3 pr-1 py-1 rounded-full bg-gray-100 text-gray-800 text-sm font-medium shadow-sm border border-gray-200" style="min-width: 0;" title="${escapeHtml(f.name)}">
+              <span class="truncate max-w-[120px] text-xs">${escapeHtml(f.name)}</span>
+              <button type="button" class="notes-pill-remove ml-1.5 p-0.5 rounded-full hover:bg-red-100 text-red-600 transition border border-transparent focus:outline-none focus:ring-2 focus:ring-red-200" data-index="${idx}" aria-label="Remove ${escapeHtml(f.name)}">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-            </div>
-          `;
-        }).join("")}
+            </span>
+          `).join("")}
+        </div>
       </div>
     `;
     container.querySelectorAll(".notes-pill-remove").forEach(btn => {
@@ -2345,14 +2053,12 @@ async function handleNotesUpload() {
   const btnText = $("notesUploadBtnText");
   const progressWrap = $("notesProgressWrap");
   const progressBar = $("notesProgressBar");
-  const progressPercent = $("notesProgressPercent");
 
   if (uploadBtn) uploadBtn.disabled = true;
   if (spinner) spinner.classList.remove("hidden");
-  if (btnText) btnText.textContent = "Extracting & Matching...";
+  if (btnText) btnText.textContent = "Processing...";
   if (progressWrap) progressWrap.classList.remove("hidden");
-  if (progressBar) progressBar.style.width = "35%";
-  if (progressPercent) progressPercent.textContent = "35%";
+  if (progressBar) progressBar.style.width = "40%";
 
   try {
     const formData = new FormData();
@@ -2367,7 +2073,6 @@ async function handleNotesUpload() {
     }
 
     if (progressBar) progressBar.style.width = "70%";
-    if (progressPercent) progressPercent.textContent = "70%";
 
     const res = await fetch("/api/notes/extract-topics", {
       method: "POST",
@@ -2377,7 +2082,6 @@ async function handleNotesUpload() {
 
     const data = await res.json();
     if (progressBar) progressBar.style.width = "100%";
-    if (progressPercent) progressPercent.textContent = "100%";
 
     if (!res.ok) {
       const errMsg = (data && data.detail)
@@ -2409,8 +2113,7 @@ async function handleNotesUpload() {
     setTimeout(() => {
       if (progressWrap) progressWrap.classList.add("hidden");
       if (progressBar) progressBar.style.width = "0%";
-      if (progressPercent) progressPercent.textContent = "0%";
-    }, 500);
+    }, 400);
   }
 }
 
@@ -2462,25 +2165,16 @@ function renderMatchedTopicsUI(data) {
   listContainer.innerHTML = data.matched_topics.map((t, idx) => {
     const isChecked = idx === selectedTopicIndex;
     const pct = Math.round((t.confidence || 0) * 100);
-    const unitTag = t.unit ? `<span class="notes-unit-pill">Unit ${escapeHtml(String(t.unit))}</span>` : "";
     const concepts = (t.matched_concepts || []).map(c => `
       <span class="notes-concept-chip">${escapeHtml(c)}</span>
     `).join("");
 
     return `
-      <div class="notes-topic-item ${isChecked ? 'selected' : ''}" data-index="${idx}" role="radio" aria-checked="${isChecked}" tabindex="${isChecked ? '0' : '-1'}">
-        <div class="notes-topic-radio-wrap">
-          <input type="radio" name="matchedTopicRadio" class="notes-topic-radio" id="topicRadio_${idx}" value="${idx}" ${isChecked ? 'checked' : ''} tabindex="-1" />
-          <div class="notes-custom-radio" aria-hidden="true">
-            <div class="notes-radio-dot"></div>
-          </div>
-        </div>
+      <div class="notes-topic-item ${isChecked ? 'selected' : ''}" data-index="${idx}" role="button" tabindex="0">
+        <input type="radio" name="matchedTopicRadio" class="notes-topic-radio" id="topicRadio_${idx}" value="${idx}" ${isChecked ? 'checked' : ''} />
         <div class="notes-topic-body">
           <div class="notes-topic-header-row">
-            <div class="notes-topic-badges">
-              <span class="notes-course-tag">${escapeHtml(t.course_code)} — ${escapeHtml(t.course_name)}</span>
-              ${unitTag}
-            </div>
+            <span class="notes-course-tag">${escapeHtml(t.course_code)} - ${escapeHtml(t.course_name)}</span>
             <span class="notes-confidence-badge">${pct}% Match</span>
           </div>
           <div class="notes-topic-name">${escapeHtml(t.topic_name)}</div>
@@ -2490,35 +2184,16 @@ function renderMatchedTopicsUI(data) {
     `;
   }).join("");
 
-  const items = listContainer.querySelectorAll(".notes-topic-item");
-  items.forEach((item, idx) => {
-    const selectItem = () => {
+  listContainer.querySelectorAll(".notes-topic-item").forEach(item => {
+    item.addEventListener("click", () => {
+      const idx = parseInt(item.dataset.index, 10);
       selectedTopicIndex = idx;
-      items.forEach((el, i) => {
+      listContainer.querySelectorAll(".notes-topic-item").forEach((el, i) => {
         const isSel = i === idx;
         el.classList.toggle("selected", isSel);
-        el.setAttribute("aria-checked", isSel ? "true" : "false");
-        el.tabIndex = isSel ? 0 : -1;
         const radio = el.querySelector(".notes-topic-radio");
         if (radio) radio.checked = isSel;
       });
-      item.focus();
-    };
-
-    item.addEventListener("click", selectItem);
-    item.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        selectItem();
-      } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
-        e.preventDefault();
-        const nextIdx = (idx + 1) % items.length;
-        items[nextIdx].click();
-      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
-        e.preventDefault();
-        const prevIdx = (idx - 1 + items.length) % items.length;
-        items[prevIdx].click();
-      }
     });
   });
 }
@@ -2544,17 +2219,17 @@ function initNotesUploaderListeners() {
       e.preventDefault();
       isDraggingNotes = true;
       dropzone.classList.remove("border-gray-300", "bg-gray-50");
-      dropzone.classList.add("border-blue-500", "bg-blue-50", "dragover");
+      dropzone.classList.add("border-blue-500", "bg-blue-50");
     });
     dropzone.addEventListener("dragleave", () => {
       isDraggingNotes = false;
-      dropzone.classList.remove("border-blue-500", "bg-blue-50", "dragover");
+      dropzone.classList.remove("border-blue-500", "bg-blue-50");
       dropzone.classList.add("border-gray-300", "bg-gray-50");
     });
     dropzone.addEventListener("drop", (e) => {
       e.preventDefault();
       isDraggingNotes = false;
-      dropzone.classList.remove("border-blue-500", "bg-blue-50", "dragover");
+      dropzone.classList.remove("border-blue-500", "bg-blue-50");
       dropzone.classList.add("border-gray-300", "bg-gray-50");
       if (e.dataTransfer && e.dataTransfer.files) {
         handleNotesFiles(e.dataTransfer.files);
@@ -2623,7 +2298,6 @@ async function initApp() {
   await ensureAuthSession();
   await loadCourses();
   initNotesUploaderListeners();
-  initDifficultySelector();
   const restored = restoreSessionState();
 
   // Initialize base history state if not already present
@@ -2657,7 +2331,6 @@ async function initApp() {
             if (topicSelect) {
               topicSelect.value = urlTopic;
             }
-            updateSyllabusPreview();
           }
         }
       }
