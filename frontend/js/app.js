@@ -1947,6 +1947,31 @@ function handleNotesFiles(files) {
   }
 }
 
+function formatFileSize(bytes) {
+  if (typeof bytes !== "number" || isNaN(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileCategoryIcon(filename, isImage = false) {
+  if (isImage) return null;
+  const ext = (filename || "").split(".").pop().toLowerCase();
+  if (ext === "pdf") {
+    return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-red-50 text-red-600 border border-red-200 font-bold text-xs uppercase shadow-sm">PDF</div>`;
+  }
+  if (ext === "docx" || ext === "doc") {
+    return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600 border border-blue-200 font-bold text-xs uppercase shadow-sm">DOC</div>`;
+  }
+  if (ext === "pptx" || ext === "ppt") {
+    return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-200 font-bold text-xs uppercase shadow-sm">PPT</div>`;
+  }
+  if (ext === "txt") {
+    return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-gray-100 text-gray-600 border border-gray-200 font-bold text-xs uppercase shadow-sm">TXT</div>`;
+  }
+  return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-gray-100 text-gray-500 border border-gray-200 text-base shadow-sm">📄</div>`;
+}
+
 function removeNotesFile(index) {
   cleanupImagePreview();
   if (isUploadingNotes && currentUploadXhr) {
@@ -2019,27 +2044,31 @@ function renderNotesFilesUI() {
     }
 
     container.innerHTML = `
-      <div class="flex items-center gap-3 bg-gray-50 rounded-lg p-2 shadow-sm border border-gray-200 mb-2 animate-fade-in">
+      <div class="notes-file-row flex items-center gap-3.5 bg-gray-50/90 rounded-xl p-3 border border-gray-200/80 shadow-sm mb-3 transition animate-fade-in hover:border-gray-300">
         ${activeImagePreviewUrl ? `
           <img
             src="${activeImagePreviewUrl}"
-            alt="Preview"
-            class="w-16 h-16 object-cover rounded-md border border-gray-200"
+            alt="${escapeHtml(file.name)}"
+            class="w-12 h-12 rounded-lg object-cover border border-gray-200 flex-shrink-0"
           />
         ` : `
-          <div class="w-16 h-16 flex items-center justify-center bg-gray-200 rounded-md text-gray-500 text-xl">
-            <span role="img" aria-label="file">📄</span>
-          </div>
+          ${getFileCategoryIcon(file.name, isImage)}
         `}
 
-        <div class="flex-1 truncate">
-          <div class="font-medium text-gray-800 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-sm text-gray-900 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+          <div class="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
+            <span>${formatFileSize(file.size)}</span>
+            <span class="inline-block w-1 h-1 rounded-full bg-gray-300"></span>
+            <span class="text-emerald-600 font-medium">${isUploadingNotes ? "Uploading..." : "Ready to upload"}</span>
+          </div>
         </div>
 
         <button
           type="button"
-          class="ml-2 px-2 py-1 text-xs flex items-center gap-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition border border-red-200 shadow-sm notes-single-remove"
-          aria-label="Remove file"
+          class="notes-single-remove p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition focus:outline-none focus:ring-2 focus:ring-red-200"
+          aria-label="Remove ${escapeHtml(file.name)}"
+          title="${isUploadingNotes ? 'Cancel upload' : 'Remove file'}"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -2053,31 +2082,32 @@ function renderNotesFilesUI() {
       removeNotesFile(0);
     });
   } else {
-    // Multi-file pill rendering (matching file-uploader.tsx chip layout)
+    // Multi-file row list (matching reference file-uploader item structure)
     cleanupImagePreview();
     container.innerHTML = `
-      <div class="mb-4" style="max-height: 180px; overflow-y: auto;">
-        <div class="flex flex-wrap gap-2">
+      <div class="notes-files-multi mb-3" style="max-height: 200px; overflow-y: auto;">
+        <div class="flex flex-col gap-2">
           ${selectedNotesFiles.map((file, idx) => `
-            <span
-              class="inline-flex items-center max-w-xs px-3 py-1 rounded-full bg-gray-100 text-gray-800 text-sm font-medium shadow-sm border border-gray-200 truncate notes-pill"
-              style="min-width: 0;"
-              title="${escapeHtml(file.name)}"
-            >
-              <span class="truncate max-w-[120px] text-xs">
-                ${escapeHtml(file.name)}
-              </span>
+            <div class="notes-file-row flex items-center gap-3 bg-gray-50/90 rounded-xl p-2.5 border border-gray-200/80 shadow-sm transition hover:border-gray-300">
+              ${getFileCategoryIcon(file.name)}
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-xs text-gray-900 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+                <div class="flex items-center gap-2 mt-0.5 text-[11px] text-gray-500">
+                  <span>${formatFileSize(file.size)}</span>
+                </div>
+              </div>
               <button
                 type="button"
-                class="ml-2 p-0.5 rounded-full hover:bg-red-100 text-red-600 transition border border-transparent focus:outline-none focus:ring-2 focus:ring-red-200 notes-pill-remove"
+                class="notes-pill-remove p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition focus:outline-none focus:ring-2 focus:ring-red-200"
                 data-index="${idx}"
                 aria-label="Remove ${escapeHtml(file.name)}"
+                title="${isUploadingNotes ? 'Cancel upload' : 'Remove file'}"
               >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-            </span>
+            </div>
           `).join("")}
         </div>
       </div>
@@ -2216,9 +2246,11 @@ class ProgressiveFluxLoader {
     const label = labelOverride || this.pickLabel(current);
 
     if (this.fillEl) {
+      this.fillEl.classList.remove("is-processing", "is-indeterminate");
       this.fillEl.style.width = `${current}%`;
     }
     if (this.trackEl) {
+      this.trackEl.setAttribute("aria-busy", current < 100 ? "true" : "false");
       this.trackEl.setAttribute("aria-valuenow", rounded);
       this.trackEl.setAttribute("aria-valuetext", label ? `${rounded}% – ${label}` : `${rounded}%`);
     }
@@ -2231,6 +2263,42 @@ class ProgressiveFluxLoader {
     } else if (current < 100) {
       this.completed = false;
     }
+  }
+
+  setProcessing(customLabel = "Processing notes…") {
+    this.isControlled = true;
+    this.cancelSweep();
+    this.completed = false;
+    this.currentValue = 100;
+
+    if (this.fillEl) {
+      this.fillEl.style.width = "100%";
+      this.fillEl.classList.add("is-processing");
+      this.fillEl.classList.remove("is-indeterminate");
+    }
+    if (this.trackEl) {
+      this.trackEl.setAttribute("aria-busy", "true");
+      this.trackEl.setAttribute("aria-valuenow", 100);
+      this.trackEl.setAttribute("aria-valuetext", `100% – ${customLabel}`);
+    }
+    this.updateLabel(customLabel);
+  }
+
+  setIndeterminate(label = "Uploading notes…") {
+    this.isControlled = false;
+    this.completed = false;
+    this.cancelSweep();
+
+    if (this.fillEl) {
+      this.fillEl.classList.add("is-indeterminate");
+      this.fillEl.classList.remove("is-processing");
+    }
+    if (this.trackEl) {
+      this.trackEl.setAttribute("aria-busy", "true");
+      this.trackEl.removeAttribute("aria-valuenow");
+      this.trackEl.setAttribute("aria-valuetext", label);
+    }
+    this.updateLabel(label);
   }
 
   startUncontrolled(customLabel) {
@@ -2299,9 +2367,11 @@ class ProgressiveFluxLoader {
     this.isControlled = true;
     this.currentValue = 100;
     if (this.fillEl) {
+      this.fillEl.classList.remove("is-processing", "is-indeterminate");
       this.fillEl.style.width = "100%";
     }
     if (this.trackEl) {
+      this.trackEl.setAttribute("aria-busy", "false");
       this.trackEl.setAttribute("aria-valuenow", 100);
       this.trackEl.setAttribute("aria-valuetext", "100% – Complete");
     }
@@ -2323,9 +2393,11 @@ class ProgressiveFluxLoader {
     this.pendingLabel = null;
     this.currentLabel = "";
     if (this.fillEl) {
+      this.fillEl.classList.remove("is-processing", "is-indeterminate");
       this.fillEl.style.width = "0%";
     }
     if (this.trackEl) {
+      this.trackEl.setAttribute("aria-busy", "false");
       this.trackEl.setAttribute("aria-valuenow", 0);
       this.trackEl.setAttribute("aria-valuetext", "0% – Uploading");
     }
@@ -2418,23 +2490,22 @@ function handleNotesUpload() {
       xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
     }
 
-    // 1. Upload byte-transfer progress
+    // 1. Upload byte-transfer progress directly following real transferred bytes
     xhr.upload.onprogress = (event) => {
       if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
       if (!event.lengthComputable || event.total <= 0) {
-        setUploadIndeterminateState("Uploading");
+        loader.setIndeterminate("Uploading");
         return;
       }
       const progress = Math.max(0, Math.min(100, (event.loaded / event.total) * 100));
-      updateProgressiveFluxLoader(progress);
+      loader.setValue(progress, "Uploading");
     };
 
-    // 2. Upload byte transfer finished, server processing begins
+    // 2. Upload byte transfer finished, transition naturally into server processing
     xhr.upload.onload = () => {
       if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
-      if (btnText) btnText.textContent = "Processing...";
-      // Start indeterminate sweep for server processing phase awaiting FastAPI response
-      setUploadIndeterminateState("Processing");
+      if (btnText) btnText.textContent = "Processing notes...";
+      loader.setProcessing("Processing notes…");
     };
 
     // 3. Response handling
@@ -2682,6 +2753,9 @@ function initNotesUploaderListeners() {
       selectedNotesFiles = [];
       lastExtractionResult = null;
       selectedTopicIndex = 0;
+      if ($("notesFileInput")) {
+        $("notesFileInput").value = "";
+      }
       renderNotesFilesUI();
       announceNotesStatus("Notes files cleared.");
       if ($("notesTopicResultsCard")) {

@@ -2917,15 +2917,55 @@ button.btn-notes-cta:hover:not(:disabled),
   }
 }
 
-/* Fill matching Framer Motion motion.div: gradient background, BAR_SHADOW, transition 0.55s ease [0.22, 1, 0.36, 1] */
+/* Fill: gradient background, BAR_SHADOW, snappy width transition for truthful upload byte tracking */
 .flux-fill {
   position: relative;
   height: 100%;
   border-radius: 9999px;
   background: var(--flux-gradient);
   box-shadow: var(--flux-bar-shadow);
-  transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width 0.2s cubic-bezier(0.1, 0.9, 0.2, 1);
   will-change: width;
+}
+
+/* Server Processing pulse (keeps loader active while awaiting backend response without fake timers) */
+@keyframes fluxProcessingPulse {
+  0%, 100% {
+    filter: brightness(1);
+    opacity: 1;
+  }
+  50% {
+    filter: brightness(1.12);
+    opacity: 0.94;
+  }
+}
+
+.flux-fill.is-processing {
+  animation: fluxProcessingPulse 2s ease-in-out infinite;
+}
+
+/* Non-computable indeterminate transfer sweep */
+@keyframes fluxIndeterminateSweep {
+  0% {
+    left: -35%;
+    width: 35%;
+  }
+  50% {
+    left: 25%;
+    width: 60%;
+  }
+  100% {
+    left: 100%;
+    width: 35%;
+  }
+}
+
+.flux-fill.is-indeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transition: none !important;
+  animation: fluxIndeterminateSweep 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 /* Moving Sheen matching Framer Motion motion.span: SHEEN_GRADIENT, mixBlendMode screen, animate x: [-110%, 210%] duration 1.6s linear infinite */
@@ -2970,6 +3010,10 @@ button.btn-notes-cta:hover:not(:disabled),
   }
   .flux-fill {
     transition: none !important;
+  }
+  .flux-fill.is-processing,
+  .flux-fill.is-indeterminate {
+    animation: none !important;
   }
   .flux-sheen {
     display: none !important;
