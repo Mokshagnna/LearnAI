@@ -21,65 +21,204 @@
   </header>
 
   <main id="main-content" class="container">
-  <!-- 1. Home / Setup Screen -->
-  <section id="setup" class="card hero-card">
-    <h1>Choose a course and topic</h1>
-    <p>Select a course, choose a syllabus topic, and LearnAI will generate a fresh 10-question quiz.</p>
-
-    <label for="course">Course</label>
-    <select id="course">
-      <option value="">Select a course</option>
-    </select>
-
-    <label for="topic">Topic</label>
-    <select id="topic" disabled>
-      <option value="">Select a course first</option>
-    </select>
-
-    <div class="pattern">
-      <span>4 Easy</span>
-      <span>4 Medium</span>
-      <span>2 Hard</span>
-    </div>
-
-    <button id="generateBtn">Generate Questions with AI</button>
-    <p id="setupMsg" class="message"></p>
-    <div class="setup-divider"><span>OR</span></div>
-    <button id="setupNotesBtn" type="button" class="btn-notes-cta">
-      <span class="notes-icon" aria-hidden="true">
+  <!-- 1. Home / Setup Screen (Academic Scholar Examination Setup) -->
+  <section id="setup" class="card hero-card setup-card">
+    <header class="setup-header">
+      <div class="setup-header-badge" aria-hidden="true">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-          <polyline points="14 2 14 8 20 8"></polyline>
-          <line x1="16" y1="13" x2="8" y2="13"></line>
-          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          <path d="M9 7h6"></path>
+          <path d="M9 11h6"></path>
         </svg>
-      </span>
-      <span>Generate Quiz from Notes or Slides</span>
-    </button>
+        <span>Curriculum Assessment Portal</span>
+      </div>
+      <h1 class="setup-title">Curriculum Assessment Setup</h1>
+      <p class="setup-subtitle muted">Configure your adaptive examination grounded in official VFSTR R22 engineering syllabi.</p>
+    </header>
+
+    <div class="setup-grid">
+      <!-- Left Column: Form Controls -->
+      <div class="setup-form-col">
+        <div class="form-group">
+          <div class="form-label-row">
+            <label for="course" class="setup-label">Course Examination Code</label>
+            <span class="setup-label-hint">55 R22 Courses</span>
+          </div>
+          <div class="select-wrapper">
+            <select id="course" class="setup-select">
+              <option value="">Select a course</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="form-label-row">
+            <label for="topic" class="setup-label">Syllabus Topic &amp; Unit</label>
+            <span id="topicCountBadge" class="setup-label-hint">Select course first</span>
+          </div>
+          <div class="select-wrapper">
+            <select id="topic" class="setup-select" disabled>
+              <option value="">Select a course first</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Assessment Mode / Difficulty Selector -->
+        <div class="form-group">
+          <div class="form-label-row">
+            <span id="difficultyGroupLabel" class="setup-label">Assessment Difficulty Mode</span>
+            <span id="difficultyModeHint" class="setup-label-hint">Recommended</span>
+          </div>
+          <div id="difficultySelector" class="difficulty-mode-selector" role="radiogroup" aria-labelledby="difficultyGroupLabel">
+            <button type="button" class="difficulty-mode-btn active" role="radio" aria-checked="true" data-difficulty="adaptive" tabindex="0">
+              <div class="difficulty-mode-header">
+                <span class="difficulty-radio-indicator" aria-hidden="true"></span>
+                <span class="difficulty-mode-name">Adaptive Mode</span>
+                <span class="difficulty-mode-tag">Dynamic</span>
+              </div>
+              <p class="difficulty-mode-desc">Automatically adjusts question difficulty based on student performance trajectory.</p>
+            </button>
+
+            <button type="button" class="difficulty-mode-btn" role="radio" aria-checked="false" data-difficulty="easy" tabindex="-1">
+              <div class="difficulty-mode-header">
+                <span class="difficulty-radio-indicator" aria-hidden="true"></span>
+                <span class="difficulty-mode-name">Foundational</span>
+                <span class="difficulty-mode-tag">Easy</span>
+              </div>
+              <p class="difficulty-mode-desc">6 Foundational, 3 Standard, 1 Advanced. Reinforces fundamental concepts.</p>
+            </button>
+
+            <button type="button" class="difficulty-mode-btn" role="radio" aria-checked="false" data-difficulty="medium" tabindex="-1">
+              <div class="difficulty-mode-header">
+                <span class="difficulty-radio-indicator" aria-hidden="true"></span>
+                <span class="difficulty-mode-name">Mixed Standard</span>
+                <span class="difficulty-mode-tag">Medium</span>
+              </div>
+              <p class="difficulty-mode-desc">4 Foundational, 4 Standard, 2 Advanced. Standard university distribution.</p>
+            </button>
+
+            <button type="button" class="difficulty-mode-btn" role="radio" aria-checked="false" data-difficulty="hard" tabindex="-1">
+              <div class="difficulty-mode-header">
+                <span class="difficulty-radio-indicator" aria-hidden="true"></span>
+                <span class="difficulty-mode-name">Advanced Challenge</span>
+                <span class="difficulty-mode-tag">Hard</span>
+              </div>
+              <p class="difficulty-mode-desc">2 Foundational, 4 Standard, 4 Advanced. High-order synthesis and analysis.</p>
+            </button>
+          </div>
+
+          <!-- Preserved distribution pattern badge for tests and quick visual feedback -->
+          <div class="pattern" aria-label="Question difficulty distribution preview">
+            <span id="patternEasy">4 Easy</span>
+            <span id="patternMedium">4 Medium</span>
+            <span id="patternHard">2 Hard</span>
+          </div>
+        </div>
+
+        <button id="generateBtn" class="btn-primary setup-submit-btn">Generate Questions with AI &rarr;</button>
+        <p id="setupMsg" class="message" role="alert" aria-live="polite"></p>
+
+        <div class="setup-divider" aria-hidden="true"><span>OR</span></div>
+        <button id="setupNotesBtn" type="button" class="btn-notes-cta">
+          <span class="notes-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+          </span>
+          <span>Generate Quiz from Notes or Slides</span>
+        </button>
+      </div>
+
+      <!-- Right Column: Official Syllabus Context Preview -->
+      <aside class="setup-preview-col" aria-label="Official Syllabus Context Preview">
+        <div id="syllabusPreviewCard" class="setup-preview-panel">
+          <div class="preview-panel-header">
+            <div class="preview-panel-badge">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <span>Syllabus Scope Dossier</span>
+            </div>
+            <span id="previewUnitTag" class="tag-chip tag-chip-sm">Curriculum Preview</span>
+          </div>
+
+          <!-- Empty Fallback State -->
+          <div id="previewEmptyState" class="preview-empty-state">
+            <div class="preview-empty-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+              </svg>
+            </div>
+            <h2 class="preview-empty-heading">Select a Course &amp; Topic</h2>
+            <p class="preview-empty-text">Choose a syllabus topic to inspect its official curriculum unit, parent module, verified key concepts, and assessment scope.</p>
+          </div>
+
+          <!-- Populated Active State -->
+          <div id="previewContentState" class="preview-content-state hidden">
+            <div class="preview-topic-block">
+              <span id="previewParentTopic" class="preview-parent-label"></span>
+              <h2 id="previewTopicName" class="preview-topic-heading"></h2>
+              <div id="previewMetaBadges" class="preview-badges-row">
+                <span id="previewModuleBadge" class="preview-micro-badge"></span>
+                <span id="previewUnitBadge" class="preview-micro-badge"></span>
+              </div>
+            </div>
+
+            <div class="preview-section">
+              <h3 class="preview-section-title">Tested Concepts in Topic</h3>
+              <div id="previewConceptsList" class="preview-concepts-grid"></div>
+            </div>
+
+            <div class="preview-section">
+              <h3 class="preview-section-title">Official Syllabus Scope</h3>
+              <blockquote id="previewSyllabusExcerpt" class="preview-syllabus-quote"></blockquote>
+            </div>
+
+            <div class="preview-footer-meta">
+              <div class="preview-spec-item">
+                <span class="preview-spec-label">Format</span>
+                <span class="preview-spec-value">10 Adaptive MCQs</span>
+              </div>
+              <div class="preview-spec-item">
+                <span class="preview-spec-label">Assessment</span>
+                <span id="previewActiveDifficulty" class="preview-spec-value">Adaptive</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
   </section>
 
-  <!-- 2. Loading Screen (Calm, Minimal, Academic) -->
+  <!-- 2. Loading Screen (Academic Assessment Scriptorium) -->
   <section id="loadingSection" class="card loading-card hidden" role="status" aria-live="polite">
     <div class="loading-spinner-wrap">
       <div class="spinner" aria-hidden="true"></div>
     </div>
-    <h2 class="loading-title">Preparing Your Quiz</h2>
-    <p class="loading-desc">We're creating 10 questions based on your selected syllabus topic.</p>
+    <h2 class="loading-title">Synthesizing Examination Paper</h2>
+    <p class="loading-desc">Generating 10 curriculum-grounded diagnostic questions calibrated to your syllabus.</p>
     <div id="loadingTopicLabel" class="loading-topic-label">—</div>
-    <p class="loading-hint">This may take a few moments...</p>
+    <p class="loading-hint">Calibrating question difficulty and distractor keys. Please wait...</p>
     <div class="loading-actions">
       <button id="loadingCancelBtn" type="button" class="secondary cancel-btn">Cancel</button>
     </div>
-    <div id="loadingErrorBox" class="loading-error-box hidden">
+    <div id="loadingErrorBox" class="loading-error-box hidden" role="alert">
       <div id="loadingErrorMsg" class="loading-error-msg"></div>
       <div class="loading-error-actions">
-        <button id="loadingRetryBtn" type="button">Retry</button>
+        <button id="loadingRetryBtn" type="button" class="btn-retry">Retry</button>
         <button id="loadingBackBtn" type="button" class="secondary">Choose Another Topic</button>
       </div>
     </div>
   </section>
 
-  <!-- 3. Active Quiz Screen -->
+  <!-- 3. Active Quiz Screen (Academic Assessment Arena) -->
   <section id="quizSection" class="hidden">
     <header class="quiz-header">
       <div class="quiz-header-main">
@@ -94,7 +233,10 @@
     <div class="quiz-progress-bar-wrap">
       <div class="quiz-progress-meta">
         <span id="progressText" class="progress-question-count">Question 1 of 10</span>
-        <span id="difficultyBadge" class="difficulty-tag">Easy</span>
+        <div class="quiz-progress-meta-right">
+          <span id="progressPercent" class="progress-pct-tag">10%</span>
+          <span id="difficultyBadge" class="difficulty-tag">Easy</span>
+        </div>
       </div>
       <div class="progress" role="progressbar" aria-valuenow="10" aria-valuemin="0" aria-valuemax="100" aria-label="Quiz progress">
         <div id="progressBar"></div>
@@ -340,11 +482,25 @@
   </section>
   <!-- 6. Generate Quiz from Notes Screen -->
   <section id="notesUploadSection" class="hidden">
-    <div class="notes-page-wrapper flex flex-col items-center justify-center py-6 px-4 w-full">
-      <div id="notesUploaderCard" class="notes-uploader-card w-full max-w-md animate-fade-in">
-        <h1 class="text-3xl font-bold mb-8 text-center text-gray-900 tracking-tight">
-          Upload Files
-        </h1>
+    <div class="notes-page-wrapper">
+
+      <!-- Academic Masthead -->
+      <header class="notes-hero-header">
+        <h1 class="notes-hero-title">Generate Quiz from Notes</h1>
+        <p class="notes-hero-subtitle">
+          Upload course lecture materials, slides, or revision notes. LearnAI extracts core engineering concepts and matches them against your official university syllabus for grounded examination practice.
+        </p>
+      </header>
+
+      <!-- Stage A & B: Document Intake Station Card -->
+      <div id="notesUploaderCard" class="card notes-uploader-card animate-fade-in">
+        <div class="notes-card-header">
+          <div>
+            <h2 class="notes-section-title">Course Document Intake</h2>
+            <p class="notes-section-subtitle">Staged files are processed in-memory and isolated to your active session.</p>
+          </div>
+          <span class="notes-limit-pill">5 MB Limit per file</span>
+        </div>
 
         <input
           id="notesFileInput"
@@ -355,29 +511,43 @@
           accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,.txt,.ppt,.pptx,image/jpeg,image/png,image/webp"
         />
 
+        <!-- Intake Dropzone -->
         <div
           id="notesDropzone"
-          class="notes-dropzone w-full flex flex-col items-center justify-center transition-all duration-200 mb-5 cursor-pointer"
-          style="min-height: 120px;"
+          class="notes-dropzone border-dashed"
           role="button"
           tabindex="0"
           aria-label="Choose files or drag files here"
         >
-          <div class="flex flex-col items-center py-6 px-4">
+          <div class="notes-dropzone-inner">
             <div class="notes-dropzone-icon" aria-hidden="true">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 <polyline points="14 2 14 8 20 8"></polyline>
                 <line x1="12" y1="18" x2="12" y2="12"></line>
                 <polyline points="9 15 12 12 15 15"></polyline>
               </svg>
             </div>
-            <span class="text-gray-700 font-medium text-center">
-              Drag &amp; drop files here, or <span class="text-blue-600 underline">browse</span>
-            </span>
-            <span class="notes-dropzone-subtext text-xs mt-1 text-center px-2">
-              Photos, PDF, DOCX, TXT, PPT and PPTX (maximum 5 MB per file)
-            </span>
+            <div class="notes-dropzone-text">
+              <span class="notes-dropzone-prompt">Drag &amp; drop study materials here, or <span class="notes-browse-link underline">browse files</span></span>
+              <span class="notes-dropzone-subtext">PDF, DOCX, TXT, PowerPoint (PPT, PPTX), or lecture photos (PNG, JPG, WEBP)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Document Formats & Session Guarantee Bar -->
+        <div class="notes-formats-bar">
+          <div class="notes-format-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+            <span>Multi-Format Ingestion</span>
+          </div>
+          <div class="notes-format-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            <span>Session-Isolated In-Memory</span>
+          </div>
+          <div class="notes-format-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span>Curriculum Grounded</span>
           </div>
         </div>
 
@@ -391,19 +561,25 @@
         ></div>
 
         <!-- Selected files list (single FilePreview or multi-file pill list) -->
-        <div id="notesFilesList" class="mb-4"></div>
+        <div id="notesFilesList" class="notes-files-container mb-4 hidden"></div>
 
         <!-- Progress bar -->
-        <div id="notesProgressWrap" class="w-full bg-gray-200 rounded-full h-3 mb-4 overflow-hidden animate-fade-in hidden">
-          <div
-            id="notesProgressBar"
-            class="bg-green-500 h-3 rounded-full transition-all duration-300"
-            style="width: 0%;"
-            role="progressbar"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow="0"
-          ></div>
+        <div id="notesProgressWrap" class="notes-progress-wrap hidden animate-fade-in">
+          <div class="notes-progress-meta">
+            <span class="notes-progress-label">Extracting text &amp; matching syllabus topics...</span>
+            <span id="notesProgressPercent" class="notes-progress-pct">0%</span>
+          </div>
+          <div class="notes-progress-track">
+            <div
+              id="notesProgressBar"
+              class="notes-progress-bar"
+              style="width: 0%;"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+            ></div>
+          </div>
         </div>
 
         <!-- Upload Action Button -->
@@ -411,12 +587,11 @@
           id="notesUploadBtn"
           type="button"
           disabled
-          class="w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed"
-          style="min-height: 40px;"
+          class="notes-upload-cta"
         >
           <svg
             id="notesSpinner"
-            class="animate-spin h-6 w-6 text-white hidden"
+            class="animate-spin notes-btn-spinner hidden"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
@@ -430,10 +605,10 @@
       </div>
 
       <!-- Toast notifications container -->
-      <div id="notesToastContainer" aria-live="polite"></div>
+      <div id="notesToastContainer" class="notes-toast-anchor" aria-live="polite"></div>
 
       <!-- Topic Preview & Selection Card -->
-      <div id="notesTopicResultsCard" class="card notes-results-card hidden w-full max-w-2xl mt-6 animate-fade-in">
+      <div id="notesTopicResultsCard" class="card notes-results-card hidden animate-fade-in">
         <div class="notes-results-header">
           <div class="badge badge-success" id="notesResultsBadge">Curriculum Match Found</div>
           <h2 class="notes-results-title">Matched Syllabus Topics</h2>
@@ -451,7 +626,7 @@
               <line x1="12" y1="8" x2="12.01" y2="8"></line>
             </svg>
           </span>
-          <div>
+          <div class="notes-alert-content">
             <strong>Partial Syllabus Coverage:</strong>
             <span>Your notes focus on specific concepts within this topic. The AI quiz generator will prioritize those concepts.</span>
           </div>
@@ -466,18 +641,34 @@
               <line x1="12" y1="17" x2="12.01" y2="17"></line>
             </svg>
           </span>
-          <div>
+          <div class="notes-alert-content">
             <strong>No Syllabus Match Found:</strong>
             <span id="notesIrrelevantMsg">We could not identify any matching curriculum courses or topics in these notes.</span>
           </div>
         </div>
 
         <!-- Topic options container -->
-        <div id="notesTopicOptions" class="notes-topics-list"></div>
+        <div id="notesTopicOptions" class="notes-topics-list" role="radiogroup" aria-label="Matched curriculum topics"></div>
+
+        <!-- Grounding parameters summary -->
+        <div class="notes-grounding-spec">
+          <div class="notes-spec-item">
+            <span class="notes-spec-label">Format</span>
+            <span class="notes-spec-val">10 Adaptive MCQs</span>
+          </div>
+          <div class="notes-spec-item">
+            <span class="notes-spec-label">Grounding Mode</span>
+            <span class="notes-spec-val">Notes-Grounded (Passive Reference)</span>
+          </div>
+          <div class="notes-spec-item">
+            <span class="notes-spec-label">Curriculum</span>
+            <span class="notes-spec-val">VFSTR R22 Regulation</span>
+          </div>
+        </div>
 
         <!-- Action buttons -->
         <div class="notes-actions-row">
-          <button id="notesGenerateQuizBtn" type="button" class="btn-primary">Generate Quiz from Notes</button>
+          <button id="notesGenerateQuizBtn" type="button" class="btn-primary">Generate Quiz from Notes &rarr;</button>
           <button id="notesResetBtn" type="button" class="secondary">Upload Different Notes</button>
         </div>
       </div>
