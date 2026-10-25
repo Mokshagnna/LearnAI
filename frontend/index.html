@@ -340,8 +340,8 @@
   </section>
   <!-- 6. Generate Quiz from Notes Screen -->
   <section id="notesUploadSection" class="hidden">
-    <div class="notes-page-wrapper flex flex-col items-center justify-center py-6 px-4 w-full">
-      <div id="notesUploaderCard" class="notes-uploader-card w-full max-w-md animate-fade-in">
+    <div class="notes-page-wrapper flex flex-col items-center justify-center py-10 px-4 w-full bg-gradient-to-br from-gray-50 to-gray-200 rounded-2xl">
+      <div id="notesUploaderCard" class="notes-uploader-card bg-white rounded-2xl shadow-xl p-10 w-full max-w-md border border-gray-100 animate-fade-in">
         <h1 class="text-3xl font-bold mb-8 text-center text-gray-900 tracking-tight">
           Upload Files
         </h1>
@@ -357,25 +357,18 @@
 
         <div
           id="notesDropzone"
-          class="notes-dropzone w-full flex flex-col items-center justify-center transition-all duration-200 mb-5 cursor-pointer"
+          class="notes-dropzone w-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all duration-200 mb-5 cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400"
           style="min-height: 120px;"
           role="button"
           tabindex="0"
           aria-label="Choose files or drag files here"
         >
-          <div class="flex flex-col items-center py-6 px-4">
-            <div class="notes-dropzone-icon" aria-hidden="true">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="12" y1="18" x2="12" y2="12"></line>
-                <polyline points="9 15 12 12 15 15"></polyline>
-              </svg>
-            </div>
+          <div class="flex flex-col items-center py-6">
+            <span class="text-4xl mb-2 animate-bounce">📁</span>
             <span class="text-gray-700 font-medium text-center">
               Drag &amp; drop files here, or <span class="text-blue-600 underline">browse</span>
             </span>
-            <span class="notes-dropzone-subtext text-xs mt-1 text-center px-2">
+            <span class="text-xs text-gray-400 mt-1 text-center px-2">
               Photos, PDF, DOCX, TXT, PPT and PPTX (maximum 5 MB per file)
             </span>
           </div>

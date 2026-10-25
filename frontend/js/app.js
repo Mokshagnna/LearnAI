@@ -1861,6 +1861,16 @@ let isUploadingNotes = false;
 let notesToastTimer = null;
 let lastExtractionResult = null;
 let selectedTopicIndex = 0;
+let activeImagePreviewUrl = null;
+
+function cleanupImagePreview() {
+  if (activeImagePreviewUrl) {
+    try {
+      URL.revokeObjectURL(activeImagePreviewUrl);
+    } catch (e) {}
+    activeImagePreviewUrl = null;
+  }
+}
 
 function showNotesToast(message, type = "success") {
   const container = $("notesToastContainer");
@@ -1938,6 +1948,7 @@ function handleNotesFiles(files) {
 }
 
 function removeNotesFile(index) {
+  cleanupImagePreview();
   const removedFile = selectedNotesFiles[index];
   selectedNotesFiles.splice(index, 1);
   if ($("notesFileInput")) {
@@ -1972,6 +1983,7 @@ function renderNotesFilesUI() {
   if (!container || !uploadBtn) return;
 
   if (selectedNotesFiles.length === 0) {
+    cleanupImagePreview();
     container.innerHTML = "";
     container.classList.add("hidden");
     uploadBtn.disabled = true;
@@ -1980,52 +1992,79 @@ function renderNotesFilesUI() {
   }
 
   container.classList.remove("hidden");
-  uploadBtn.disabled = false;
-  uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-700 text-white hover:bg-gray-800 active:scale-95";
+  if (!isUploadingNotes) {
+    uploadBtn.disabled = false;
+    uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-700 text-white hover:bg-gray-800 active:scale-95";
+  }
 
   if (selectedNotesFiles.length === 1) {
+    cleanupImagePreview();
     const file = selectedNotesFiles[0];
-    const isImage = file.type.startsWith("image/");
-    const previewUrl = isImage ? URL.createObjectURL(file) : null;
+    const isImage = file.type && file.type.startsWith("image/");
+    if (isImage) {
+      try {
+        activeImagePreviewUrl = URL.createObjectURL(file);
+      } catch (e) {
+        activeImagePreviewUrl = null;
+      }
+    }
 
     container.innerHTML = `
       <div class="flex items-center gap-3 bg-gray-50 rounded-lg p-2 shadow-sm border border-gray-200 mb-2 animate-fade-in">
-        ${isImage ? `
-          <img src="${previewUrl}" alt="Preview" class="w-16 h-16 object-cover rounded-md border border-gray-200" />
+        ${activeImagePreviewUrl ? `
+          <img
+            src="${activeImagePreviewUrl}"
+            alt="Preview"
+            class="w-16 h-16 object-cover rounded-md border border-gray-200"
+          />
         ` : `
           <div class="w-16 h-16 flex items-center justify-center bg-gray-200 rounded-md text-gray-500 text-xl">
-            <svg class="w-7 h-7 text-gray-500" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-            </svg>
+            <span role="img" aria-label="file">📄</span>
           </div>
         `}
+
         <div class="flex-1 truncate">
           <div class="font-medium text-gray-800 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
-          <div class="text-xs text-gray-500">${(file.size / 1024).toFixed(1)} KB</div>
         </div>
-        <button type="button" class="ml-2 px-2 py-1 text-xs flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition border border-red-200 shadow-sm notes-single-remove" aria-label="Remove ${escapeHtml(file.name)}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+
+        <button
+          type="button"
+          class="ml-2 px-2 py-1 text-xs flex items-center gap-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition border border-red-200 shadow-sm notes-single-remove"
+          aria-label="Remove file"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
     `;
-    container.querySelector(".notes-single-remove")?.addEventListener("click", () => {
+    container.querySelector(".notes-single-remove")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
       removeNotesFile(0);
     });
   } else {
-    // Multi-file pill rendering
+    // Multi-file pill rendering (matching file-uploader.tsx chip layout)
+    cleanupImagePreview();
     container.innerHTML = `
-      <div style="max-height: 180px; overflow-y: auto;" class="notes-pills-scroll-wrap">
-        <div class="flex flex-wrap gap-3 items-center">
-          ${selectedNotesFiles.map((f, idx) => `
-            <span class="notes-pill inline-flex items-center max-w-xs pl-3 pr-1 py-1 rounded-full bg-gray-100 text-gray-800 text-sm font-medium shadow-sm border border-gray-200" style="min-width: 0;" title="${escapeHtml(f.name)}">
-              <span class="truncate max-w-[120px] text-xs">${escapeHtml(f.name)}</span>
-              <button type="button" class="notes-pill-remove ml-1.5 p-0.5 rounded-full hover:bg-red-100 text-red-600 transition border border-transparent focus:outline-none focus:ring-2 focus:ring-red-200" data-index="${idx}" aria-label="Remove ${escapeHtml(f.name)}">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+      <div class="mb-4" style="max-height: 180px; overflow-y: auto;">
+        <div class="flex flex-wrap gap-2">
+          ${selectedNotesFiles.map((file, idx) => `
+            <span
+              class="inline-flex items-center max-w-xs px-3 py-1 rounded-full bg-gray-100 text-gray-800 text-sm font-medium shadow-sm border border-gray-200 truncate notes-pill"
+              style="min-width: 0;"
+              title="${escapeHtml(file.name)}"
+            >
+              <span class="truncate max-w-[120px] text-xs">
+                ${escapeHtml(file.name)}
+              </span>
+              <button
+                type="button"
+                class="ml-2 p-0.5 rounded-full hover:bg-red-100 text-red-600 transition border border-transparent focus:outline-none focus:ring-2 focus:ring-red-200 notes-pill-remove"
+                data-index="${idx}"
+                aria-label="Remove ${escapeHtml(file.name)}"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
@@ -2037,6 +2076,7 @@ function renderNotesFilesUI() {
     container.querySelectorAll(".notes-pill-remove").forEach(btn => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
+        e.preventDefault();
         const idx = parseInt(btn.dataset.index, 10);
         removeNotesFile(idx);
       });
@@ -2054,11 +2094,17 @@ async function handleNotesUpload() {
   const progressWrap = $("notesProgressWrap");
   const progressBar = $("notesProgressBar");
 
-  if (uploadBtn) uploadBtn.disabled = true;
+  if (uploadBtn) {
+    uploadBtn.disabled = true;
+    uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed";
+  }
   if (spinner) spinner.classList.remove("hidden");
   if (btnText) btnText.textContent = "Processing...";
   if (progressWrap) progressWrap.classList.remove("hidden");
-  if (progressBar) progressBar.style.width = "40%";
+  if (progressBar) {
+    progressBar.style.width = "50%";
+    progressBar.setAttribute("aria-valuenow", "50");
+  }
 
   try {
     const formData = new FormData();
@@ -2072,8 +2118,6 @@ async function handleNotesUpload() {
       headers["Authorization"] = `Bearer ${authToken}`;
     }
 
-    if (progressBar) progressBar.style.width = "70%";
-
     const res = await fetch("/api/notes/extract-topics", {
       method: "POST",
       headers,
@@ -2081,12 +2125,15 @@ async function handleNotesUpload() {
     });
 
     const data = await res.json();
-    if (progressBar) progressBar.style.width = "100%";
+    if (progressBar) {
+      progressBar.style.width = "100%";
+      progressBar.setAttribute("aria-valuenow", "100");
+    }
 
     if (!res.ok) {
       const errMsg = (data && data.detail)
         ? (typeof data.detail === "object" ? JSON.stringify(data.detail) : data.detail)
-        : "Unable to process files. Please verify file integrity.";
+        : "Unable to process files. Please try again.";
       throw new Error(errMsg);
     }
 
@@ -2095,24 +2142,33 @@ async function handleNotesUpload() {
 
     if (data.matched_topics && data.matched_topics.length > 0) {
       showNotesToast(data.message || `Found ${data.matched_topics.length} matching curriculum topic(s).`, "success");
-    } else {
+    } else if (!data.relevant) {
       showNotesToast(data.message || "No curriculum topics matched your notes.", "error");
     }
 
     renderMatchedTopicsUI(data);
 
   } catch (err) {
-    showNotesToast(err.message || "Failed to extract notes. Please try again.", "error");
+    showNotesToast(err.message || "Unable to process files. Please try again.", "error");
   } finally {
     isUploadingNotes = false;
     if (spinner) spinner.classList.add("hidden");
     if (btnText) btnText.textContent = "Upload & Find Topics";
     if (uploadBtn) {
-      uploadBtn.disabled = selectedNotesFiles.length === 0;
+      if (selectedNotesFiles.length > 0) {
+        uploadBtn.disabled = false;
+        uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-700 text-white hover:bg-gray-800 active:scale-95";
+      } else {
+        uploadBtn.disabled = true;
+        uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed";
+      }
     }
     setTimeout(() => {
       if (progressWrap) progressWrap.classList.add("hidden");
-      if (progressBar) progressBar.style.width = "0%";
+      if (progressBar) {
+        progressBar.style.width = "0%";
+        progressBar.setAttribute("aria-valuenow", "0");
+      }
     }, 400);
   }
 }
@@ -2268,6 +2324,7 @@ function initNotesUploaderListeners() {
 
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
+      cleanupImagePreview();
       selectedNotesFiles = [];
       lastExtractionResult = null;
       selectedTopicIndex = 0;
