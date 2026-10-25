@@ -885,6 +885,7 @@ button.secondary:hover:not(:disabled) {
 
 .ai-box {
   border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-brand);
   background-color: var(--color-surface-subtle);
 }
 
@@ -1192,11 +1193,11 @@ button.secondary:hover:not(:disabled) {
 }
 
 .rec-card.card-review-high {
-  border-color: var(--color-warning-border);
+  border-left: 3px solid var(--color-warning);
 }
 
 .rec-card.card-review-adv {
-  border-color: var(--color-brand);
+  border-left: 3px solid var(--color-brand);
 }
 
 .rec-card-header {
@@ -2340,7 +2341,7 @@ button.secondary:hover:not(:disabled) {
 
 /* Keyframe Animations */
 @keyframes fadeIn {
-  from { opacity: 0.85; transform: translateY(3px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes bounce {
@@ -2351,7 +2352,7 @@ button.secondary:hover:not(:disabled) {
   to { transform: rotate(360deg); }
 }
 
-.animate-fade-in { animation: fadeIn 0.15s ease-out forwards; }
+.animate-fade-in { animation: fadeIn 0.25s ease-out forwards; }
 .animate-bounce { animation: bounce 1s infinite; }
 .animate-spin { animation: spin 1s linear infinite; }
 

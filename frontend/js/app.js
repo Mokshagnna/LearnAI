@@ -81,7 +81,9 @@ function escapeHtml(str) {
 // Ensures EXACTLY ONE screen is visible at any time.
 const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection"];
 
-function showScreen(screenId) {
+let lastActiveScreen = "setup";
+
+function showScreen(screenId, pushHistory = true) {
   ALL_SCREENS.forEach(id => {
     const el = $(id);
     if (el) {
@@ -92,6 +94,10 @@ function showScreen(screenId) {
       }
     }
   });
+
+  if (screenId !== "loadingSection") {
+    lastActiveScreen = screenId;
+  }
 
   const isDashboard = screenId === "dashboardSection";
   const isNotes = screenId === "notesUploadSection";
@@ -106,6 +112,17 @@ function showScreen(screenId) {
     if (heading) {
       heading.setAttribute("tabindex", "-1");
       heading.focus({ preventScroll: true });
+    }
+  }
+
+  // Push history state if supported (excluding transient loading state)
+  if (pushHistory && screenId !== "loadingSection" && typeof window !== "undefined" && window.history && typeof window.history.pushState === "function") {
+    if (!window.history.state || window.history.state.screen !== screenId) {
+      try {
+        window.history.pushState({ screen: screenId }, "");
+      } catch (e) {
+        // Ignore history errors if sandbox restricts pushState
+      }
     }
   }
 }
@@ -338,7 +355,7 @@ $("retakeBtn").addEventListener("click", async () => {
   retakeBtn.dataset.processing = "false";
 });
 
-// ── Explicit Home Navigation ────────────────────────────────────────────────
+// ── Explicit Home Navigation & Loading Screen Exit ──────────────────────────
 function goToHome() {
   if (isGenerating) return;
   clearSessionState();
@@ -346,10 +363,7 @@ function goToHome() {
   $("setupMsg").textContent = "";
 }
 
-$("newTopicBtn").addEventListener("click", goToHome);
-$("brandLogo")?.addEventListener("click", goToHome);
-$("loadingBackBtn")?.addEventListener("click", goToHome);
-$("loadingCancelBtn")?.addEventListener("click", () => {
+function returnFromLoading() {
   if (activeAbortController) {
     activeAbortController.abort();
     activeAbortController = null;
@@ -363,8 +377,19 @@ $("loadingCancelBtn")?.addEventListener("click", () => {
     retakeBtn.textContent = "Retake with New AI Questions";
     retakeBtn.dataset.processing = "false";
   }
-  goToHome();
-});
+  if (lastActiveScreen === "dashboardSection") {
+    openDashboard();
+  } else if (lastActiveScreen === "notesUploadSection") {
+    showScreen("notesUploadSection");
+  } else {
+    goToHome();
+  }
+}
+
+$("newTopicBtn").addEventListener("click", goToHome);
+$("brandLogo")?.addEventListener("click", goToHome);
+$("loadingBackBtn")?.addEventListener("click", returnFromLoading);
+$("loadingCancelBtn")?.addEventListener("click", returnFromLoading);
 
 // ── Clear Results Display ───────────────────────────────────────────────────
 function clearResultDisplay() {
@@ -886,7 +911,7 @@ function populateDashboardCourseFilter(data) {
   if (!filterSelect) return;
 
   const currentVal = filterSelect.value || "";
-  const existingValues = new Set(Array.from(filterSelect.options).map(o => o.value));
+  const existingValues = new Set(Array.from(filterSelect.options || []).map(o => o.value));
 
   // Initialize with curriculum courses if only default 'All Courses' exists
   if (existingValues.size <= 1 && Array.isArray(curriculum) && curriculum.length > 0) {
@@ -1628,37 +1653,196 @@ function attachHistoryToggleListeners() {
 
 function attachPracticeTopicListeners() {
   document.querySelectorAll(".practice-topic-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
+    if (btn.getAttribute("data-listener-attached") === "true") return;
+    btn.setAttribute("data-listener-attached", "true");
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (isGenerating || btn.disabled || btn.dataset.busy === "true") return;
+      btn.disabled = true;
+      btn.dataset.busy = "true";
+
       const courseCode = btn.getAttribute("data-course");
       const topicName = btn.getAttribute("data-topic");
-      selectAndPracticeTopic(courseCode, topicName);
+      const topicId = btn.getAttribute("data-topic-id") || null;
+
+      const p = selectAndPracticeTopic(courseCode, topicName, topicId);
+      btn._practicePromise = p;
+      if (p && typeof p.finally === "function") {
+        p.finally(() => {
+          btn.disabled = false;
+          btn.dataset.busy = "false";
+        });
+      } else {
+        btn.disabled = false;
+        btn.dataset.busy = "false";
+      }
     });
   });
 }
 
-function selectAndPracticeTopic(courseCode, topicName) {
+async function selectAndPracticeTopic(courseCode, topicName, topicId = null) {
   if (isGenerating) return;
-  goToHome();
 
+  const cleanCourse = (courseCode || "").trim();
+  const cleanTopic = (topicName || "").trim();
+
+  // 1. Validation: Ensure both course code and topic name are provided
+  if (!cleanCourse || !cleanTopic) {
+    showScreen("loadingSection");
+    const spinner = document.querySelector("#loadingSection .spinner");
+    if (spinner) spinner.style.display = "none";
+    if ($("loadingTopicLabel")) {
+      $("loadingTopicLabel").textContent = `${cleanCourse || "Course unavailable"} • ${cleanTopic || "Topic unavailable"}`;
+    }
+    if ($("loadingErrorMsg")) {
+      $("loadingErrorMsg").textContent = "Please choose a valid course and topic to practice.";
+    }
+    if ($("loadingErrorBox")) {
+      $("loadingErrorBox").classList.remove("hidden");
+    }
+    const retryBtn = $("loadingRetryBtn");
+    if (retryBtn) {
+      retryBtn.onclick = () => returnFromLoading();
+    }
+    return;
+  }
+
+  // 2. Ensure curriculum is loaded
+  if (!Array.isArray(curriculum) || curriculum.length === 0) {
+    try {
+      await loadCourses();
+    } catch (e) {
+      console.warn("Failed to load curriculum courses:", e);
+    }
+  }
+
+  // 3. Resolve course and topic in curriculum (case, whitespace, and punctuation resilient)
+  const courseObj = (curriculum || []).find(
+    c => (c.code || "").trim().toLowerCase() === cleanCourse.toLowerCase()
+  );
+  let resolvedTopic = null;
+  if (courseObj && Array.isArray(courseObj.topics)) {
+    // 3a. Lookup by explicit topicId
+    if (topicId) {
+      resolvedTopic = courseObj.topics.find(t => t.id === topicId);
+    }
+    // 3b. Lookup by exact topic name (case-insensitive)
+    if (!resolvedTopic) {
+      resolvedTopic = courseObj.topics.find(
+        t => (t.name || "").trim().toLowerCase() === cleanTopic.toLowerCase()
+      );
+    }
+    // 3c. Lookup ignoring hyphens, en-dashes, em-dashes, and punctuation
+    if (!resolvedTopic) {
+      const cleanAlnum = cleanTopic.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (cleanAlnum) {
+        resolvedTopic = courseObj.topics.find(
+          t => (t.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") === cleanAlnum
+        );
+      }
+    }
+    // 3d. Lookup by raw_name alias
+    if (!resolvedTopic) {
+      resolvedTopic = courseObj.topics.find(
+        t => (t.raw_name || "").trim().toLowerCase() === cleanTopic.toLowerCase()
+      );
+    }
+    // 3e. Lookup by normalized raw_name
+    if (!resolvedTopic) {
+      const cleanAlnum = cleanTopic.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (cleanAlnum) {
+        resolvedTopic = courseObj.topics.find(
+          t => (t.raw_name || "").toLowerCase().replace(/[^a-z0-9]/g, "") === cleanAlnum
+        );
+      }
+    }
+    // 3f. Lookup by substring containment in name or raw_name
+    if (!resolvedTopic) {
+      const cleanLower = cleanTopic.toLowerCase();
+      resolvedTopic = courseObj.topics.find(t => {
+        const tLower = (t.name || "").toLowerCase();
+        const rLower = (t.raw_name || "").toLowerCase();
+        return (tLower && (cleanLower.includes(tLower) || tLower.includes(cleanLower))) ||
+               (rLower && (cleanLower.includes(rLower) || rLower.includes(cleanLower)));
+      });
+    }
+    // 3g. Word overlap matching for composite or historical titles (e.g. "History and Applications of Deep Learning")
+    if (!resolvedTopic) {
+      const stopWords = new Set(["a", "an", "the", "and", "or", "of", "in", "to", "with", "for", "is", "what", "by", "from", "through"]);
+      const targetWords = cleanTopic.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 1 && !stopWords.has(w));
+      if (targetWords.length > 0) {
+        let bestScore = 0;
+        let bestCandidate = null;
+        for (const t of courseObj.topics) {
+          const tText = `${t.name || ""} ${t.raw_name || ""} ${t.parent_topic || ""}`.toLowerCase();
+          const tWords = new Set(tText.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 1 && !stopWords.has(w)));
+          let matches = 0;
+          for (const tw of targetWords) {
+            if (tWords.has(tw)) matches++;
+          }
+          const score = matches / targetWords.length;
+          if (score > bestScore && score >= 0.4) {
+            bestScore = score;
+            bestCandidate = t;
+          }
+        }
+        if (bestCandidate) {
+          resolvedTopic = bestCandidate;
+        }
+      }
+    }
+    // 3h. Lookup by parent_topic or source_topic_name
+    if (!resolvedTopic) {
+      resolvedTopic = courseObj.topics.find(
+        t => (t.parent_topic || t.parent_section || t.source_topic_name || "").trim().toLowerCase() === cleanTopic.toLowerCase()
+      );
+    }
+  }
+
+  const finalCourseCode = courseObj ? courseObj.code : cleanCourse;
+  const finalTopicName = resolvedTopic ? resolvedTopic.name : cleanTopic;
+  const finalTopicId = (resolvedTopic && resolvedTopic.id) ? resolvedTopic.id : (topicId || "");
+
+  // 4. Preselect in setup form (without navigating there) so underlying form state stays synced
   const courseSelect = $("course");
   const topicSelect = $("topic");
-
-  if (courseSelect && courseCode) {
-    courseSelect.value = courseCode;
-    courseSelect.dispatchEvent(new Event("change"));
-
-    setTimeout(() => {
-      if (topicSelect && topicName) {
-        topicSelect.value = topicName;
-        topicSelect.dispatchEvent(new Event("change"));
-      }
-      const genBtn = $("generateBtn");
-      if (genBtn) {
-        genBtn.scrollIntoView({ behavior: "smooth", block: "center" });
-        genBtn.focus();
-      }
-    }, 100);
+  if (courseSelect && courseObj) {
+    courseSelect.value = courseObj.code;
+    if (typeof Event !== "undefined") {
+      courseSelect.dispatchEvent(new Event("change"));
+    }
+    if (topicSelect && resolvedTopic) {
+      topicSelect.value = resolvedTopic.name;
+    }
   }
+
+  // 5. If topic cannot be resolved from the known curriculum, report actionable error without substituting unrelated topic
+  if (!courseObj || !resolvedTopic) {
+    showScreen("loadingSection");
+    const spinner = document.querySelector("#loadingSection .spinner");
+    if (spinner) spinner.style.display = "none";
+    if ($("loadingTopicLabel")) {
+      $("loadingTopicLabel").textContent = `${finalCourseCode} • ${finalTopicName}`;
+    }
+    if ($("loadingErrorMsg")) {
+      $("loadingErrorMsg").textContent = `Topic "${finalTopicName}" could not be resolved in curriculum course "${courseObj ? courseObj.name : finalCourseCode}". Please choose another topic.`;
+    }
+    if ($("loadingErrorBox")) {
+      $("loadingErrorBox").classList.remove("hidden");
+    }
+    const retryBtn = $("loadingRetryBtn");
+    if (retryBtn) {
+      retryBtn.onclick = () => selectAndPracticeTopic(courseCode, topicName, topicId);
+    }
+    return;
+  }
+
+  // 6. Seamlessly launch quiz generation directly — NO home page detour!
+  activeNotesSessionId = null;
+  await startQuizGeneration(finalCourseCode, finalTopicName, false, finalTopicId);
 }
 
 // ── Dashboard Navigation & Button Listeners ──────────────────────────────────
@@ -2114,7 +2298,64 @@ async function initApp() {
   await ensureAuthSession();
   await loadCourses();
   initNotesUploaderListeners();
-  restoreSessionState();
+  const restored = restoreSessionState();
+
+  // Initialize base history state if not already present
+  if (typeof window !== "undefined" && window.history && !window.history.state) {
+    try {
+      window.history.replaceState({ screen: restored ? "quizSection" : "setup" }, "");
+    } catch (e) {
+      // Ignore if sandbox restricts replaceState
+    }
+  }
+
+  // If no active quiz was restored, check URL parameters
+  if (!restored && typeof window !== "undefined" && window.location && window.location.search) {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlCourse = params.get("course");
+      const urlTopic = params.get("topic");
+      const urlAction = params.get("action");
+
+      if (urlCourse && urlTopic) {
+        if (urlAction === "practice") {
+          selectAndPracticeTopic(urlCourse, urlTopic);
+        } else {
+          const courseSelect = $("course");
+          const topicSelect = $("topic");
+          if (courseSelect && (curriculum || []).some(c => (c.code || "").toLowerCase() === urlCourse.trim().toLowerCase())) {
+            courseSelect.value = urlCourse;
+            if (typeof Event !== "undefined") {
+              courseSelect.dispatchEvent(new Event("change"));
+            }
+            if (topicSelect) {
+              topicSelect.value = urlTopic;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to parse navigation parameters:", e);
+    }
+  }
+}
+
+// ── Browser Popstate Navigation ─────────────────────────────────────────────
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("popstate", (e) => {
+    const targetScreen = (e.state && e.state.screen) || lastActiveScreen || "setup";
+    if (isGenerating && targetScreen !== "loadingSection") {
+      if (activeAbortController) {
+        activeAbortController.abort();
+        activeAbortController = null;
+      }
+      isGenerating = false;
+    }
+    showScreen(targetScreen, false);
+    if (targetScreen === "dashboardSection") {
+      loadDashboard();
+    }
+  });
 }
 
 initApp();
