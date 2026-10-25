@@ -464,7 +464,7 @@ def validate_quiz_data(
     if len(unique_questions) < min_questions:
         raise ValueError(f"Only {len(unique_questions)} unique questions passed strict relevance, duplicate, and option validation.")
 
-    # Apply difficulty distribution to questions missing difficulty metadata
+    # Apply and calibrate difficulty distribution
     if not difficulty_dist:
         difficulty_dist = {"Easy": 4, "Medium": 4, "Hard": 2}
     expected_difficulties: List[str] = []
@@ -472,11 +472,20 @@ def validate_quiz_data(
         expected_difficulties.extend([diff] * count)
 
     for index, q in enumerate(unique_questions):
-        if not q.get("difficulty"):
+        raw_diff = str(q.get("difficulty") or "").strip().capitalize()
+        if raw_diff not in {"Easy", "Medium", "Hard"}:
             if index < len(expected_difficulties):
-                q["difficulty"] = expected_difficulties[index]
+                raw_diff = expected_difficulties[index]
             else:
-                q["difficulty"] = "Medium"
+                raw_diff = "Medium"
+        q["difficulty"] = raw_diff
+
+    # If all questions have collapsed to a single difficulty but a multi-level distribution was requested,
+    # align them to the requested distribution to prevent difficulty drift
+    present_diffs = {q["difficulty"] for q in unique_questions}
+    if len(present_diffs) == 1 and len(expected_difficulties) >= len(unique_questions) and len(difficulty_dist) > 1:
+        for index, q in enumerate(unique_questions):
+            q["difficulty"] = expected_difficulties[index]
 
     return {
         "subject": course_name,
