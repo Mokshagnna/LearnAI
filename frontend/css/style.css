@@ -2763,3 +2763,215 @@ button.btn-notes-cta:hover:not(:disabled),
     z-index: 2;
   }
 }
+
+/* ==========================================================================
+   Progressive Flux Loader Component (from 21st.dev)
+   Faithful reproduction of React/Framer Motion component in vanilla CSS
+   ========================================================================== */
+
+:root {
+  --flux-from: #1d6ffb;
+  --flux-to: #74e1ff;
+  --flux-mid: color-mix(in oklab, var(--flux-from, #1d6ffb), var(--flux-to, #74e1ff));
+  --flux-gradient: linear-gradient(
+    90deg,
+    var(--flux-from, #1d6ffb) 0%,
+    color-mix(in oklab, var(--flux-from, #1d6ffb), var(--flux-to, #74e1ff)) 35%,
+    var(--flux-to, #74e1ff) 55%,
+    color-mix(in oklab, var(--flux-from, #1d6ffb), var(--flux-to, #74e1ff)) 78%,
+    var(--flux-from, #1d6ffb) 100%
+  );
+  --flux-bar-shadow: 0 0 18px color-mix(in oklab, var(--flux-from, #1d6ffb) 55%, transparent),
+    0 0 32px color-mix(in oklab, var(--flux-to, #74e1ff) 40%, transparent),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -2px 3px rgba(0, 40, 120, 0.35);
+  --flux-sheen-gradient: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 100%
+  );
+}
+
+.progressive-flux-loader {
+  width: 100%;
+}
+
+.flux-label-wrapper {
+  position: relative;
+  height: 4rem; /* h-16 */
+  width: 100%;
+  user-select: none;
+  perspective: 1000px;
+}
+
+.flux-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 1.875rem; /* text-3xl */
+  line-height: 2.25rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: #6b7280; /* text-muted-foreground */
+  transform-style: preserve-3d;
+}
+
+@media (min-width: 640px) {
+  .flux-label {
+    font-size: 2.25rem; /* sm:text-4xl */
+    line-height: 2.5rem;
+  }
+}
+
+/* 3D Entry Animation matching Framer Motion animate={{ opacity: [0, 1, 1, 1], z: [-380, 60, -8, 0], scale: [0.65, 1.08, 0.985, 1], filter: ["blur(14px)", "blur(0px)", "blur(0px)", "blur(0px)"] }} */
+@keyframes fluxLabelEnter {
+  0% {
+    opacity: 0;
+    transform: translateZ(-380px) scale(0.65);
+    filter: blur(14px);
+  }
+  40% {
+    opacity: 1;
+    transform: translateZ(60px) scale(1.08);
+    filter: blur(0px);
+  }
+  75% {
+    opacity: 1;
+    transform: translateZ(-8px) scale(0.985);
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateZ(0) scale(1);
+    filter: blur(0px);
+  }
+}
+
+/* 3D Exit Animation matching Framer Motion exit={{ opacity: 0, z: 220, scale: 1.35, filter: "blur(10px)", transition: { duration: 0.45, ease: [0.7, 0, 0.84, 0] } }} */
+@keyframes fluxLabelExit {
+  0% {
+    opacity: 1;
+    transform: translateZ(0) scale(1);
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateZ(220px) scale(1.35);
+    filter: blur(10px);
+  }
+}
+
+/* Letter Stagger Animation matching Framer Motion LETTER_TRANSITION: duration 0.45s ease [0.22, 1, 0.36, 1] */
+@keyframes fluxLetterIn {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0px);
+  }
+}
+
+.flux-label-enter {
+  animation: fluxLabelEnter 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.flux-label-exit {
+  animation: fluxLabelExit 0.45s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+.flux-letter {
+  display: inline-block;
+  opacity: 0;
+  animation: fluxLetterIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(0.18s + var(--char-index, 0) * 0.035s);
+}
+
+.flux-letter-space {
+  display: inline-block;
+  width: 0.35em;
+}
+
+/* Track matching Framer Motion component: h-5 w-full overflow-hidden rounded-full bg-muted shadow-[inset_0_2px_3px_rgba(0,0,0,0.09),inset_0_-1px_2px_rgba(255,255,255,0.7)] */
+.flux-track {
+  position: relative;
+  height: 1.25rem; /* h-5 */
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background-color: #f3f4f6; /* bg-muted */
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.09), inset 0 -1px 2px rgba(255, 255, 255, 0.7);
+}
+
+/* Dark mode shadow support as in React component */
+@media (prefers-color-scheme: dark) {
+  .flux-track {
+    box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.45), inset 0 -1px 2px rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* Fill matching Framer Motion motion.div: gradient background, BAR_SHADOW, transition 0.55s ease [0.22, 1, 0.36, 1] */
+.flux-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--flux-gradient);
+  box-shadow: var(--flux-bar-shadow);
+  transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: width;
+}
+
+/* Moving Sheen matching Framer Motion motion.span: SHEEN_GRADIENT, mixBlendMode screen, animate x: [-110%, 210%] duration 1.6s linear infinite */
+.flux-sheen {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 50%;
+  border-radius: 9999px;
+  background: var(--flux-sheen-gradient);
+  mix-blend-mode: screen;
+  animation: fluxSheenSweep 1.6s linear infinite;
+  will-change: transform;
+}
+
+@keyframes fluxSheenSweep {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(210%);
+  }
+}
+
+/* Reduced Motion Override (WCAG 2.1 compliance matching useReducedMotion()) */
+@media (prefers-reduced-motion: reduce) {
+  .flux-label-wrapper {
+    perspective: none !important;
+  }
+  .flux-label {
+    transform-style: flat !important;
+  }
+  .flux-label-enter,
+  .flux-label-exit,
+  .flux-letter {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+  .flux-fill {
+    transition: none !important;
+  }
+  .flux-sheen {
+    display: none !important;
+  }
+}

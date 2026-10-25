@@ -1949,6 +1949,15 @@ function handleNotesFiles(files) {
 
 function removeNotesFile(index) {
   cleanupImagePreview();
+  if (isUploadingNotes && currentUploadXhr) {
+    uploadRequestSeq++;
+    try { currentUploadXhr.abort(); } catch (e) {}
+    currentUploadXhr = null;
+    isUploadingNotes = false;
+    if (fluxLoaderInstance) fluxLoaderInstance.reset();
+    if ($("notesProgressWrap")) $("notesProgressWrap").classList.add("hidden");
+    cleanupUploadState();
+  }
   const removedFile = selectedNotesFiles[index];
   selectedNotesFiles.splice(index, 1);
   if ($("notesFileInput")) {
@@ -2084,7 +2093,294 @@ function renderNotesFilesUI() {
   }
 }
 
-async function handleNotesUpload() {
+/* ── Progressive Flux Loader (from 21st.dev) ──────────────────────────────────
+   Reproduces the exact ProgressiveFluxLoader component from 21st.dev in vanilla JS.
+   - Phases: Uploading (0), Processing (40), Finalizing (75), Complete (100)
+   - 3D perspective transitions, letter-by-letter staggered entrance
+   - Color-mix gradients, outer glow, inset depth shadows, and moving sheen
+   - Controlled mode (0..100) & Uncontrolled mode (indeterminate looping sweep)
+   - Reduced-motion support (WCAG compliant)
+   - Real completion lifecycle (onComplete)
+───────────────────────────────────────────────────────────────────────────── */
+
+const FLUX_DEFAULT_PHASES = [
+  { at: 0, label: "Uploading" },
+  { at: 40, label: "Processing" },
+  { at: 75, label: "Finalizing" },
+  { at: 100, label: "Complete" },
+];
+
+class ProgressiveFluxLoader {
+  constructor(options = {}) {
+    this.phases = options.phases || FLUX_DEFAULT_PHASES;
+    this.duration = options.duration || 12;
+    this.loop = options.loop !== false;
+    this.showLabel = options.showLabel !== false;
+    this.onComplete = options.onComplete || null;
+
+    this.sortedPhases = [...this.phases].sort((a, b) => a.at - b.at);
+    this.currentValue = 0;
+    this.currentLabel = "";
+    this.isControlled = true;
+    this.completed = false;
+    this.isTransitioningLabel = false;
+    this.pendingLabel = null;
+
+    this.rafId = null;
+    this.timerId = null;
+    this.startTime = null;
+
+    this.labelEl = document.getElementById("fluxLabel");
+    this.trackEl = document.getElementById("fluxTrack");
+    this.fillEl = document.getElementById("notesProgressBar");
+
+  }
+
+  get isReducedMotion() {
+    return typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
+  }
+
+  pickLabel(val) {
+    let active = this.sortedPhases[0]?.label ?? "";
+    for (const phase of this.sortedPhases) {
+      if (val >= phase.at) active = phase.label;
+    }
+    return active;
+  }
+
+  updateLabel(newLabel) {
+    if (!this.showLabel || !this.labelEl) return;
+    if (newLabel === this.currentLabel && this.labelEl.innerHTML !== "") return;
+
+    if (this.isTransitioningLabel) {
+      this.pendingLabel = newLabel;
+      return;
+    }
+
+    if (this.isReducedMotion || !this.currentLabel) {
+      this.renderLabelDOM(newLabel);
+      this.currentLabel = newLabel;
+      return;
+    }
+
+    this.isTransitioningLabel = true;
+    this.labelEl.classList.remove("flux-label-enter");
+    this.labelEl.classList.add("flux-label-exit");
+
+    setTimeout(() => {
+      this.renderLabelDOM(newLabel);
+      this.currentLabel = newLabel;
+      this.labelEl.classList.remove("flux-label-exit");
+      this.labelEl.classList.add("flux-label-enter");
+      this.isTransitioningLabel = false;
+
+      if (this.pendingLabel && this.pendingLabel !== newLabel) {
+        const next = this.pendingLabel;
+        this.pendingLabel = null;
+        this.updateLabel(next);
+      }
+    }, 450);
+  }
+
+  renderLabelDOM(label) {
+    if (!this.labelEl) return;
+    if (this.isReducedMotion) {
+      this.labelEl.textContent = label;
+      return;
+    }
+
+    const chars = label.split("");
+    let html = '<span class="inline-flex">';
+    chars.forEach((ch, idx) => {
+      if (ch === " ") {
+        html += '<span class="flux-letter-space">&nbsp;</span>';
+      } else {
+        html += `<span class="flux-letter" style="--char-index: ${idx};">${escapeHtml(ch)}</span>`;
+      }
+    });
+    html += '</span>';
+    this.labelEl.innerHTML = html;
+  }
+
+  setValue(val, labelOverride) {
+    this.isControlled = true;
+    this.cancelSweep();
+
+    const raw = typeof val === "number" ? val : 0;
+    const current = Math.min(100, Math.max(0, raw));
+    this.currentValue = current;
+    const rounded = Math.round(current);
+
+    const label = labelOverride || this.pickLabel(current);
+
+    if (this.fillEl) {
+      this.fillEl.style.width = `${current}%`;
+    }
+    if (this.trackEl) {
+      this.trackEl.setAttribute("aria-valuenow", rounded);
+      this.trackEl.setAttribute("aria-valuetext", label ? `${rounded}% – ${label}` : `${rounded}%`);
+    }
+
+    this.updateLabel(label);
+
+    if (current >= 100 && !this.completed) {
+      this.completed = true;
+      if (this.onComplete) this.onComplete();
+    } else if (current < 100) {
+      this.completed = false;
+    }
+  }
+
+  startUncontrolled(customLabel) {
+    this.isControlled = false;
+    this.completed = false;
+    this.cancelSweep();
+
+    if (customLabel) {
+      this.updateLabel(customLabel);
+    }
+
+    const totalMs = Math.max(500, this.duration * 1000);
+    this.startTime = null;
+
+    const tick = (ts) => {
+      if (this.startTime === null) this.startTime = ts;
+      const pct = Math.min(100, ((ts - this.startTime) / totalMs) * 100);
+      this.currentValue = pct;
+
+      if (this.fillEl) {
+        this.fillEl.style.width = `${pct}%`;
+      }
+      const label = customLabel || this.pickLabel(pct);
+      if (this.trackEl) {
+        const rounded = Math.round(pct);
+        this.trackEl.setAttribute("aria-valuenow", rounded);
+        this.trackEl.setAttribute("aria-valuetext", label ? `${rounded}% – ${label}` : `${rounded}%`);
+      }
+      this.updateLabel(label);
+
+      if (pct >= 100) {
+        if (!this.completed) {
+          this.completed = true;
+          if (this.onComplete) this.onComplete();
+        }
+        if (this.loop) {
+          this.startTime = null;
+          this.completed = false;
+          this.timerId = setTimeout(() => {
+            if (this.fillEl) this.fillEl.style.width = "0%";
+            this.rafId = requestAnimationFrame(tick);
+          }, 700);
+        }
+        return;
+      }
+      this.rafId = requestAnimationFrame(tick);
+    };
+
+    this.rafId = requestAnimationFrame(tick);
+  }
+
+  cancelSweep() {
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    if (this.timerId) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+    this.startTime = null;
+  }
+
+  complete(callback) {
+    this.cancelSweep();
+    this.isControlled = true;
+    this.currentValue = 100;
+    if (this.fillEl) {
+      this.fillEl.style.width = "100%";
+    }
+    if (this.trackEl) {
+      this.trackEl.setAttribute("aria-valuenow", 100);
+      this.trackEl.setAttribute("aria-valuetext", "100% – Complete");
+    }
+    this.updateLabel("Complete");
+    this.completed = true;
+    if (callback) {
+      callback();
+    } else if (this.onComplete) {
+      this.onComplete();
+    }
+  }
+
+  reset() {
+    this.cancelSweep();
+    this.isControlled = true;
+    this.currentValue = 0;
+    this.completed = false;
+    this.isTransitioningLabel = false;
+    this.pendingLabel = null;
+    this.currentLabel = "";
+    if (this.fillEl) {
+      this.fillEl.style.width = "0%";
+    }
+    if (this.trackEl) {
+      this.trackEl.setAttribute("aria-valuenow", 0);
+      this.trackEl.setAttribute("aria-valuetext", "0% – Uploading");
+    }
+    if (this.labelEl) {
+      this.labelEl.innerHTML = "";
+      this.labelEl.classList.remove("flux-label-enter", "flux-label-exit");
+    }
+  }
+}
+
+let fluxLoaderInstance = null;
+let currentUploadXhr = null;
+let uploadRequestSeq = 0;
+
+function getFluxLoader() {
+  if (!fluxLoaderInstance) {
+    fluxLoaderInstance = new ProgressiveFluxLoader({
+      phases: FLUX_DEFAULT_PHASES,
+      duration: 12,
+      loop: true
+    });
+  }
+  return fluxLoaderInstance;
+}
+
+function updateProgressiveFluxLoader(progress) {
+  const loader = getFluxLoader();
+  loader.setValue(progress, "Uploading");
+}
+
+function setUploadIndeterminateState(label = "Uploading") {
+  const loader = getFluxLoader();
+  loader.startUncontrolled(label);
+}
+
+function cleanupUploadState() {
+  isUploadingNotes = false;
+  const spinner = $("notesSpinner");
+  const btnText = $("notesUploadBtnText");
+  const uploadBtn = $("notesUploadBtn");
+
+  if (spinner) spinner.classList.add("hidden");
+  if (btnText) btnText.textContent = "Upload & Find Topics";
+  if (uploadBtn) {
+    if (selectedNotesFiles.length > 0) {
+      uploadBtn.disabled = false;
+      uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-700 text-white hover:bg-gray-800 active:scale-95";
+    } else {
+      uploadBtn.disabled = true;
+      uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed";
+    }
+  }
+}
+
+function handleNotesUpload() {
   if (selectedNotesFiles.length === 0 || isUploadingNotes) return;
 
   isUploadingNotes = true;
@@ -2092,85 +2388,134 @@ async function handleNotesUpload() {
   const spinner = $("notesSpinner");
   const btnText = $("notesUploadBtnText");
   const progressWrap = $("notesProgressWrap");
-  const progressBar = $("notesProgressBar");
 
   if (uploadBtn) {
     uploadBtn.disabled = true;
     uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed";
   }
   if (spinner) spinner.classList.remove("hidden");
-  if (btnText) btnText.textContent = "Processing...";
+  if (btnText) btnText.textContent = "Uploading...";
   if (progressWrap) progressWrap.classList.remove("hidden");
-  if (progressBar) {
-    progressBar.style.width = "50%";
-    progressBar.setAttribute("aria-valuenow", "50");
-  }
 
-  try {
-    const formData = new FormData();
-    selectedNotesFiles.forEach(f => {
-      formData.append("files", f);
-    });
+  const loader = getFluxLoader();
+  loader.reset();
+  loader.setValue(0, "Uploading");
 
-    await ensureAuthSession();
-    const headers = {};
+  const formData = new FormData();
+  selectedNotesFiles.forEach(f => {
+    formData.append("files", f);
+  });
+
+  const thisRequestId = ++uploadRequestSeq;
+
+  ensureAuthSession().then(() => {
+    if (thisRequestId !== uploadRequestSeq) return;
+    const xhr = new XMLHttpRequest();
+    currentUploadXhr = xhr;
+
+    xhr.open("POST", "/api/notes/extract-topics", true);
     if (authToken) {
-      headers["Authorization"] = `Bearer ${authToken}`;
+      xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
     }
 
-    const res = await fetch("/api/notes/extract-topics", {
-      method: "POST",
-      headers,
-      body: formData
-    });
+    // 1. Upload byte-transfer progress
+    xhr.upload.onprogress = (event) => {
+      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+      if (!event.lengthComputable || event.total <= 0) {
+        setUploadIndeterminateState("Uploading");
+        return;
+      }
+      const progress = Math.max(0, Math.min(100, (event.loaded / event.total) * 100));
+      updateProgressiveFluxLoader(progress);
+    };
 
-    const data = await res.json();
-    if (progressBar) {
-      progressBar.style.width = "100%";
-      progressBar.setAttribute("aria-valuenow", "100");
-    }
+    // 2. Upload byte transfer finished, server processing begins
+    xhr.upload.onload = () => {
+      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+      if (btnText) btnText.textContent = "Processing...";
+      // Start indeterminate sweep for server processing phase awaiting FastAPI response
+      setUploadIndeterminateState("Processing");
+    };
 
-    if (!res.ok) {
-      const errMsg = (data && data.detail)
-        ? (typeof data.detail === "object" ? JSON.stringify(data.detail) : data.detail)
-        : "Unable to process files. Please try again.";
-      throw new Error(errMsg);
-    }
+    // 3. Response handling
+    xhr.onload = () => {
+      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+      currentUploadXhr = null;
+      let data = null;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch (e) {
+        data = null;
+      }
 
-    lastExtractionResult = data;
-    selectedTopicIndex = 0;
+      if (xhr.status >= 200 && xhr.status < 300 && data) {
+        if (!data.success || data.relevant === false || !data.matched_topics || data.matched_topics.length === 0) {
+          lastExtractionResult = data;
+          selectedTopicIndex = 0;
+          showNotesToast(data.message || "No curriculum topics matched your notes.", "error");
+          renderMatchedTopicsUI(data);
+          setTimeout(() => {
+            if (progressWrap) progressWrap.classList.add("hidden");
+            loader.reset();
+          }, 500);
+        } else {
+          // Complete only after successful HTTP response and valid curriculum match
+          loader.complete(() => {
+            lastExtractionResult = data;
+            selectedTopicIndex = 0;
 
-    if (data.matched_topics && data.matched_topics.length > 0) {
-      showNotesToast(data.message || `Found ${data.matched_topics.length} matching curriculum topic(s).`, "success");
-    } else if (!data.relevant) {
-      showNotesToast(data.message || "No curriculum topics matched your notes.", "error");
-    }
+            showNotesToast(data.message || `Found ${data.matched_topics.length} matching curriculum topic(s).`, "success");
+            renderMatchedTopicsUI(data);
 
-    renderMatchedTopicsUI(data);
-
-  } catch (err) {
-    showNotesToast(err.message || "Unable to process files. Please try again.", "error");
-  } finally {
-    isUploadingNotes = false;
-    if (spinner) spinner.classList.add("hidden");
-    if (btnText) btnText.textContent = "Upload & Find Topics";
-    if (uploadBtn) {
-      if (selectedNotesFiles.length > 0) {
-        uploadBtn.disabled = false;
-        uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-700 text-white hover:bg-gray-800 active:scale-95";
+            setTimeout(() => {
+              if (progressWrap) progressWrap.classList.add("hidden");
+              loader.reset();
+            }, 800);
+          });
+        }
       } else {
-        uploadBtn.disabled = true;
-        uploadBtn.className = "w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed";
+        const errMsg = (data && data.detail)
+          ? (typeof data.detail === "object" ? JSON.stringify(data.detail) : data.detail)
+          : (xhr.statusText ? `Upload failed (${xhr.status}): ${xhr.statusText}` : "Unable to process files. Please try again.");
+        showNotesToast(errMsg, "error");
+        setTimeout(() => {
+          if (progressWrap) progressWrap.classList.add("hidden");
+          loader.reset();
+        }, 500);
       }
-    }
-    setTimeout(() => {
-      if (progressWrap) progressWrap.classList.add("hidden");
-      if (progressBar) {
-        progressBar.style.width = "0%";
-        progressBar.setAttribute("aria-valuenow", "0");
-      }
-    }, 400);
-  }
+      cleanupUploadState();
+    };
+
+    // 4. Network error handling
+    xhr.onerror = () => {
+      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+      currentUploadXhr = null;
+      showNotesToast("Network error during upload. Please check your connection and try again.", "error");
+      setTimeout(() => {
+        if (progressWrap) progressWrap.classList.add("hidden");
+        loader.reset();
+      }, 500);
+      cleanupUploadState();
+    };
+
+    // 5. Timeout handling
+    xhr.ontimeout = () => {
+      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+      currentUploadXhr = null;
+      showNotesToast("Upload request timed out. Please try uploading a smaller file.", "error");
+      setTimeout(() => {
+        if (progressWrap) progressWrap.classList.add("hidden");
+        loader.reset();
+      }, 500);
+      cleanupUploadState();
+    };
+
+    xhr.timeout = 60000;
+    xhr.send(formData);
+  }).catch(err => {
+    showNotesToast(err.message || "Authentication error before upload.", "error");
+    cleanupUploadState();
+  });
 }
 
 function renderMatchedTopicsUI(data) {
@@ -2325,6 +2670,15 @@ function initNotesUploaderListeners() {
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       cleanupImagePreview();
+      uploadRequestSeq++;
+      if (currentUploadXhr) {
+        try { currentUploadXhr.abort(); } catch (e) {}
+        currentUploadXhr = null;
+      }
+      isUploadingNotes = false;
+      if (fluxLoaderInstance) fluxLoaderInstance.reset();
+      if ($("notesProgressWrap")) $("notesProgressWrap").classList.add("hidden");
+      cleanupUploadState();
       selectedNotesFiles = [];
       lastExtractionResult = null;
       selectedTopicIndex = 0;
