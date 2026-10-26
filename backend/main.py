@@ -123,7 +123,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins if allowed_origins else ["*"],
     allow_credentials=False if is_wildcard else True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
     allow_headers=["*"],
 )
 # Database-backed quiz_sessions table is the sole authoritative session store (Stage C)

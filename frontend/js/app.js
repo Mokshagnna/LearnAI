@@ -1,5 +1,51 @@
 const $ = id => document.getElementById(id);
 
+// ── API Routing & Base URL Resolution ────────────────────────────────────────
+function getApiBaseUrl(loc = (typeof window !== "undefined" ? window.location : null), win = (typeof window !== "undefined" ? window : null)) {
+  if (win && win.LEARNAI_API_BASE_URL && typeof win.LEARNAI_API_BASE_URL === "string") {
+    return win.LEARNAI_API_BASE_URL.replace(/\/+$/, "");
+  }
+  if (win && win.localStorage) {
+    try {
+      const stored = win.localStorage.getItem("learnai_api_base_url");
+      if (stored && typeof stored === "string") {
+        return stored.replace(/\/+$/, "");
+      }
+    } catch (_) {}
+  }
+
+  if (loc) {
+    if (loc.protocol === "file:") {
+      return "http://127.0.0.1:8000";
+    }
+    const hostname = (loc.hostname || "").toLowerCase();
+    const port = String(loc.port || "");
+    const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname.endsWith(".local");
+
+    // When running on a separate local frontend development server (e.g. port 5500, 3000)
+    // that is distinct from the FastAPI server port (8000), route API requests to FastAPI at http://127.0.0.1:8000.
+    if (isLocalhost && port !== "8000" && port !== "") {
+      return "http://127.0.0.1:8000";
+    }
+  }
+
+  // In production (e.g. Render) or when served directly by FastAPI on port 8000,
+  // use same-origin relative paths (empty base prefix).
+  return "";
+}
+
+const API_BASE_URL = getApiBaseUrl();
+
+function apiUrl(endpoint, base = API_BASE_URL) {
+  if (!endpoint || typeof endpoint !== "string") return endpoint || "";
+  if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+    return endpoint;
+  }
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  return base ? `${base}${cleanEndpoint}` : cleanEndpoint;
+}
+
+
 // ── Application State ────────────────────────────────────────────────────────
 let curriculum = [];
 let currentQuiz = null;
@@ -51,7 +97,7 @@ async function ensureAuthSession(forceRefresh = false) {
         headers["Authorization"] = `Bearer ${authToken}`;
       }
       if (typeof fetch === "function") {
-        const res = await fetch("/api/auth/session", {
+        const res = await fetch(apiUrl("/api/auth/session"), {
           method: "POST",
           headers: headers
         });
@@ -95,18 +141,19 @@ function getAuthToken() {
 }
 
 async function authenticatedFetch(url, options = {}) {
+  const resolvedUrl = apiUrl(url);
   await ensureAuthSession();
   options.headers = options.headers || {};
   if (authToken && !isTokenExpired(authToken)) {
     options.headers["Authorization"] = `Bearer ${authToken}`;
   }
-  let res = await fetch(url, options);
+  let res = await fetch(resolvedUrl, options);
   if (res.status === 401) {
     console.warn("[AUTH] 401 Unauthorized received. Renewing session and retrying fetch once...");
     await ensureAuthSession(true);
     if (authToken) {
       options.headers["Authorization"] = `Bearer ${authToken}`;
-      res = await fetch(url, options);
+      res = await fetch(resolvedUrl, options);
     }
   }
   return res;
@@ -237,7 +284,7 @@ function restoreSessionState() {
 async function loadCourses() {
   const courseSelect = $("course");
   try {
-    const res = await fetch("/api/courses");
+    const res = await fetch(apiUrl("/api/courses"));
     if (!res.ok) {
       throw new Error(`Failed to fetch curriculum: HTTP ${res.status}`);
     }
@@ -2521,7 +2568,7 @@ async function sendNotesUploadXhr(formData, thisRequestId, isRetry) {
   const xhr = new XMLHttpRequest();
   currentUploadXhr = xhr;
 
-  xhr.open("POST", "/api/notes/extract-topics", true);
+  xhr.open("POST", apiUrl("/api/notes/extract-topics"), true);
   if (authToken && !isTokenExpired(authToken)) {
     xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
   }
@@ -3294,4 +3341,15 @@ if (typeof window !== "undefined" && window.addEventListener) {
   });
 }
 
-initApp();
+if (typeof window !== "undefined" && typeof document !== "undefined" && typeof require === "undefined") {
+  initApp();
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    getApiBaseUrl,
+    apiUrl,
+    isTokenExpired,
+    escapeHtml
+  };
+}
