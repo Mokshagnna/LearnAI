@@ -4,6 +4,7 @@ import uuid
 import logging
 import re
 import os
+import hashlib
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List, Tuple, Union
@@ -19,11 +20,6 @@ from services.db.base import (
     is_production_mode,
 )
 from services.db.sqlite_adapter import SQLiteAdapter
-from services.db.postgres_adapter import (
-    PostgresAdapter,
-    PostgresConnectionWrapper,
-    PostgresCursorWrapper,
-)
 from services.db.mysql_adapter import (
     MySQLAdapter,
     MySQLConnectionWrapper,
@@ -35,7 +31,6 @@ logger = logging.getLogger("learnai.database")
 
 _db_config = DatabaseConfig()
 _sqlite_adapter = SQLiteAdapter(_db_config)
-_postgres_adapter: Optional[PostgresAdapter] = None
 _mysql_adapter: Optional[MySQLAdapter] = None
 
 
@@ -53,11 +48,7 @@ def is_mysql_active() -> bool:
 
 
 def is_pg_conn(conn: Any) -> bool:
-    if isinstance(conn, PostgresConnectionWrapper):
-        return True
-    if hasattr(conn, "_is_mysql") or getattr(conn, "dialect", None) == "mysql" or isinstance(conn, MySQLConnectionWrapper):
-        return False
-    return hasattr(conn, "_pool")
+    return False
 
 
 def is_mysql_conn(conn: Any) -> bool:
@@ -138,14 +129,8 @@ def normalise_text(text: str) -> str:
 
 
 def reset_db_adapter() -> None:
-    """Reset cached PostgreSQL and MySQL adapters and pools for test isolation."""
-    global _postgres_adapter, _mysql_adapter
-    if _postgres_adapter is not None:
-        try:
-            PostgresAdapter.close_pool()
-        except Exception:
-            pass
-        _postgres_adapter = None
+    """Reset cached MySQL adapter and pool for test isolation."""
+    global _mysql_adapter
     if _mysql_adapter is not None:
         try:
             MySQLAdapter.close_pool()
@@ -167,7 +152,7 @@ def get_connection(db_path: Optional[Path] = None) -> Any:
         If DATABASE_URL or SUPABASE_DB_URL is PostgreSQL: uses PostgresAdapter with connection pool.
         Else: uses SQLiteAdapter with WAL mode and busy timeout.
     """
-    global _postgres_adapter, _mysql_adapter
+    global _mysql_adapter
 
     if is_production_mode():
         if db_path is not None:
@@ -209,9 +194,9 @@ def get_connection(db_path: Optional[Path] = None) -> Any:
         return _mysql_adapter.get_connection()
 
     if _db_config.is_postgres:
-        if _postgres_adapter is None:
-            _postgres_adapter = PostgresAdapter(_db_config)
-        return _postgres_adapter.get_connection()
+        raise DatabaseConnectionError(
+            "Configuration error: PostgreSQL adapter has been retired. Please use MySQL or SQLite."
+        )
 
     return _sqlite_adapter.get_connection()
 
@@ -238,7 +223,7 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     Preserves all existing data in students, quiz_attempts, and question_metadata.
     Adds quiz_sessions, student_answers, and topic_mastery.
     """
-    global _postgres_adapter, _mysql_adapter
+    global _mysql_adapter
 
     if is_production_mode():
         if db_path is not None:
@@ -289,15 +274,9 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
             conn.close()
 
     if db_path is None and _db_config.is_postgres:
-        if _postgres_adapter is None:
-            _postgres_adapter = PostgresAdapter(_db_config)
-        conn = _postgres_adapter.get_connection()
-        try:
-            applied = apply_migrations(conn, is_postgres=True, dialect="postgres")
-            logger.info("Supabase PostgreSQL initialized successfully (applied migrations: %s)", applied)
-            return {"status": "ok", "backend": "postgres", "applied_migrations": applied}
-        finally:
-            conn.close()
+        raise DatabaseConnectionError(
+            "Configuration error: PostgreSQL adapter has been retired. Please use MySQL or SQLite."
+        )
 
     conn = get_connection(db_path)
     cursor = conn.cursor()
@@ -472,6 +451,64 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_topic_mastery_lookup
         ON topic_mastery (student_id, course_code, topic_name)
+    """)
+
+    # 7. Study Materials & Topics Tables (Persistent Study Materials)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS study_materials (
+            id TEXT PRIMARY KEY,
+            student_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            file_size INTEGER NOT NULL DEFAULT 0,
+            extracted_text_preview TEXT,
+            extracted_text TEXT,
+            content_hash TEXT,
+            notes_session_id TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (student_id) REFERENCES students (id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS study_material_topics (
+            id TEXT PRIMARY KEY,
+            material_id TEXT NOT NULL,
+            student_id TEXT NOT NULL,
+            course_code TEXT NOT NULL,
+            course_name TEXT NOT NULL,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            matched_concepts TEXT DEFAULT '[]',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            UNIQUE(material_id, course_code, topic_name),
+            FOREIGN KEY (material_id) REFERENCES study_materials (id) ON DELETE CASCADE,
+            FOREIGN KEY (student_id) REFERENCES students (id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_study_materials_student_status
+        ON study_materials (student_id, status)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_study_materials_student_hash
+        ON study_materials (student_id, content_hash)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_study_material_topics_material
+        ON study_material_topics (material_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_study_material_topics_student_topic
+        ON study_material_topics (student_id, course_code, topic_name)
     """)
 
     conn.commit()
@@ -1084,8 +1121,7 @@ def submit_quiz_atomic(
             conn=conn
         )
 
-        if close_conn:
-            conn.commit()
+        conn.commit()
 
         result["student_id"] = eff_student_id
         logger.info(
@@ -1874,7 +1910,7 @@ def get_student_dashboard_data(
         # 1. Overview Metrics (Aggregated strictly from completed quiz_attempts)
         if clean_course:
             cursor.execute("""
-                SELECT 
+                SELECT
                     COUNT(*) as completed_quizzes,
                     COALESCE(SUM(total), 0) as total_questions,
                     COALESCE(SUM(score), 0) as total_correct,
@@ -1885,7 +1921,7 @@ def get_student_dashboard_data(
             """, (student_id, clean_course, clean_course))
         else:
             cursor.execute("""
-                SELECT 
+                SELECT
                     COUNT(*) as completed_quizzes,
                     COALESCE(SUM(total), 0) as total_questions,
                     COALESCE(SUM(score), 0) as total_correct,
@@ -2335,3 +2371,419 @@ def get_student_dashboard_data(
     finally:
         if close_conn:
             conn.close()
+
+# ── Study Materials & Topic Persistence ──────────────────────────────────────
+
+def create_or_update_study_material(
+    student_id: str,
+    filename: str,
+    file_type: str,
+    file_size: int,
+    extracted_text: str,
+    matched_topics: List[Dict[str, Any]],
+    notes_session_id: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None
+) -> Dict[str, Any]:
+    """
+    Persistently stores or updates a study material record and its extracted topics.
+    Idempotent: deduplicates retried uploads for the same student with matching content hash.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    get_or_create_student(student_id, conn=conn)
+
+    clean_filename = (filename or "Untitled Document").strip()
+    clean_type = (file_type or "Notes").strip().upper()
+    now = get_utc_now_iso()
+
+    text_snippet = (extracted_text or "").strip()[:500]
+    hash_source = f"{clean_filename.lower()}:{file_size}:{text_snippet}"
+    content_hash = hashlib.sha256(hash_source.encode("utf-8")).hexdigest()
+
+    cursor = conn.cursor()
+    # Check if active material with identical content hash already exists for this student
+    cursor.execute("""
+        SELECT id, notes_session_id FROM study_materials
+        WHERE student_id = ? AND content_hash = ? AND status = 'active'
+    """, (student_id, content_hash))
+    existing = cursor.fetchone()
+
+    if existing:
+        material_id = existing[0] if isinstance(existing, (tuple, list)) else existing["id"]
+        eff_sess = notes_session_id or (existing[1] if isinstance(existing, (tuple, list)) else existing["notes_session_id"])
+        cursor.execute("""
+            UPDATE study_materials
+            SET updated_at = ?, notes_session_id = ?, extracted_text = ?
+            WHERE id = ?
+        """, (now, eff_sess, extracted_text, material_id))
+    else:
+        material_id = str(uuid.uuid4())
+        text_preview = (extracted_text or "").strip()[:400]
+        cursor.execute("""
+            INSERT INTO study_materials (
+                id, student_id, filename, file_type, file_size,
+                extracted_text_preview, extracted_text, content_hash,
+                notes_session_id, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        """, (
+            material_id, student_id, clean_filename, clean_type, int(file_size or 0),
+            text_preview, extracted_text, content_hash,
+            notes_session_id, now, now
+        ))
+
+    # Persist or update extracted topics for this material
+    for idx, top in enumerate(matched_topics or []):
+        course_code = (top.get("course_code") or "").strip()
+        course_name = (top.get("course_name") or course_code).strip()
+        topic_name = (top.get("topic_name") or "").strip()
+        topic_id = (top.get("topic_id") or f"top_{idx+1}").strip()
+        confidence = float(top.get("confidence") or 1.0)
+        concepts = json.dumps(top.get("matched_concepts") or [])
+
+        topic_row_id = str(uuid.uuid4())
+        use_mysql = is_mysql_conn(conn) or (is_mysql_active() if conn is None else False)
+        if use_mysql:
+            cursor.execute("""
+                INSERT INTO study_material_topics (
+                    id, material_id, student_id, course_code, course_name,
+                    topic_id, topic_name, confidence, matched_concepts,
+                    sort_order, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    topic_id = VALUES(topic_id),
+                    course_name = VALUES(course_name),
+                    confidence = VALUES(confidence),
+                    matched_concepts = VALUES(matched_concepts),
+                    sort_order = VALUES(sort_order)
+            """, (
+                topic_row_id, material_id, student_id, course_code, course_name,
+                topic_id, topic_name, confidence, concepts,
+                idx, now
+            ))
+        else:
+            cursor.execute("""
+                INSERT INTO study_material_topics (
+                    id, material_id, student_id, course_code, course_name,
+                    topic_id, topic_name, confidence, matched_concepts,
+                    sort_order, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(material_id, course_code, topic_name) DO UPDATE SET
+                    topic_id = excluded.topic_id,
+                    course_name = excluded.course_name,
+                    confidence = excluded.confidence,
+                    matched_concepts = excluded.matched_concepts,
+                    sort_order = excluded.sort_order
+            """, (
+                topic_row_id, material_id, student_id, course_code, course_name,
+                topic_id, topic_name, confidence, concepts,
+                idx, now
+            ))
+
+    conn.commit()
+    if close_conn:
+        conn.close()
+
+    logger.info("Saved study material '%s' (id=%s) with %d topics for student %s",
+                clean_filename, material_id, len(matched_topics or []), student_id)
+    return {
+        "id": material_id,
+        "filename": clean_filename,
+        "file_type": clean_type,
+        "file_size": file_size,
+        "topic_count": len(matched_topics or []),
+        "created_at": now
+    }
+
+
+def get_student_study_materials(
+    student_id: str,
+    conn: Optional[sqlite3.Connection] = None
+) -> List[Dict[str, Any]]:
+    """
+    Returns list of active study materials for the student with aggregated topic & quiz mastery progress.
+    Single SQL aggregation: 0 N+1 overhead.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT
+            sm.id,
+            sm.filename,
+            sm.file_type,
+            sm.file_size,
+            sm.notes_session_id,
+            sm.created_at,
+            sm.updated_at,
+            COUNT(DISTINCT smt.id) as topic_count,
+            COUNT(DISTINCT CASE WHEN tm.attempt_count > 0 THEN smt.id END) as attempted_topics,
+            COUNT(DISTINCT CASE WHEN tm.attempt_count > 0 AND (tm.mastery_score >= 0.80 OR (
+                SELECT qa.percentage
+                FROM quiz_attempts qa
+                WHERE qa.student_id = smt.student_id
+                  AND qa.course_code = smt.course_code
+                  AND qa.topic_name = smt.topic_name
+                ORDER BY qa.created_at DESC
+                LIMIT 1
+            ) >= 80.0) THEN smt.id END) as mastered_topics,
+            COALESCE(SUM(tm.attempt_count), 0) as total_quiz_attempts
+        FROM study_materials sm
+        LEFT JOIN study_material_topics smt ON sm.id = smt.material_id
+        LEFT JOIN topic_mastery tm ON sm.student_id = tm.student_id
+            AND smt.course_code = tm.course_code
+            AND smt.topic_name = tm.topic_name
+        WHERE sm.student_id = ? AND sm.status = 'active'
+        GROUP BY sm.id
+        ORDER BY sm.created_at DESC
+    """, (student_id,))
+    rows = cursor.fetchall()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        tc = d.get("topic_count") or 0
+        mc = d.get("mastered_topics") or 0
+        d["mastery_percentage"] = round((mc / tc) * 100, 1) if tc > 0 else 0.0
+        results.append(d)
+
+    if close_conn:
+        conn.close()
+    return results
+
+
+def get_study_material_detail(
+    material_id: str,
+    student_id: str,
+    conn: Optional[sqlite3.Connection] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Retrieves full detail of a study material and its extracted topics with actual quiz history.
+    Enforces student ownership (PermissionError on mismatch, None on not found).
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM study_materials
+        WHERE id = ? AND status = 'active'
+    """, (material_id,))
+    mat_row = cursor.fetchone()
+    if not mat_row:
+        if close_conn:
+            conn.close()
+        return None
+
+    mat = dict(mat_row)
+    if mat["student_id"] != student_id:
+        if close_conn:
+            conn.close()
+        raise PermissionError("Forbidden: You do not have access to this study material.")
+
+    cursor.execute("""
+        SELECT
+            smt.id, smt.course_code, smt.course_name, smt.topic_id, smt.topic_name,
+            smt.confidence, smt.matched_concepts, smt.sort_order,
+            COALESCE(tm.attempt_count, 0) as attempt_count,
+            COALESCE(tm.mastery_score, 0.0) as mastery_score,
+            COALESCE(tm.current_level, 'mixed') as current_level,
+            tm.last_practiced_at,
+            (
+                SELECT qa.percentage
+                FROM quiz_attempts qa
+                WHERE qa.student_id = smt.student_id
+                  AND qa.course_code = smt.course_code
+                  AND qa.topic_name = smt.topic_name
+                ORDER BY qa.created_at DESC
+                LIMIT 1
+            ) as latest_score,
+            (
+                SELECT qa.score
+                FROM quiz_attempts qa
+                WHERE qa.student_id = smt.student_id
+                  AND qa.course_code = smt.course_code
+                  AND qa.topic_name = smt.topic_name
+                ORDER BY qa.created_at DESC
+                LIMIT 1
+            ) as latest_correct,
+            (
+                SELECT qa.total
+                FROM quiz_attempts qa
+                WHERE qa.student_id = smt.student_id
+                  AND qa.course_code = smt.course_code
+                  AND qa.topic_name = smt.topic_name
+                ORDER BY qa.created_at DESC
+                LIMIT 1
+            ) as latest_total,
+            (
+                SELECT qa.created_at
+                FROM quiz_attempts qa
+                WHERE qa.student_id = smt.student_id
+                  AND qa.course_code = smt.course_code
+                  AND qa.topic_name = smt.topic_name
+                ORDER BY qa.created_at DESC
+                LIMIT 1
+            ) as latest_attempt_at
+        FROM study_material_topics smt
+        LEFT JOIN topic_mastery tm ON smt.student_id = tm.student_id
+            AND smt.course_code = tm.course_code
+            AND smt.topic_name = tm.topic_name
+        WHERE smt.material_id = ? AND smt.student_id = ?
+        ORDER BY smt.sort_order ASC, smt.id ASC
+    """, (material_id, student_id))
+    topic_rows = cursor.fetchall()
+
+    topics = []
+    attempted_count = 0
+    mastered_count = 0
+
+    for tr in topic_rows:
+        t = dict(tr)
+        attempts = t.get("attempt_count") or 0
+        m_score = t.get("mastery_score") or 0.0
+        c_level = t.get("current_level") or "mixed"
+        latest = t.get("latest_score")
+
+        if attempts == 0:
+            status = "not_attempted"
+            status_label = "Not Attempted"
+        elif attempts > 0 and ((latest is not None and latest >= 80.0) or m_score >= 0.80):
+            status = "mastered"
+            status_label = "Mastered"
+            attempted_count += 1
+            mastered_count += 1
+        else:
+            status = "attempted"
+            status_label = "Attempted"
+            attempted_count += 1
+
+        try:
+            t["matched_concepts"] = json.loads(t["matched_concepts"]) if isinstance(t["matched_concepts"], str) else (t["matched_concepts"] or [])
+        except Exception:
+            t["matched_concepts"] = []
+
+        t["status"] = status
+        t["status_label"] = status_label
+        topics.append(t)
+
+    mat["topics"] = topics
+    mat["topic_count"] = len(topics)
+    mat["attempted_topics"] = attempted_count
+    mat["mastered_topics"] = mastered_count
+    mat["mastery_percentage"] = round((mastered_count / len(topics)) * 100, 1) if topics else 0.0
+
+    if close_conn:
+        conn.close()
+    return mat
+
+
+def archive_study_material(
+    material_id: str,
+    student_id: str,
+    conn: Optional[sqlite3.Connection] = None
+) -> bool:
+    """
+    Safely archives study material without deleting quiz attempts, student answers, or mastery history.
+    Enforces student ownership.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT student_id, status FROM study_materials WHERE id = ?", (material_id,))
+    row = cursor.fetchone()
+    if not row:
+        if close_conn:
+            conn.close()
+        return False
+
+    owner_id = row[0] if isinstance(row, (tuple, list)) else row["student_id"]
+    if owner_id != student_id:
+        if close_conn:
+            conn.close()
+        raise PermissionError("Forbidden: Cannot remove study material belonging to another student.")
+
+    now = get_utc_now_iso()
+    cursor.execute("""
+        UPDATE study_materials
+        SET status = 'archived', updated_at = ?
+        WHERE id = ? AND student_id = ?
+    """, (now, material_id, student_id))
+    conn.commit()
+
+    if close_conn:
+        conn.close()
+
+    logger.info("Archived study material id=%s for student %s (quiz history preserved)", material_id, student_id)
+    return True
+
+
+def get_study_material_by_session_id(
+    notes_session_id: str,
+    student_id: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Retrieves active study material by notes_session_id to restore notes context across sessions.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    query = "SELECT * FROM study_materials WHERE notes_session_id = ? AND status = 'active'"
+    params = [notes_session_id]
+    if student_id:
+        query += " AND student_id = ?"
+        params.append(student_id)
+    query += " ORDER BY created_at DESC LIMIT 1"
+
+    cursor.execute(query, tuple(params))
+    row = cursor.fetchone()
+    if close_conn:
+        conn.close()
+    return dict(row) if row else None
+
+
+def get_study_material_grounding_text(
+    material_id: str,
+    student_id: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None
+) -> Optional[str]:
+    """
+    Retrieves extracted text for grounding quiz generation from study material.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    query = "SELECT extracted_text, student_id FROM study_materials WHERE id = ? AND status = 'active'"
+    cursor.execute(query, (material_id,))
+    row = cursor.fetchone()
+    if not row:
+        if close_conn:
+            conn.close()
+        return None
+
+    data = dict(row)
+    if student_id and data["student_id"] != student_id:
+        if close_conn:
+            conn.close()
+        raise PermissionError("Forbidden: Material belongs to another student.")
+
+    if close_conn:
+        conn.close()
+    return data.get("extracted_text")

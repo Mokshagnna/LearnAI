@@ -16,11 +16,6 @@ from services.db.base import (
     serialize_json_for_db,
 )
 from services.db.sqlite_adapter import SQLiteAdapter
-from services.db.postgres_adapter import (
-    PostgresAdapter,
-    PostgresConnectionWrapper,
-    PostgresCursorWrapper,
-)
 from services.db.mysql_adapter import (
     MySQLAdapter,
     MySQLConnectionWrapper,
@@ -43,9 +38,6 @@ __all__ = [
     "parse_json_column",
     "serialize_json_for_db",
     "SQLiteAdapter",
-    "PostgresAdapter",
-    "PostgresConnectionWrapper",
-    "PostgresCursorWrapper",
     "MySQLAdapter",
     "MySQLConnectionWrapper",
     "MySQLCursorWrapper",

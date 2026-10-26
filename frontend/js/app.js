@@ -11,31 +11,76 @@ let activeTopicId = "";
 let activeNotesSessionId = null;
 let isGenerating = false;
 let activeAbortController = null;
-let studentId = localStorage.getItem("learnai_student_id") || null;
-let authToken = localStorage.getItem("learnai_auth_token") || null;
+let studentId = (typeof localStorage !== "undefined" && localStorage.getItem) ? (localStorage.getItem("learnai_student_id") || null) : null;
+let authToken = (typeof localStorage !== "undefined" && localStorage.getItem) ? (localStorage.getItem("learnai_auth_token") || null) : null;
+let authSessionPromise = null;
 
 // ── Student Authentication & Session Management ──────────────────────────────
-async function ensureAuthSession() {
-  if (authToken && studentId) {
+function isTokenExpired(token, bufferSeconds = 30) {
+  if (!token || typeof token !== "string") return true;
+  const parts = token.trim().split(".");
+  if (parts.length !== 3) return true;
+  const expTs = parseInt(parts[1], 10);
+  if (isNaN(expTs) || expTs <= 0) return true;
+  const nowTs = Math.floor(Date.now() / 1000);
+  return nowTs >= (expTs - bufferSeconds);
+}
+
+async function ensureAuthSession(forceRefresh = false) {
+  if (!studentId && typeof localStorage !== "undefined" && localStorage.getItem) {
+    studentId = localStorage.getItem("learnai_student_id") || null;
+  }
+  if (!authToken && typeof localStorage !== "undefined" && localStorage.getItem) {
+    authToken = localStorage.getItem("learnai_auth_token") || null;
+  }
+
+  // If we already have a valid unexpired token and are not forcing renewal, return it
+  if (!forceRefresh && authToken && studentId && !isTokenExpired(authToken)) {
     return { token: authToken, studentId: studentId };
   }
-  try {
-    const res = await fetch("/api/auth/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      authToken = data.token;
-      studentId = data.student_id;
-      localStorage.setItem("learnai_auth_token", authToken);
-      localStorage.setItem("learnai_student_id", studentId);
-      return { token: authToken, studentId: studentId };
-    }
-  } catch (err) {
-    console.warn("Failed to initialize server auth session:", err);
+
+  // Deduplicate concurrent session requests
+  if (authSessionPromise) {
+    return authSessionPromise;
   }
-  return { token: authToken, studentId: studentId };
+
+  authSessionPromise = (async () => {
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`;
+      }
+      if (typeof fetch === "function") {
+        const res = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: headers
+        });
+        if (res.ok) {
+          const data = await res.json();
+          authToken = data.token;
+          studentId = data.student_id;
+          if (typeof localStorage !== "undefined" && localStorage.setItem) {
+            localStorage.setItem("learnai_auth_token", authToken);
+            localStorage.setItem("learnai_student_id", studentId);
+          }
+          return { token: authToken, studentId: studentId };
+        } else {
+          console.warn("[AUTH] /api/auth/session rejected with status", res.status);
+          if (typeof localStorage !== "undefined" && localStorage.removeItem) {
+            localStorage.removeItem("learnai_auth_token");
+          }
+          authToken = null;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to initialize server auth session:", err);
+    } finally {
+      authSessionPromise = null;
+    }
+    return { token: authToken, studentId: studentId };
+  })();
+
+  return authSessionPromise;
 }
 
 function getStudentId() {
@@ -43,21 +88,22 @@ function getStudentId() {
 }
 
 function getAuthToken() {
+  if (isTokenExpired(authToken)) {
+    return null;
+  }
   return authToken;
 }
 
 async function authenticatedFetch(url, options = {}) {
   await ensureAuthSession();
   options.headers = options.headers || {};
-  if (authToken) {
+  if (authToken && !isTokenExpired(authToken)) {
     options.headers["Authorization"] = `Bearer ${authToken}`;
   }
   let res = await fetch(url, options);
   if (res.status === 401) {
-    console.warn("[AUTH] 401 Unauthorized received. Renewing session...");
-    localStorage.removeItem("learnai_auth_token");
-    authToken = null;
-    await ensureAuthSession();
+    console.warn("[AUTH] 401 Unauthorized received. Renewing session and retrying fetch once...");
+    await ensureAuthSession(true);
     if (authToken) {
       options.headers["Authorization"] = `Bearer ${authToken}`;
       res = await fetch(url, options);
@@ -79,7 +125,7 @@ function escapeHtml(str) {
 
 // ── Mutually Exclusive Screen Management ────────────────────────────────────
 // Ensures EXACTLY ONE screen is visible at any time.
-const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection"];
+const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection", "materialsSection"];
 
 let lastActiveScreen = "setup";
 
@@ -101,9 +147,11 @@ function showScreen(screenId, pushHistory = true) {
 
   const isDashboard = screenId === "dashboardSection";
   const isNotes = screenId === "notesUploadSection";
+  const isMaterials = screenId === "materialsSection";
   $("navDashboardBtn")?.classList.toggle("active", isDashboard);
   $("navNotesBtn")?.classList.toggle("active", isNotes);
-  $("navPracticeBtn")?.classList.toggle("active", !isDashboard && !isNotes);
+  $("navMaterialsBtn")?.classList.toggle("active", isMaterials);
+  $("navPracticeBtn")?.classList.toggle("active", !isDashboard && !isNotes && !isMaterials);
 
   // Safe programmatic focus on screen heading for screen readers & keyboard navigation
   const activeEl = $(screenId);
@@ -381,6 +429,8 @@ function returnFromLoading() {
     openDashboard();
   } else if (lastActiveScreen === "notesUploadSection") {
     showScreen("notesUploadSection");
+  } else if (lastActiveScreen === "materialsSection") {
+    openStudyMaterials();
   } else {
     goToHome();
   }
@@ -410,12 +460,15 @@ function clearResultDisplay() {
 }
 
 // ── Core Quiz Generation (First Attempt & Retake) ────────────────────────────
-async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null, notesSessionId = null) {
+async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null, notesSessionId = null, studyMaterialId = null) {
   if (isGenerating) return;
   isGenerating = true;
 
   if (notesSessionId) {
     activeNotesSessionId = notesSessionId;
+  }
+  if (studyMaterialId) {
+    activeStudyMaterialId = studyMaterialId;
   }
 
   const generateBtn = $("generateBtn");
@@ -449,7 +502,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     // Populate course and topic label (small, secondary)
     const courseObj = curriculum.find(c => c.code === courseCode);
     const courseLabel = courseObj ? `${courseObj.code} - ${courseObj.name}` : courseCode;
-    const notesTag = activeNotesSessionId ? " [Notes-Grounded]" : "";
+    const notesTag = (activeNotesSessionId || activeStudyMaterialId) ? " [Notes-Grounded]" : "";
     if ($("loadingTopicLabel")) {
       $("loadingTopicLabel").textContent = `${courseLabel} • ${topic}${notesTag}`;
     }
@@ -469,6 +522,9 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     };
     if (activeNotesSessionId) {
       quizPayload.notes_session_id = activeNotesSessionId;
+    }
+    if (activeStudyMaterialId) {
+      quizPayload.study_material_id = activeStudyMaterialId;
     }
 
     const res = await authenticatedFetch("/api/quiz/generate", {
@@ -1947,31 +2003,6 @@ function handleNotesFiles(files) {
   }
 }
 
-function formatFileSize(bytes) {
-  if (typeof bytes !== "number" || isNaN(bytes) || bytes <= 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function getFileCategoryIcon(filename, isImage = false) {
-  if (isImage) return null;
-  const ext = (filename || "").split(".").pop().toLowerCase();
-  if (ext === "pdf") {
-    return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-red-50 text-red-600 border border-red-200 font-bold text-xs uppercase shadow-sm">PDF</div>`;
-  }
-  if (ext === "docx" || ext === "doc") {
-    return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600 border border-blue-200 font-bold text-xs uppercase shadow-sm">DOC</div>`;
-  }
-  if (ext === "pptx" || ext === "ppt") {
-    return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-200 font-bold text-xs uppercase shadow-sm">PPT</div>`;
-  }
-  if (ext === "txt") {
-    return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-gray-100 text-gray-600 border border-gray-200 font-bold text-xs uppercase shadow-sm">TXT</div>`;
-  }
-  return `<div class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-gray-100 text-gray-500 border border-gray-200 text-base shadow-sm">📄</div>`;
-}
-
 function removeNotesFile(index) {
   cleanupImagePreview();
   if (isUploadingNotes && currentUploadXhr) {
@@ -1979,8 +2010,8 @@ function removeNotesFile(index) {
     try { currentUploadXhr.abort(); } catch (e) {}
     currentUploadXhr = null;
     isUploadingNotes = false;
-    if (fluxLoaderInstance) fluxLoaderInstance.reset();
     if ($("notesProgressWrap")) $("notesProgressWrap").classList.add("hidden");
+    if ($("notesProgressBar")) $("notesProgressBar").style.width = "0%";
     cleanupUploadState();
   }
   const removedFile = selectedNotesFiles[index];
@@ -2044,31 +2075,27 @@ function renderNotesFilesUI() {
     }
 
     container.innerHTML = `
-      <div class="notes-file-row flex items-center gap-3.5 bg-gray-50/90 rounded-xl p-3 border border-gray-200/80 shadow-sm mb-3 transition animate-fade-in hover:border-gray-300">
+      <div class="flex items-center gap-3 bg-gray-50 rounded-lg p-2 shadow-sm border border-gray-200 mb-2 animate-fade-in">
         ${activeImagePreviewUrl ? `
           <img
             src="${activeImagePreviewUrl}"
-            alt="${escapeHtml(file.name)}"
-            class="w-12 h-12 rounded-lg object-cover border border-gray-200 flex-shrink-0"
+            alt="Preview"
+            class="w-16 h-16 object-cover rounded-md border border-gray-200"
           />
         ` : `
-          ${getFileCategoryIcon(file.name, isImage)}
+          <div class="w-16 h-16 flex items-center justify-center bg-gray-200 rounded-md text-gray-500 text-xl">
+            <span role="img" aria-label="file">📄</span>
+          </div>
         `}
 
-        <div class="flex-1 min-w-0">
-          <div class="font-semibold text-sm text-gray-900 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
-          <div class="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
-            <span>${formatFileSize(file.size)}</span>
-            <span class="inline-block w-1 h-1 rounded-full bg-gray-300"></span>
-            <span class="text-emerald-600 font-medium">${isUploadingNotes ? "Uploading..." : "Ready to upload"}</span>
-          </div>
+        <div class="flex-1 truncate">
+          <div class="font-medium text-gray-800 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
         </div>
 
         <button
           type="button"
-          class="notes-single-remove p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition focus:outline-none focus:ring-2 focus:ring-red-200"
-          aria-label="Remove ${escapeHtml(file.name)}"
-          title="${isUploadingNotes ? 'Cancel upload' : 'Remove file'}"
+          class="ml-2 px-2 py-1 text-xs flex items-center gap-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition border border-red-200 shadow-sm notes-single-remove"
+          aria-label="Remove file"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -2082,32 +2109,29 @@ function renderNotesFilesUI() {
       removeNotesFile(0);
     });
   } else {
-    // Multi-file row list (matching reference file-uploader item structure)
+    // Multi-file pill rendering (matching file-uploader.tsx chip layout)
     cleanupImagePreview();
     container.innerHTML = `
-      <div class="notes-files-multi mb-3" style="max-height: 200px; overflow-y: auto;">
-        <div class="flex flex-col gap-2">
+      <div class="mb-4" style="max-height: 180px; overflow-y: auto;">
+        <div class="flex flex-wrap gap-2">
           ${selectedNotesFiles.map((file, idx) => `
-            <div class="notes-file-row flex items-center gap-3 bg-gray-50/90 rounded-xl p-2.5 border border-gray-200/80 shadow-sm transition hover:border-gray-300">
-              ${getFileCategoryIcon(file.name)}
-              <div class="flex-1 min-w-0">
-                <div class="font-semibold text-xs text-gray-900 truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
-                <div class="flex items-center gap-2 mt-0.5 text-[11px] text-gray-500">
-                  <span>${formatFileSize(file.size)}</span>
-                </div>
-              </div>
+            <span
+              class="inline-flex items-center max-w-xs px-3 py-1 rounded-full bg-gray-100 text-gray-800 text-sm font-medium shadow-sm border border-gray-200 truncate"
+              style="min-width: 0;"
+              title="${escapeHtml(file.name)}"
+            >
+              <span class="truncate max-w-[120px] text-xs">${escapeHtml(file.name)}</span>
               <button
                 type="button"
-                class="notes-pill-remove p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition focus:outline-none focus:ring-2 focus:ring-red-200"
+                class="ml-2 p-0.5 rounded-full hover:bg-red-100 text-red-600 transition border border-transparent focus:outline-none focus:ring-2 focus:ring-red-200 notes-pill-remove"
                 data-index="${idx}"
-                aria-label="Remove ${escapeHtml(file.name)}"
-                title="${isUploadingNotes ? 'Cancel upload' : 'Remove file'}"
+                aria-label="Remove file"
               >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-            </div>
+            </span>
           `).join("")}
         </div>
       </div>
@@ -2460,6 +2484,7 @@ function handleNotesUpload() {
   const spinner = $("notesSpinner");
   const btnText = $("notesUploadBtnText");
   const progressWrap = $("notesProgressWrap");
+  const progressBar = $("notesProgressBar");
 
   if (uploadBtn) {
     uploadBtn.disabled = true;
@@ -2468,10 +2493,10 @@ function handleNotesUpload() {
   if (spinner) spinner.classList.remove("hidden");
   if (btnText) btnText.textContent = "Uploading...";
   if (progressWrap) progressWrap.classList.remove("hidden");
-
-  const loader = getFluxLoader();
-  loader.reset();
-  loader.setValue(0, "Uploading");
+  if (progressBar) {
+    progressBar.style.width = "0%";
+    progressBar.setAttribute("aria-valuenow", 0);
+  }
 
   const formData = new FormData();
   selectedNotesFiles.forEach(f => {
@@ -2479,114 +2504,163 @@ function handleNotesUpload() {
   });
 
   const thisRequestId = ++uploadRequestSeq;
+  sendNotesUploadXhr(formData, thisRequestId, false);
+}
 
-  ensureAuthSession().then(() => {
-    if (thisRequestId !== uploadRequestSeq) return;
-    const xhr = new XMLHttpRequest();
-    currentUploadXhr = xhr;
+async function sendNotesUploadXhr(formData, thisRequestId, isRetry) {
+  if (thisRequestId !== uploadRequestSeq) return;
 
-    xhr.open("POST", "/api/notes/extract-topics", true);
-    if (authToken) {
-      xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
+  const progressWrap = $("notesProgressWrap");
+  const progressBar = $("notesProgressBar");
+  const btnText = $("notesUploadBtnText");
+
+  // Ensure fresh, unexpired session before dispatching upload
+  await ensureAuthSession();
+  if (thisRequestId !== uploadRequestSeq) return;
+
+  const xhr = new XMLHttpRequest();
+  currentUploadXhr = xhr;
+
+  xhr.open("POST", "/api/notes/extract-topics", true);
+  if (authToken && !isTokenExpired(authToken)) {
+    xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
+  }
+
+  // 1. Upload byte-transfer progress directly following real transferred bytes
+  xhr.upload.onprogress = (event) => {
+    if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+    if (!event.lengthComputable || event.total <= 0) return;
+    const progress = Math.max(0, Math.min(100, (event.loaded / event.total) * 100));
+    if (progressBar) {
+      progressBar.style.width = `${progress}%`;
+      progressBar.setAttribute("aria-valuenow", Math.round(progress));
+    }
+  };
+
+  // 2. Upload byte transfer finished, transition naturally into server processing
+  xhr.upload.onload = () => {
+    if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+    if (btnText) btnText.textContent = "Processing...";
+    if (progressBar) {
+      progressBar.style.width = "100%";
+      progressBar.setAttribute("aria-valuenow", 100);
+    }
+  };
+
+  // 3. Response handling
+  xhr.onload = async () => {
+    if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+    currentUploadXhr = null;
+    let data = null;
+    try {
+      data = JSON.parse(xhr.responseText);
+    } catch (e) {
+      data = null;
     }
 
-    // 1. Upload byte-transfer progress directly following real transferred bytes
-    xhr.upload.onprogress = (event) => {
-      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
-      if (!event.lengthComputable || event.total <= 0) {
-        loader.setIndeterminate("Uploading");
-        return;
-      }
-      const progress = Math.max(0, Math.min(100, (event.loaded / event.total) * 100));
-      loader.setValue(progress, "Uploading");
-    };
-
-    // 2. Upload byte transfer finished, transition naturally into server processing
-    xhr.upload.onload = () => {
-      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
-      if (btnText) btnText.textContent = "Processing notes...";
-      loader.setProcessing("Processing notes…");
-    };
-
-    // 3. Response handling
-    xhr.onload = () => {
-      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
-      currentUploadXhr = null;
-      let data = null;
-      try {
-        data = JSON.parse(xhr.responseText);
-      } catch (e) {
-        data = null;
-      }
-
-      if (xhr.status >= 200 && xhr.status < 300 && data) {
-        if (!data.success || data.relevant === false || !data.matched_topics || data.matched_topics.length === 0) {
-          lastExtractionResult = data;
-          selectedTopicIndex = 0;
-          showNotesToast(data.message || "No curriculum topics matched your notes.", "error");
-          renderMatchedTopicsUI(data);
-          setTimeout(() => {
-            if (progressWrap) progressWrap.classList.add("hidden");
-            loader.reset();
-          }, 500);
-        } else {
-          // Complete only after successful HTTP response and valid curriculum match
-          loader.complete(() => {
-            lastExtractionResult = data;
-            selectedTopicIndex = 0;
-
-            showNotesToast(data.message || `Found ${data.matched_topics.length} matching curriculum topic(s).`, "success");
-            renderMatchedTopicsUI(data);
-
-            setTimeout(() => {
-              if (progressWrap) progressWrap.classList.add("hidden");
-              loader.reset();
-            }, 800);
-          });
+    // ── Authentication Expiration Handling (401) ──
+    if (xhr.status === 401) {
+      if (!isRetry) {
+        console.warn("[AUTH] Notes upload 401 received. Renewing session and retrying upload once...");
+        if (btnText) btnText.textContent = "Refreshing session...";
+        if (progressBar) {
+          progressBar.style.width = "0%";
+          progressBar.setAttribute("aria-valuenow", 0);
+        }
+        await ensureAuthSession(true);
+        if (thisRequestId === uploadRequestSeq) {
+          sendNotesUploadXhr(formData, thisRequestId, true);
+          return;
         }
       } else {
-        const errMsg = (data && data.detail)
-          ? (typeof data.detail === "object" ? JSON.stringify(data.detail) : data.detail)
-          : (xhr.statusText ? `Upload failed (${xhr.status}): ${xhr.statusText}` : "Unable to process files. Please try again.");
-        showNotesToast(errMsg, "error");
+        if (typeof localStorage !== "undefined" && localStorage.removeItem) {
+          localStorage.removeItem("learnai_auth_token");
+        }
+        authToken = null;
+        showNotesToast("Session expired. Please refresh the page to sign in again.", "error");
         setTimeout(() => {
           if (progressWrap) progressWrap.classList.add("hidden");
-          loader.reset();
+          if (progressBar) progressBar.style.width = "0%";
         }, 500);
+        cleanupUploadState();
+        return;
       }
-      cleanupUploadState();
-    };
+    }
 
-    // 4. Network error handling
-    xhr.onerror = () => {
-      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
-      currentUploadXhr = null;
-      showNotesToast("Network error during upload. Please check your connection and try again.", "error");
+    if (xhr.status >= 200 && xhr.status < 300 && data) {
+      if (!data.success || data.relevant === false || !data.matched_topics || data.matched_topics.length === 0) {
+        lastExtractionResult = data;
+        selectedTopicIndex = 0;
+        showNotesToast(data.message || "No curriculum topics matched your notes.", "error");
+        renderMatchedTopicsUI(data);
+        setTimeout(() => {
+          if (progressWrap) progressWrap.classList.add("hidden");
+          if (progressBar) progressBar.style.width = "0%";
+        }, 500);
+      } else {
+        // Success only after valid successful response
+        if (progressBar) {
+          progressBar.style.width = "100%";
+          progressBar.setAttribute("aria-valuenow", 100);
+        }
+        lastExtractionResult = data;
+        selectedTopicIndex = 0;
+
+        showNotesToast(data.message || `Found ${data.matched_topics.length} matching curriculum topic(s).`, "success");
+        renderMatchedTopicsUI(data);
+
+        setTimeout(() => {
+          if (progressWrap) progressWrap.classList.add("hidden");
+          if (progressBar) progressBar.style.width = "0%";
+        }, 800);
+      }
+    } else {
+      let errMsg = "Unable to process files. Please try again.";
+      if (data && data.detail) {
+        errMsg = typeof data.detail === "object" ? JSON.stringify(data.detail) : data.detail;
+      } else if (xhr.status === 413) {
+        errMsg = "File exceeds the maximum allowed size (5 MB).";
+      } else if (xhr.status === 429) {
+        errMsg = "Upload rate limit reached. Please wait a moment before trying again.";
+      } else if (xhr.status >= 500) {
+        errMsg = "Server error while processing your document. Please try again.";
+      } else if (xhr.statusText) {
+        errMsg = `Upload failed (${xhr.status}): ${xhr.statusText}`;
+      }
+      showNotesToast(errMsg, "error");
       setTimeout(() => {
         if (progressWrap) progressWrap.classList.add("hidden");
-        loader.reset();
+        if (progressBar) progressBar.style.width = "0%";
       }, 500);
-      cleanupUploadState();
-    };
-
-    // 5. Timeout handling
-    xhr.ontimeout = () => {
-      if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
-      currentUploadXhr = null;
-      showNotesToast("Upload request timed out. Please try uploading a smaller file.", "error");
-      setTimeout(() => {
-        if (progressWrap) progressWrap.classList.add("hidden");
-        loader.reset();
-      }, 500);
-      cleanupUploadState();
-    };
-
-    xhr.timeout = 60000;
-    xhr.send(formData);
-  }).catch(err => {
-    showNotesToast(err.message || "Authentication error before upload.", "error");
+    }
     cleanupUploadState();
-  });
+  };
+
+  // 4. Network error handling
+  xhr.onerror = () => {
+    if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+    currentUploadXhr = null;
+    showNotesToast("Network error during upload. Please check your connection and try again.", "error");
+    setTimeout(() => {
+      if (progressWrap) progressWrap.classList.add("hidden");
+      if (progressBar) progressBar.style.width = "0%";
+    }, 500);
+    cleanupUploadState();
+  };
+
+  // 5. Timeout handling
+  xhr.ontimeout = () => {
+    if (thisRequestId !== uploadRequestSeq || xhr !== currentUploadXhr) return;
+    currentUploadXhr = null;
+    showNotesToast("Upload request timed out. Please try uploading a smaller file.", "error");
+    setTimeout(() => {
+      if (progressWrap) progressWrap.classList.add("hidden");
+      if (progressBar) progressBar.style.width = "0%";
+    }, 500);
+    cleanupUploadState();
+  };
+
+  xhr.send(formData);
 }
 
 function renderMatchedTopicsUI(data) {
@@ -2733,7 +2807,8 @@ function initNotesUploaderListeners() {
         topicObj.topic_name,
         false,
         topicObj.topic_id,
-        lastExtractionResult.notes_session_id
+        lastExtractionResult.notes_session_id,
+        lastExtractionResult.study_material_id
       );
     });
   }
@@ -2778,11 +2853,387 @@ function initNotesUploaderListeners() {
   });
 }
 
+
+// ── Study Materials Client Implementation ────────────────────────────────────
+
+let activeStudyMaterialId = null;
+let currentViewingMaterial = null;
+let materialPendingRemoval = null;
+
+function formatFileSize(bytes) {
+  if (!bytes || bytes <= 0) return "0 B";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function formatMaterialDate(isoString) {
+  if (!isoString) return "Recently";
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return "Recently";
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  } catch (e) {
+    return "Recently";
+  }
+}
+
+function getFileTypeBadgeClass(fileType) {
+  const ft = (fileType || "").toLowerCase();
+  if (ft.includes("ppt")) return "icon-pptx";
+  if (ft.includes("pdf")) return "icon-pdf";
+  if (ft.includes("doc")) return "icon-docx";
+  if (ft.includes("txt")) return "icon-txt";
+  if (ft.includes("image") || ft.includes("png") || ft.includes("jpg")) return "icon-image";
+  return "icon-txt";
+}
+
+async function openStudyMaterials() {
+  if (isGenerating) return;
+  showScreen("materialsSection");
+
+  const loadingEl = $("materialsLoading");
+  const emptyState = $("materialsEmptyState");
+  const listView = $("materialsListView");
+  const detailView = $("materialTopicsDetailView");
+
+  if (detailView) detailView.classList.add("hidden");
+  if (listView) listView.classList.remove("hidden");
+  if (emptyState) emptyState.classList.add("hidden");
+  if (loadingEl) loadingEl.classList.remove("hidden");
+
+  try {
+    const res = await authenticatedFetch("/api/study-materials");
+    if (!res.ok) {
+      throw new Error(`Failed to load study materials (HTTP ${res.status})`);
+    }
+    const data = await res.json();
+    const materials = data.materials || [];
+
+    if (loadingEl) loadingEl.classList.add("hidden");
+
+    if (materials.length === 0) {
+      if (emptyState) emptyState.classList.remove("hidden");
+      if (listView) listView.classList.add("hidden");
+    } else {
+      if (emptyState) emptyState.classList.add("hidden");
+      if (listView) listView.classList.remove("hidden");
+      renderMaterialsGrid(materials);
+    }
+  } catch (err) {
+    console.error("Error loading study materials:", err);
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (emptyState) emptyState.classList.remove("hidden");
+  }
+}
+
+function renderMaterialsGrid(materials) {
+  const grid = $("materialsGrid");
+  if (!grid) return;
+
+  grid.innerHTML = materials.map(m => {
+    const iconClass = getFileTypeBadgeClass(m.file_type);
+    const dateStr = formatMaterialDate(m.created_at);
+    const sizeStr = formatFileSize(m.file_size);
+    const masteryPct = typeof m.mastery_percentage === "number" ? m.mastery_percentage : 0;
+    const fillClass = masteryPct >= 80 ? "fill-high" : (masteryPct > 0 ? "fill-medium" : "");
+
+    return `
+      <div class="material-card" data-material-id="${escapeHtml(m.id)}">
+        <div>
+          <div class="material-card-top">
+            <div class="material-card-type-icon ${iconClass}">
+              ${escapeHtml(m.file_type || "FILE")}
+            </div>
+            <div class="material-card-title-wrap">
+              <h3 class="material-card-filename" title="${escapeHtml(m.filename)}">
+                ${escapeHtml(m.filename)}
+              </h3>
+              <div class="material-card-submeta">
+                <span>${dateStr}</span>
+                <span>•</span>
+                <span>${sizeStr}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="material-card-stats-row">
+            <div class="material-stat">
+              <span class="material-stat-num">${m.topic_count || 0}</span>
+              <span class="material-stat-lbl">Topics</span>
+            </div>
+            <div class="material-stat">
+              <span class="material-stat-num">${m.attempted_count || 0}</span>
+              <span class="material-stat-lbl">Attempted</span>
+            </div>
+            <div class="material-stat">
+              <span class="material-stat-num">${m.mastered_count || 0}</span>
+              <span class="material-stat-lbl">Mastered</span>
+            </div>
+          </div>
+
+          <div class="material-card-progress-section">
+            <div class="material-progress-labels">
+              <span class="muted text-xs">Mastery Progress</span>
+              <span class="text-xs font-semibold">${masteryPct}%</span>
+            </div>
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill ${fillClass}" style="width: ${masteryPct}%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="material-card-footer">
+          <button type="button" class="btn-primary btn-open-material" data-material-id="${escapeHtml(m.id)}">
+            Open Topics &amp; Practice &rarr;
+          </button>
+          <button
+            type="button"
+            class="btn-icon-danger btn-remove-material"
+            data-material-id="${escapeHtml(m.id)}"
+            data-filename="${escapeHtml(m.filename)}"
+            title="Remove ${escapeHtml(m.filename)}"
+            aria-label="Remove ${escapeHtml(m.filename)}"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  grid.querySelectorAll(".btn-open-material").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const matId = btn.getAttribute("data-material-id");
+      if (matId) openMaterialDetail(matId);
+    });
+  });
+
+  grid.querySelectorAll(".btn-remove-material").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const matId = btn.getAttribute("data-material-id");
+      const filename = btn.getAttribute("data-filename") || "this material";
+      if (matId) promptRemoveMaterial(matId, filename);
+    });
+  });
+}
+
+async function openMaterialDetail(materialId) {
+  const loadingEl = $("materialsLoading");
+  const listView = $("materialsListView");
+  const detailView = $("materialTopicsDetailView");
+
+  if (listView) listView.classList.add("hidden");
+  if (detailView) detailView.classList.add("hidden");
+  if (loadingEl) loadingEl.classList.remove("hidden");
+
+  try {
+    const res = await authenticatedFetch(`/api/study-materials/${encodeURIComponent(materialId)}`);
+    if (!res.ok) {
+      throw new Error(`Failed to load material detail (HTTP ${res.status})`);
+    }
+    const material = await res.json();
+    currentViewingMaterial = material;
+
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (detailView) detailView.classList.remove("hidden");
+
+    renderMaterialTopicsView(material);
+  } catch (err) {
+    console.error("Failed to load study material topics:", err);
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (listView) listView.classList.remove("hidden");
+  }
+}
+
+function renderMaterialTopicsView(material) {
+  const tagEl = $("materialDetailTag");
+  const filenameEl = $("materialDetailFilename");
+  const metaEl = $("materialDetailMeta");
+  const masteryValEl = $("materialDetailMasteryVal");
+  const masterySubEl = $("materialDetailMasterySub");
+  const progressFill = $("materialDetailProgressBar");
+  const listEl = $("materialTopicsList");
+
+  if (tagEl) tagEl.textContent = material.file_type || "FILE";
+  if (filenameEl) filenameEl.textContent = material.filename;
+  if (metaEl) {
+    const dateStr = formatMaterialDate(material.created_at);
+    const sizeStr = formatFileSize(material.file_size);
+    const tCount = (material.topics || []).length;
+    metaEl.textContent = `Uploaded ${dateStr} • ${sizeStr} • ${tCount} Topic${tCount === 1 ? '' : 's'}`;
+  }
+
+  const masteryPct = material.mastery_percentage || 0;
+  if (masteryValEl) masteryValEl.textContent = `${masteryPct}%`;
+  if (masterySubEl) {
+    masterySubEl.textContent = `${material.mastered_topics || 0} of ${material.topic_count || (material.topics || []).length} topics mastered`;
+  }
+  if (progressFill) {
+    progressFill.style.width = `${masteryPct}%`;
+    progressFill.className = `progress-bar-fill ${masteryPct >= 80 ? 'fill-high' : (masteryPct > 0 ? 'fill-medium' : '')}`;
+  }
+
+  if (!listEl) return;
+  const topics = material.topics || [];
+  if (topics.length === 0) {
+    listEl.innerHTML = '<p class="muted">No syllabus topics extracted from this document.</p>';
+    return;
+  }
+
+  listEl.innerHTML = topics.map(t => {
+    const statusKey = t.status || "not_attempted";
+    const statusLabel = t.status_label || "Not Attempted";
+    const attempts = t.attempt_count || 0;
+    const latestScore = t.latest_score !== null && t.latest_score !== undefined ? `${Math.round(t.latest_score)}%` : null;
+
+    let subStatusText = "";
+    if (statusKey === "mastered") {
+      subStatusText = latestScore ? ` • Latest score: ${latestScore}` : "";
+    } else if (statusKey === "attempted") {
+      subStatusText = latestScore ? ` • Latest score: ${latestScore}` : ` • ${attempts} attempt${attempts === 1 ? '' : 's'}`;
+    }
+
+    const concepts = (t.matched_concepts || []).map(c => `
+      <span class="concept-chip-sm">${escapeHtml(c)}</span>
+    `).join("");
+
+    return `
+      <div class="material-topic-card">
+        <div class="material-topic-main">
+          <div class="material-topic-header">
+            <span class="notes-course-tag">${escapeHtml(t.course_code)} - ${escapeHtml(t.course_name)}</span>
+            <span class="topic-badge-status status-${statusKey}">
+              ${escapeHtml(statusLabel)}${subStatusText}
+            </span>
+          </div>
+          <h4 class="material-topic-title">${escapeHtml(t.topic_name)}</h4>
+          ${concepts ? `<div class="material-topic-concepts">${concepts}</div>` : ''}
+        </div>
+        <div class="material-topic-actions">
+          <button
+            type="button"
+            class="btn-primary btn-sm btn-practice-topic"
+            data-course="${escapeHtml(t.course_code)}"
+            data-topic="${escapeHtml(t.topic_name)}"
+            data-topic-id="${escapeHtml(t.topic_id || '')}"
+            data-material-id="${escapeHtml(material.id)}"
+          >
+            Practice Topic &rarr;
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  listEl.querySelectorAll(".btn-practice-topic").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const course = btn.getAttribute("data-course");
+      const topic = btn.getAttribute("data-topic");
+      const topicId = btn.getAttribute("data-topic-id") || null;
+      const matId = btn.getAttribute("data-material-id");
+      if (course && topic) {
+        startQuizGeneration(course, topic, false, topicId, null, matId);
+      }
+    });
+  });
+}
+
+function promptRemoveMaterial(materialId, filename) {
+  materialPendingRemoval = { id: materialId, filename };
+  const nameEl = $("removeMaterialFilename");
+  if (nameEl) nameEl.textContent = filename;
+  const modal = $("materialRemoveModal");
+  if (modal) modal.classList.remove("hidden");
+}
+
+function closeRemoveModal() {
+  materialPendingRemoval = null;
+  const modal = $("materialRemoveModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function confirmRemoveMaterial() {
+  if (!materialPendingRemoval) return;
+  const { id } = materialPendingRemoval;
+  const confirmBtn = $("removeModalConfirmBtn");
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Removing...";
+  }
+
+  try {
+    const res = await authenticatedFetch(`/api/study-materials/${encodeURIComponent(id)}`, {
+      method: "DELETE"
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to remove material: HTTP ${res.status}`);
+    }
+    closeRemoveModal();
+    openStudyMaterials();
+  } catch (err) {
+    console.error("Error removing study material:", err);
+    alert("Could not remove the study material. Please try again.");
+  } finally {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Remove Material";
+    }
+  }
+}
+
+let studyMaterialsListenersInitialized = false;
+
+function initStudyMaterialsListeners() {
+  if (studyMaterialsListenersInitialized) return;
+  studyMaterialsListenersInitialized = true;
+  $("navMaterialsBtn")?.addEventListener("click", () => {
+    openStudyMaterials();
+  });
+
+  $("materialsUploadNewBtn")?.addEventListener("click", () => {
+    if (isGenerating) return;
+    showScreen("notesUploadSection");
+  });
+
+  $("materialsEmptyUploadBtn")?.addEventListener("click", () => {
+    if (isGenerating) return;
+    showScreen("notesUploadSection");
+  });
+
+  $("materialDetailBackBtn")?.addEventListener("click", () => {
+    openStudyMaterials();
+  });
+
+  $("removeModalCancelBtn")?.addEventListener("click", closeRemoveModal);
+  $("removeModalConfirmBtn")?.addEventListener("click", confirmRemoveMaterial);
+
+  // Close modal when clicking backdrop outside dialog
+  $("materialRemoveModal")?.addEventListener("click", (e) => {
+    if (e.target === $("materialRemoveModal")) {
+      closeRemoveModal();
+    }
+  });
+
+  // Close modal on Escape
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && $("materialRemoveModal") && !$("materialRemoveModal").classList.contains("hidden")) {
+        closeRemoveModal();
+      }
+    });
+  }
+}
+
 // ── App Initialization ──────────────────────────────────────────────────────
 async function initApp() {
   await ensureAuthSession();
   await loadCourses();
   initNotesUploaderListeners();
+  initStudyMaterialsListeners();
   const restored = restoreSessionState();
 
   // Initialize base history state if not already present

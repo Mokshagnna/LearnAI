@@ -44,10 +44,16 @@ from services.database import get_connection, init_db, get_or_create_student
 @pytest.fixture
 def test_client(tmp_path, monkeypatch):
     """Isolated test database and client."""
+    from services.rate_limiter import reset_all_rate_limiters
+    reset_all_rate_limiters()
     db_file = tmp_path / "notes_test.db"
     monkeypatch.setenv("LEARNAI_DB_PATH", str(db_file))
     init_db(db_file)
-    return TestClient(app)
+    client = TestClient(app)
+    try:
+        yield client
+    finally:
+        reset_all_rate_limiters()
 
 
 # ============================================================================

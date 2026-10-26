@@ -119,3 +119,13 @@ quiz_submit_limiter = SlidingWindowRateLimiter(
     window_seconds=60,
     name="quiz_submit"
 )
+
+
+def reset_all_rate_limiters() -> None:
+    """
+    Clears all in-memory rate-limiter state across all global limiter instances.
+    Designed for test isolation and fixture teardown without modifying production
+    limits or application behavior.
+    """
+    quiz_gen_limiter.reset()
+    quiz_submit_limiter.reset()

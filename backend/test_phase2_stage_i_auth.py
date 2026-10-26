@@ -101,6 +101,30 @@ class TestTokenIssuanceAndLifecycle:
         assert is_valid is True
         assert decoded_id == data1["student_id"]
 
+    def test_create_auth_session_with_expired_authentic_token_renews_same_student(self, isolated_auth_client):
+        """POST /api/auth/session with expired authentic token re-issues fresh token for same student."""
+        client, db_file = isolated_auth_client
+        conn = get_connection(db_file)
+        student_id = get_or_create_student("stud_returning_expired", conn=conn)
+        conn.close()
+
+        expired_token = sign_student_identity(student_id, ttl_seconds=-200)
+        is_valid, _, err = verify_student_identity(expired_token)
+        assert is_valid is False
+        assert err == "Token expired"
+
+        headers = {"Authorization": f"Bearer {expired_token}"}
+        res = client.post("/api/auth/session", headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["student_id"] == student_id
+        assert data["expires_at"] > int(time.time())
+
+        is_valid_new, decoded_id, err_new = verify_student_identity(data["token"])
+        assert is_valid_new is True
+        assert decoded_id == student_id
+        assert err_new is None
+
     def test_refresh_endpoint_with_valid_token_extends_ttl(self, isolated_auth_client):
         """POST /api/auth/refresh with valid token issues a refreshed token."""
         client, _ = isolated_auth_client

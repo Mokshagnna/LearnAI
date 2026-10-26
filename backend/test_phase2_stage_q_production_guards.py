@@ -279,17 +279,23 @@ class TestLocalDevelopmentAndTestFixtures:
         conn.close()
 
     def test_development_mode_accepts_legacy_aliases(self, monkeypatch):
-        """In development mode, legacy aliases LEARNAI_SECRET_KEY and SUPABASE_DB_URL are accepted."""
+        """In development mode, MYSQL_DATABASE_URL and LEARNAI_SECRET_KEY are accepted while SUPABASE_DB_URL is retired."""
         monkeypatch.setenv("ENVIRONMENT", "development")
         monkeypatch.delenv("DATABASE_URL", raising=False)
-        monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://dev:pass@localhost:5432/devdb")
+        monkeypatch.setenv("MYSQL_DATABASE_URL", "mysql://dev:pass@localhost:3306/devdb")
         monkeypatch.delenv("SESSION_SECRET_KEY", raising=False)
         monkeypatch.setenv("LEARNAI_SECRET_KEY", "legacy-dev-secret-key-for-test")
 
         cfg = DatabaseConfig()
-        assert cfg.database_url == "postgresql://dev:pass@localhost:5432/devdb"
-        assert cfg.is_postgres is True
+        assert cfg.database_url == "mysql://dev:pass@localhost:3306/devdb"
+        assert cfg.is_mysql is True
         assert get_session_secret() == b"legacy-dev-secret-key-for-test"
+
+        # Verify retired SUPABASE_DB_URL is ignored
+        monkeypatch.delenv("MYSQL_DATABASE_URL", raising=False)
+        monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://dev:pass@localhost:5432/devdb")
+        cfg_retired = DatabaseConfig()
+        assert cfg_retired.database_url is None
 
 
 # ── 6. Database Connection Failure Without SQLite Fallback ────────────────────

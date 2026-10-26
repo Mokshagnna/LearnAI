@@ -16,6 +16,7 @@
     <nav class="topbar-nav" aria-label="Main Navigation">
       <button id="navPracticeBtn" type="button" class="nav-tab active">Practice Quiz</button>
       <button id="navNotesBtn" type="button" class="nav-tab">Generate from Notes</button>
+      <button id="navMaterialsBtn" type="button" class="nav-tab">My Study Materials</button>
       <button id="navDashboardBtn" type="button" class="nav-tab">Student Dashboard</button>
     </nav>
   </header>
@@ -369,7 +370,7 @@
               Drag &amp; drop files here, or <span class="text-blue-600 underline">browse</span>
             </span>
             <span class="text-xs text-gray-400 mt-1 text-center px-2">
-              Photos, PDF, DOCX, TXT, PPT and PPTX (maximum 5 MB per file)
+              (PNG, JPG, PDF, etc. up to 5MB each)
             </span>
           </div>
         </div>
@@ -386,40 +387,17 @@
         <!-- Selected files list (single FilePreview or multi-file pill list) -->
         <div id="notesFilesList" class="mb-4"></div>
 
-        <!-- Progressive Flux Loader (from 21st.dev) -->
-        <div id="notesProgressWrap" class="w-full mb-6 animate-fade-in hidden">
-          <div id="progressiveFluxLoader" class="progressive-flux-loader mx-auto flex w-full max-w-md flex-col items-center gap-6">
-            <div class="flux-label-wrapper relative h-16 w-full select-none" style="perspective: 1000px;">
-              <div
-                id="fluxLabel"
-                class="flux-label absolute inset-0 flex items-center justify-center text-center text-3xl font-semibold tracking-tight text-gray-500 sm:text-4xl"
-                style="transform-style: preserve-3d;"
-                aria-hidden="true"
-              ></div>
-            </div>
-
-            <div
-              id="fluxTrack"
-              class="flux-track relative h-5 w-full overflow-hidden rounded-full"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              aria-valuenow="0"
-              aria-valuetext="0% – Uploading"
-              aria-label="Loading"
-            >
-              <div
-                id="notesProgressBar"
-                class="flux-fill relative h-full rounded-full"
-                style="width: 0%;"
-              >
-                <span
-                  aria-hidden="true"
-                  class="flux-sheen pointer-events-none absolute inset-y-0 left-0 w-1/2 rounded-full"
-                ></span>
-              </div>
-            </div>
-          </div>
+        <!-- Progress bar matching exact reference component -->
+        <div id="notesProgressWrap" class="w-full bg-gray-200 rounded-full h-3 mb-4 overflow-hidden animate-fade-in hidden">
+          <div
+            id="notesProgressBar"
+            class="bg-green-500 h-3 rounded-full transition-all duration-300"
+            style="width: 0%;"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          ></div>
         </div>
 
         <!-- Upload Action Button -->
@@ -499,8 +477,116 @@
       </div>
     </div>
   </section>
+  <!-- 7. My Study Materials Screen -->
+  <section id="materialsSection" class="card materials-card hidden">
+    <!-- Header with title & upload CTA -->
+    <div class="materials-header">
+      <div class="materials-header-text">
+        <h1 class="materials-title">My Study Materials</h1>
+        <p class="materials-subtitle">Access previously uploaded notes, review extracted topics, and generate grounded practice quizzes without re-uploading.</p>
+      </div>
+      <button id="materialsUploadNewBtn" type="button" class="btn-notes-cta materials-upload-cta">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="12" y1="18" x2="12" y2="12"></line>
+          <line x1="9" y1="15" x2="15" y2="15"></line>
+        </svg>
+        <span>Upload Notes</span>
+      </button>
+    </div>
+
+    <!-- Loading state -->
+    <div id="materialsLoading" class="materials-loading hidden" role="status">
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="muted">Loading your study materials...</p>
+    </div>
+
+    <!-- Empty state -->
+    <div id="materialsEmptyState" class="first-time-container hidden">
+      <div class="card first-time-welcome-card">
+        <div class="first-time-badge" aria-hidden="true">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+        </div>
+        <h2 class="first-time-heading">No study materials saved yet</h2>
+        <p class="first-time-lead">Upload your course notes, slides, or syllabus sheets to extract topics and take practice quizzes anytime.</p>
+        <div class="first-time-actions">
+          <button id="materialsEmptyUploadBtn" type="button" class="btn-primary">Upload Your First Notes &rarr;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Materials List View -->
+    <div id="materialsListView">
+      <div id="materialsGrid" class="materials-grid"></div>
+    </div>
+
+    <!-- Material Topics Subview (Detail) -->
+    <div id="materialTopicsDetailView" class="hidden">
+      <div class="material-detail-nav">
+        <button id="materialDetailBackBtn" type="button" class="secondary btn-back-materials">
+          &larr; Back to All Materials
+        </button>
+      </div>
+
+      <div class="material-detail-hero">
+        <div class="material-detail-info">
+          <div class="material-detail-filetag" id="materialDetailTag">PPTX</div>
+          <div class="material-detail-titles">
+            <h2 class="material-detail-filename" id="materialDetailFilename">Lecture Slides.pptx</h2>
+            <div class="material-detail-meta" id="materialDetailMeta">Uploaded Oct 26, 2026 • 240 KB • 4 Topics</div>
+          </div>
+        </div>
+        <div class="material-detail-mastery-card" id="materialDetailMasteryCard">
+          <div class="mastery-summary-title">Topic Mastery</div>
+          <div class="mastery-summary-val" id="materialDetailMasteryVal">0%</div>
+          <div class="mastery-summary-sub" id="materialDetailMasterySub">0 of 4 topics mastered</div>
+          <div class="progress-bar-track mt-2">
+            <div id="materialDetailProgressBar" class="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="material-topics-section">
+        <h3 class="material-topics-heading">Extracted Syllabus Topics</h3>
+        <p class="muted material-topics-sub">Choose any topic to practice with AI-generated questions grounded directly in your notes.</p>
+        <div id="materialTopicsList" class="material-topics-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Safe Material Removal Confirmation Modal -->
+  <div id="materialRemoveModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="removeModalTitle">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-warning-icon" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+        <h3 id="removeModalTitle" class="modal-title">Remove Study Material?</h3>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to remove <strong id="removeMaterialFilename">this file</strong>?</p>
+        <div class="safe-removal-notice">
+          <strong>Safe Removal Guarantee:</strong> Your historical quiz attempts, scores, and topic mastery will remain 100% intact on your student dashboard. Only the uploaded notes document will be removed.
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="removeModalCancelBtn" type="button" class="secondary">Cancel</button>
+        <button id="removeModalConfirmBtn" type="button" class="btn-danger">Remove Material</button>
+      </div>
+    </div>
+  </div>
 </main>
 
-<script src="js/app.js?v=2.2.0"></script>
+<script src="js/app.js?v=2.4.0"></script>
 </body>
 </html>

@@ -268,7 +268,7 @@ class DatabaseConfig:
 
     Precedence:
     1. Explicit custom database_url passed to constructor (if provided)
-    2. DATABASE_URL (production canonical) or MYSQL_DATABASE_URL or SUPABASE_DB_URL (development legacy alias)
+    2. DATABASE_URL (production canonical) or MYSQL_DATABASE_URL (development/test alias)
     3. LEARNAI_DB_PATH -> SQLite persistent path
     4. SQLITE_DB_PATH -> SQLite legacy path
     5. Default -> backend/data/learnai.db
@@ -315,7 +315,7 @@ class DatabaseConfig:
         if self.is_production:
             url = os.getenv("DATABASE_URL")
         else:
-            url = os.getenv("DATABASE_URL") or os.getenv("MYSQL_DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+            url = os.getenv("DATABASE_URL") or os.getenv("MYSQL_DATABASE_URL")
         return url.strip() if url else None
 
     @property

@@ -32,7 +32,13 @@ from services.database import (
     create_quiz_session,
     get_quiz_session,
     submit_quiz_atomic,
-    get_student_dashboard_data
+    get_student_dashboard_data,
+    create_or_update_study_material,
+    get_student_study_materials,
+    get_study_material_detail,
+    archive_study_material,
+    get_study_material_by_session_id,
+    get_study_material_grounding_text
 )
 from services.auth_utils import (
     sign_student_identity,
@@ -132,6 +138,7 @@ class QuizRequest(BaseModel):
     # Backend always generates fresh — this flag is used only for logging.
     retake: bool = False
     notes_session_id: str | None = Field(default=None, max_length=100)
+    study_material_id: str | None = Field(default=None, max_length=100)
     notes_context: str | None = Field(default=None, max_length=10000)
 
 class SubmitRequest(BaseModel):
@@ -192,8 +199,8 @@ def create_auth_session(request: Request):
     """
     token = get_token_from_request(request)
     if token:
-        is_valid, existing_student_id, _ = verify_student_identity(token)
-        if is_valid and existing_student_id:
+        is_valid, existing_student_id, err = verify_student_identity(token)
+        if (is_valid or err == "Token expired") and existing_student_id:
             new_token = sign_student_identity(existing_student_id)
             return {
                 "student_id": existing_student_id,
@@ -264,8 +271,10 @@ async def extract_topics_from_notes(
         raise HTTPException(status_code=400, detail="Maximum 10 files can be uploaded at a time.")
 
     combined_text_parts = []
+    total_upload_bytes = 0
     for f in files:
         content = await f.read()
+        total_upload_bytes += len(content)
         if len(content) > MAX_FILE_SIZE_BYTES:
             max_mb = MAX_FILE_SIZE_BYTES // (1024 * 1024)
             raise HTTPException(
@@ -295,6 +304,27 @@ async def extract_topics_from_notes(
 
     auth_student_id = get_optional_authenticated_student_id(request)
     match_result = match_notes_to_curriculum(combined_text, student_id=auth_student_id)
+
+    # Persist study material if extraction succeeded and matched syllabus topics
+    if auth_student_id and match_result.get("success") and match_result.get("relevant") and match_result.get("matched_topics"):
+        try:
+            total_bytes = total_upload_bytes or sum(len(p) for p in combined_text_parts)
+            file_names = [f.filename for f in files if f.filename]
+            primary_name = file_names[0] if len(file_names) == 1 else f"{file_names[0]} (+{len(file_names)-1} files)" if file_names else "Uploaded Notes"
+            ext = Path(file_names[0]).suffix.lstrip(".").upper() if file_names and Path(file_names[0]).suffix else "NOTES"
+            mat_info = create_or_update_study_material(
+                student_id=auth_student_id,
+                filename=primary_name,
+                file_type=ext,
+                file_size=total_bytes,
+                extracted_text=combined_text,
+                matched_topics=match_result.get("matched_topics") or [],
+                notes_session_id=match_result.get("notes_session_id")
+            )
+            match_result["study_material_id"] = mat_info["id"]
+        except Exception as e:
+            logger.warning("Failed to persist study material record: %s", e)
+
     return match_result
 
 @app.post("/api/quiz/generate")
@@ -373,10 +403,20 @@ def create_quiz(req: QuizRequest, request: Request):
     if req.notes_session_id:
         sess = get_notes_session(req.notes_session_id)
         if not sess:
-            raise HTTPException(
-                status_code=404,
-                detail="Notes session expired or not found. Please re-upload your notes."
-            )
+            # Fallback to persistent study materials table if memory session expired
+            mat = get_study_material_by_session_id(req.notes_session_id, student_id=student_id)
+            if mat and mat.get("extracted_text"):
+                mat_detail = get_study_material_detail(mat["id"], student_id)
+                sess = {
+                    "text": mat.get("extracted_text", ""),
+                    "student_id": mat.get("student_id"),
+                    "matched_topics": mat_detail.get("topics", []) if mat_detail else []
+                }
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Notes session expired or not found. Please re-upload your notes."
+                )
 
         sess_student_id = sess.get("student_id")
         if sess_student_id and sess_student_id != student_id:
@@ -401,6 +441,33 @@ def create_quiz(req: QuizRequest, request: Request):
                 detail=f"Selected topic '{req.topic}' for course '{req.course_code}' is not aligned with the uploaded notes session."
             )
         notes_text = sess.get("text", "")
+        if matched_topic_entry:
+            dynamic_concepts = matched_topic_entry.get("matched_concepts", []) or []
+    elif req.study_material_id:
+        try:
+            mat_detail = get_study_material_detail(req.study_material_id, student_id)
+        except PermissionError:
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: Study material belongs to another student."
+            )
+        if not mat_detail:
+            raise HTTPException(
+                status_code=404,
+                detail="Study material not found."
+            )
+        notes_text = get_study_material_grounding_text(req.study_material_id, student_id=student_id) or ""
+        mat_topics = mat_detail.get("topics", [])
+        matched_topic_entry = None
+        for t in mat_topics:
+            if t.get("course_code") == req.course_code and t.get("topic_name") == req.topic:
+                matched_topic_entry = t
+                break
+        if not matched_topic_entry and mat_topics:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Selected topic '{req.topic}' for course '{req.course_code}' is not associated with this study material."
+            )
         if matched_topic_entry:
             dynamic_concepts = matched_topic_entry.get("matched_concepts", []) or []
 
@@ -803,5 +870,61 @@ def get_dashboard(student_id: str, request: Request, course_code: str | None = N
     except Exception as e:
         logger.error(f"Failed to get student dashboard: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve dashboard")
+
+# ── Study Materials Endpoints ───────────────────────────────────────────────
+
+@app.get("/api/study-materials")
+def list_study_materials(request: Request):
+    """
+    Lists active study materials for the authenticated student with aggregated topic & mastery counts.
+    """
+    student_id = get_authenticated_student_id(request)
+    materials = get_student_study_materials(student_id)
+    return {"materials": materials}
+
+
+@app.get("/api/study-materials/{material_id}")
+def get_study_material(material_id: str, request: Request):
+    """
+    Retrieves full details of a study material and its extracted topics with actual quiz history.
+    Enforces student ownership: 401 for unauthenticated, 403 for cross-student, 404 for not found.
+    """
+    student_id = get_authenticated_student_id(request)
+    try:
+        material = get_study_material_detail(material_id, student_id)
+    except PermissionError:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: You do not have access to this study material."
+        )
+    if not material:
+        raise HTTPException(
+            status_code=404,
+            detail="Study material not found."
+        )
+    return material
+
+
+@app.delete("/api/study-materials/{material_id}")
+def remove_study_material(material_id: str, request: Request):
+    """
+    Safely archives study material without deleting student quiz attempts, scores, or mastery history.
+    Enforces student ownership: 401 for unauthenticated, 403 for cross-student, 404 for not found.
+    """
+    student_id = get_authenticated_student_id(request)
+    try:
+        success = archive_study_material(material_id, student_id)
+    except PermissionError:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: Cannot remove study material belonging to another student."
+        )
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail="Study material not found."
+        )
+    return {"success": True, "message": "Study material removed successfully. Historical quiz progress preserved."}
+
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
