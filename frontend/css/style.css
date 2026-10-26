@@ -3260,25 +3260,56 @@ button.btn-notes-cta:hover:not(:disabled),
   text-align: center;
 }
 
+button.btn-icon-danger,
 .btn-icon-danger {
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0 !important;
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-muted);
-  display: flex;
+  background-color: #ffffff;
+  color: #dc2626;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
+button.btn-icon-danger:hover:not(:disabled),
 .btn-icon-danger:hover {
-  background-color: #fef2f2;
-  color: #dc2626;
-  border-color: #fecaca;
+  background-color: #fee2e2 !important;
+  color: #b91c1c !important;
+  border-color: #fca5a5 !important;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.15);
+}
+
+button.btn-icon-danger:focus,
+.btn-icon-danger:focus {
+  outline: 3px solid #fca5a5 !important;
+  outline-offset: 2px;
+}
+
+button.btn-icon-danger:active:not(:disabled),
+.btn-icon-danger:active {
+  background-color: #fecaca !important;
+  transform: scale(0.96);
+}
+
+.btn-icon-danger svg,
+.btn-icon-danger .icon-trash {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  stroke: currentColor;
+  stroke-width: 2;
+  display: block;
+  flex-shrink: 0;
 }
 
 /* Material Detail Subview */
@@ -3555,4 +3586,118 @@ button.btn-notes-cta:hover:not(:disabled),
 
 .btn-danger:hover {
   background-color: #b91c1c;
+}
+
+/* ==========================================================================
+   LearnAI — Integrated Notes & Slides Header & Expandable Materials
+   ========================================================================== */
+
+.notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-5) var(--space-6);
+  margin-bottom: var(--space-5);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.notes-header-main {
+  flex: 1;
+  min-width: 240px;
+}
+
+.notes-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.notes-subtitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* Expandable Material Card & Inline Topics Accordion */
+.material-card.is-expanded {
+  grid-column: 1 / -1;
+  border-color: var(--color-brand);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.12);
+  background: var(--color-surface);
+}
+
+.material-card-topics-panel {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.material-topics-header-inline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.material-topics-heading-inline {
+  font-size: var(--font-size-base);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.material-topics-list-inline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.topics-loading-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.spinner-sm {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
+
+@media (max-width: 640px) {
+  .notes-header {
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--space-4);
+  }
+  .materials-card {
+    padding: var(--space-4);
+  }
+  .materials-grid {
+    grid-template-columns: 1fr;
+  }
+  .material-topic-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+  .material-topic-actions {
+    justify-content: flex-end;
+  }
+  .material-topic-actions .btn-practice-topic {
+    width: 100%;
+  }
 }

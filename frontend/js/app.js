@@ -172,11 +172,15 @@ function escapeHtml(str) {
 
 // ── Mutually Exclusive Screen Management ────────────────────────────────────
 // Ensures EXACTLY ONE screen is visible at any time.
-const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection", "materialsSection"];
+const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection"];
 
 let lastActiveScreen = "setup";
 
 function showScreen(screenId, pushHistory = true) {
+  if (screenId === "materialsSection") {
+    screenId = "notesUploadSection";
+  }
+
   ALL_SCREENS.forEach(id => {
     const el = $(id);
     if (el) {
@@ -194,11 +198,15 @@ function showScreen(screenId, pushHistory = true) {
 
   const isDashboard = screenId === "dashboardSection";
   const isNotes = screenId === "notesUploadSection";
-  const isMaterials = screenId === "materialsSection";
   $("navDashboardBtn")?.classList.toggle("active", isDashboard);
   $("navNotesBtn")?.classList.toggle("active", isNotes);
-  $("navMaterialsBtn")?.classList.toggle("active", isMaterials);
-  $("navPracticeBtn")?.classList.toggle("active", !isDashboard && !isNotes && !isMaterials);
+  $("navMaterialsBtn")?.classList.toggle("active", isNotes);
+  $("navPracticeBtn")?.classList.toggle("active", !isDashboard && !isNotes);
+
+  if (isNotes && typeof loadStudyMaterials === "function") {
+    const expandId = lastPracticedStudyMaterialId || expandedMaterialId;
+    loadStudyMaterials({ expandMaterialId: expandId });
+  }
 
   // Safe programmatic focus on screen heading for screen readers & keyboard navigation
   const activeEl = $(screenId);
@@ -232,7 +240,8 @@ function saveSessionState() {
       activeCourseCode,
       activeTopicName,
       activeTopicId,
-      activeNotesSessionId
+      activeNotesSessionId,
+      activeStudyMaterialId
     }));
   }
 }
@@ -255,6 +264,7 @@ function restoreSessionState() {
       activeTopicName = data.activeTopicName || currentQuiz.topic;
       activeTopicId = data.activeTopicId || currentQuiz.topic_id || "";
       activeNotesSessionId = data.activeNotesSessionId || null;
+      activeStudyMaterialId = data.activeStudyMaterialId || currentQuiz.study_material_id || null;
 
       // Restore select dropdowns
       if ($("course") && activeCourseCode) {
@@ -829,7 +839,10 @@ async function submitQuiz() {
       throw new Error(data.detail || "Failed to submit quiz.");
     }
 
+    lastPracticedStudyMaterialId = activeStudyMaterialId || currentQuiz.study_material_id || null;
     clearSessionState();
+    studyMaterialsCacheTime = 0;
+    materialTopicsCache.clear();
     showResult(data);
   } catch (e) {
     clearTimeout(timeoutId);
@@ -2638,14 +2651,14 @@ async function sendNotesUploadXhr(formData, thisRequestId, isRetry) {
       if (!data.success || data.relevant === false || !data.matched_topics || data.matched_topics.length === 0) {
         lastExtractionResult = data;
         selectedTopicIndex = 0;
-        showNotesToast(data.message || "No curriculum topics matched your notes.", "error");
-        renderMatchedTopicsUI(data);
+        showNotesToast(data.message || "No curriculum syllabus topics matched your notes.", "error");
+        if ($("notesTopicResultsCard")) $("notesTopicResultsCard").classList.add("hidden");
         setTimeout(() => {
           if (progressWrap) progressWrap.classList.add("hidden");
           if (progressBar) progressBar.style.width = "0%";
         }, 500);
       } else {
-        // Success only after valid successful response
+        // Success: valid response with matched syllabus topics
         if (progressBar) {
           progressBar.style.width = "100%";
           progressBar.setAttribute("aria-valuenow", 100);
@@ -2653,13 +2666,37 @@ async function sendNotesUploadXhr(formData, thisRequestId, isRetry) {
         lastExtractionResult = data;
         selectedTopicIndex = 0;
 
-        showNotesToast(data.message || `Found ${data.matched_topics.length} matching curriculum topic(s).`, "success");
-        renderMatchedTopicsUI(data);
+        // Ensure intermediate results panel is not shown
+        if ($("notesTopicResultsCard")) $("notesTopicResultsCard").classList.add("hidden");
+
+        // Compact success notification
+        const topicCount = Array.isArray(data.matched_topics) ? data.matched_topics.length : 0;
+        const topicWord = topicCount === 1 ? "syllabus topic" : "syllabus topics";
+        const successMsg = data.message || `Notes processed successfully. Extracted ${topicCount} ${topicWord}.`;
+        showNotesToast(successMsg, "success");
+
+        // Reset staged uploader files and dropzone preview
+        cleanupImagePreview();
+        selectedNotesFiles = [];
+        renderNotesFilesUI();
+        if ($("notesFileInput")) $("notesFileInput").value = "";
+
+        // Invalidate cache and refresh saved study materials, auto-expanding the new material
+        studyMaterialsCacheTime = 0;
+        materialTopicsCache.clear();
+        if (typeof loadStudyMaterials === "function") {
+          loadStudyMaterials({ forceRefresh: true, expandMaterialId: data.study_material_id });
+        }
 
         setTimeout(() => {
           if (progressWrap) progressWrap.classList.add("hidden");
           if (progressBar) progressBar.style.width = "0%";
-        }, 800);
+          // Smoothly scroll to the expanded material card
+          const targetCard = data.study_material_id ? $(`materialCard_${data.study_material_id}`) : $("savedMaterialsSection");
+          if (targetCard) {
+            targetCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+        }, 600);
       }
     } else {
       let errMsg = "Unable to process files. Please try again.";
@@ -2904,8 +2941,13 @@ function initNotesUploaderListeners() {
 // ── Study Materials Client Implementation ────────────────────────────────────
 
 let activeStudyMaterialId = null;
-let currentViewingMaterial = null;
+let lastPracticedStudyMaterialId = null;
 let materialPendingRemoval = null;
+let studyMaterialsCache = null;
+let studyMaterialsCacheTime = 0;
+let materialTopicsCache = new Map();
+let expandedMaterialId = null;
+let isLoadingMaterials = false;
 
 function formatFileSize(bytes) {
   if (!bytes || bytes <= 0) return "0 B";
@@ -2935,19 +2977,39 @@ function getFileTypeBadgeClass(fileType) {
   return "icon-txt";
 }
 
-async function openStudyMaterials() {
-  if (isGenerating) return;
-  showScreen("materialsSection");
+async function loadStudyMaterials(options = {}) {
+  const forceRefresh = options.forceRefresh || false;
+  const targetExpandId = options.expandMaterialId || expandedMaterialId || null;
 
   const loadingEl = $("materialsLoading");
   const emptyState = $("materialsEmptyState");
   const listView = $("materialsListView");
-  const detailView = $("materialTopicsDetailView");
 
-  if (detailView) detailView.classList.add("hidden");
-  if (listView) listView.classList.remove("hidden");
-  if (emptyState) emptyState.classList.add("hidden");
-  if (loadingEl) loadingEl.classList.remove("hidden");
+  const now = Date.now();
+  // If not force-refreshing, reuse cache if fresh within 15 seconds
+  if (!forceRefresh && studyMaterialsCache && (now - studyMaterialsCacheTime < 15000)) {
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (studyMaterialsCache.length === 0) {
+      if (emptyState) emptyState.classList.remove("hidden");
+      if (listView) listView.classList.add("hidden");
+    } else {
+      if (emptyState) emptyState.classList.add("hidden");
+      if (listView) listView.classList.remove("hidden");
+      renderMaterialsGrid(studyMaterialsCache);
+      if (targetExpandId) {
+        expandMaterialCard(targetExpandId);
+      }
+    }
+    return;
+  }
+
+  if (isLoadingMaterials) return;
+  isLoadingMaterials = true;
+
+  if (!studyMaterialsCache) {
+    if (loadingEl) loadingEl.classList.remove("hidden");
+    if (emptyState) emptyState.classList.add("hidden");
+  }
 
   try {
     const res = await authenticatedFetch("/api/study-materials");
@@ -2955,23 +3017,39 @@ async function openStudyMaterials() {
       throw new Error(`Failed to load study materials (HTTP ${res.status})`);
     }
     const data = await res.json();
-    const materials = data.materials || [];
+    studyMaterialsCache = data.materials || [];
+    studyMaterialsCacheTime = Date.now();
 
     if (loadingEl) loadingEl.classList.add("hidden");
 
-    if (materials.length === 0) {
+    if (studyMaterialsCache.length === 0) {
       if (emptyState) emptyState.classList.remove("hidden");
       if (listView) listView.classList.add("hidden");
     } else {
       if (emptyState) emptyState.classList.add("hidden");
       if (listView) listView.classList.remove("hidden");
-      renderMaterialsGrid(materials);
+      renderMaterialsGrid(studyMaterialsCache);
+      if (targetExpandId) {
+        expandMaterialCard(targetExpandId);
+      }
     }
   } catch (err) {
     console.error("Error loading study materials:", err);
     if (loadingEl) loadingEl.classList.add("hidden");
-    if (emptyState) emptyState.classList.remove("hidden");
+    if (!studyMaterialsCache) {
+      if (emptyState) emptyState.classList.remove("hidden");
+      if (listView) listView.classList.add("hidden");
+    }
+  } finally {
+    isLoadingMaterials = false;
   }
+}
+
+// Backward-compatibility alias
+function openStudyMaterials() {
+  if (isGenerating) return;
+  showScreen("notesUploadSection");
+  loadStudyMaterials({ forceRefresh: true });
 }
 
 function renderMaterialsGrid(materials) {
@@ -2984,10 +3062,11 @@ function renderMaterialsGrid(materials) {
     const sizeStr = formatFileSize(m.file_size);
     const masteryPct = typeof m.mastery_percentage === "number" ? m.mastery_percentage : 0;
     const fillClass = masteryPct >= 80 ? "fill-high" : (masteryPct > 0 ? "fill-medium" : "");
+    const isExpanded = expandedMaterialId === m.id;
 
     return `
-      <div class="material-card" data-material-id="${escapeHtml(m.id)}">
-        <div>
+      <div class="material-card ${isExpanded ? 'is-expanded' : ''}" data-material-id="${escapeHtml(m.id)}" id="materialCard_${escapeHtml(m.id)}">
+        <div class="material-card-summary">
           <div class="material-card-top">
             <div class="material-card-type-icon ${iconClass}">
               ${escapeHtml(m.file_type || "FILE")}
@@ -3028,25 +3107,43 @@ function renderMaterialsGrid(materials) {
               <div class="progress-bar-fill ${fillClass}" style="width: ${masteryPct}%;"></div>
             </div>
           </div>
+
+          <div class="material-card-footer">
+            <button
+              type="button"
+              class="btn-primary btn-open-material"
+              data-material-id="${escapeHtml(m.id)}"
+              aria-expanded="${isExpanded ? 'true' : 'false'}"
+              aria-controls="materialTopics_${escapeHtml(m.id)}"
+            >
+              <span class="btn-open-text">${isExpanded ? 'Hide Topics &uarr;' : 'Open Topics &amp; Practice &rarr;'}</span>
+            </button>
+            <button
+              type="button"
+              class="btn-icon-danger btn-remove-material"
+              data-material-id="${escapeHtml(m.id)}"
+              data-filename="${escapeHtml(m.filename)}"
+              title="Remove study material (${escapeHtml(m.filename)})"
+              aria-label="Remove study material ${escapeHtml(m.filename)}"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="icon-trash">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div class="material-card-footer">
-          <button type="button" class="btn-primary btn-open-material" data-material-id="${escapeHtml(m.id)}">
-            Open Topics &amp; Practice &rarr;
-          </button>
-          <button
-            type="button"
-            class="btn-icon-danger btn-remove-material"
-            data-material-id="${escapeHtml(m.id)}"
-            data-filename="${escapeHtml(m.filename)}"
-            title="Remove ${escapeHtml(m.filename)}"
-            aria-label="Remove ${escapeHtml(m.filename)}"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
+        <div class="material-card-topics-panel ${isExpanded ? '' : 'hidden'}" id="materialTopics_${escapeHtml(m.id)}" role="region" aria-label="Extracted topics for ${escapeHtml(m.filename)}">
+          <div class="material-topics-header-inline">
+            <h4 class="material-topics-heading-inline">Extracted Syllabus Topics (${m.topic_count || 0})</h4>
+            <span class="muted text-xs">${m.mastered_count || 0} of ${m.topic_count || 0} mastered</span>
+          </div>
+          <div class="material-topics-list-inline" id="materialTopicsList_${escapeHtml(m.id)}">
+            <!-- Rendered dynamically -->
+          </div>
         </div>
       </div>
     `;
@@ -3055,12 +3152,18 @@ function renderMaterialsGrid(materials) {
   grid.querySelectorAll(".btn-open-material").forEach(btn => {
     btn.addEventListener("click", () => {
       const matId = btn.getAttribute("data-material-id");
-      if (matId) openMaterialDetail(matId);
+      if (!matId) return;
+      if (expandedMaterialId === matId) {
+        collapseMaterialCard(matId);
+      } else {
+        expandMaterialCard(matId);
+      }
     });
   });
 
   grid.querySelectorAll(".btn-remove-material").forEach(btn => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
       const matId = btn.getAttribute("data-material-id");
       const filename = btn.getAttribute("data-filename") || "this material";
       if (matId) promptRemoveMaterial(matId, filename);
@@ -3068,66 +3171,82 @@ function renderMaterialsGrid(materials) {
   });
 }
 
-async function openMaterialDetail(materialId) {
-  const loadingEl = $("materialsLoading");
-  const listView = $("materialsListView");
-  const detailView = $("materialTopicsDetailView");
+function collapseMaterialCard(materialId) {
+  const card = $(`materialCard_${materialId}`);
+  const panel = $(`materialTopics_${materialId}`);
+  const btn = card?.querySelector(".btn-open-material");
+  const btnText = btn?.querySelector(".btn-open-text");
 
-  if (listView) listView.classList.add("hidden");
-  if (detailView) detailView.classList.add("hidden");
-  if (loadingEl) loadingEl.classList.remove("hidden");
+  if (card) card.classList.remove("is-expanded");
+  if (panel) panel.classList.add("hidden");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  if (btnText) btnText.innerHTML = "Open Topics &amp; Practice &rarr;";
+
+  if (expandedMaterialId === materialId) {
+    expandedMaterialId = null;
+  }
+}
+
+async function expandMaterialCard(materialId) {
+  // If another card is expanded, collapse it first
+  if (expandedMaterialId && expandedMaterialId !== materialId) {
+    collapseMaterialCard(expandedMaterialId);
+  }
+
+  expandedMaterialId = materialId;
+  const card = $(`materialCard_${materialId}`);
+  const panel = $(`materialTopics_${materialId}`);
+  const listEl = $(`materialTopicsList_${materialId}`);
+  const btn = card?.querySelector(".btn-open-material");
+  const btnText = btn?.querySelector(".btn-open-text");
+
+  if (card) card.classList.add("is-expanded");
+  if (panel) panel.classList.remove("hidden");
+  if (btn) btn.setAttribute("aria-expanded", "true");
+  if (btnText) btnText.innerHTML = "Hide Topics &uarr;";
+
+  if (!listEl) return;
+
+  // Check cache for this material's topics
+  if (materialTopicsCache.has(materialId)) {
+    renderInlineTopicsList(materialId, materialTopicsCache.get(materialId));
+    return;
+  }
+
+  // Show inline loading state
+  listEl.innerHTML = `
+    <div class="topics-loading-inline">
+      <div class="spinner spinner-sm" aria-hidden="true"></div>
+      <span>Loading extracted topics and quiz progress...</span>
+    </div>
+  `;
 
   try {
     const res = await authenticatedFetch(`/api/study-materials/${encodeURIComponent(materialId)}`);
     if (!res.ok) {
-      throw new Error(`Failed to load material detail (HTTP ${res.status})`);
+      throw new Error(`Failed to load topics (HTTP ${res.status})`);
     }
     const material = await res.json();
-    currentViewingMaterial = material;
-
-    if (loadingEl) loadingEl.classList.add("hidden");
-    if (detailView) detailView.classList.remove("hidden");
-
-    renderMaterialTopicsView(material);
+    materialTopicsCache.set(materialId, material);
+    renderInlineTopicsList(materialId, material);
   } catch (err) {
     console.error("Failed to load study material topics:", err);
-    if (loadingEl) loadingEl.classList.add("hidden");
-    if (listView) listView.classList.remove("hidden");
+    listEl.innerHTML = `
+      <div class="notes-alert notes-alert-error" style="margin: var(--space-2) 0;">
+        <span>Unable to load topics for this material.</span>
+        <button type="button" class="secondary btn-sm" onclick="expandMaterialCard('${escapeHtml(materialId)}')">Retry</button>
+      </div>
+    `;
   }
 }
 
-function renderMaterialTopicsView(material) {
-  const tagEl = $("materialDetailTag");
-  const filenameEl = $("materialDetailFilename");
-  const metaEl = $("materialDetailMeta");
-  const masteryValEl = $("materialDetailMasteryVal");
-  const masterySubEl = $("materialDetailMasterySub");
-  const progressFill = $("materialDetailProgressBar");
-  const listEl = $("materialTopicsList");
-
-  if (tagEl) tagEl.textContent = material.file_type || "FILE";
-  if (filenameEl) filenameEl.textContent = material.filename;
-  if (metaEl) {
-    const dateStr = formatMaterialDate(material.created_at);
-    const sizeStr = formatFileSize(material.file_size);
-    const tCount = (material.topics || []).length;
-    metaEl.textContent = `Uploaded ${dateStr} • ${sizeStr} • ${tCount} Topic${tCount === 1 ? '' : 's'}`;
-  }
-
-  const masteryPct = material.mastery_percentage || 0;
-  if (masteryValEl) masteryValEl.textContent = `${masteryPct}%`;
-  if (masterySubEl) {
-    masterySubEl.textContent = `${material.mastered_topics || 0} of ${material.topic_count || (material.topics || []).length} topics mastered`;
-  }
-  if (progressFill) {
-    progressFill.style.width = `${masteryPct}%`;
-    progressFill.className = `progress-bar-fill ${masteryPct >= 80 ? 'fill-high' : (masteryPct > 0 ? 'fill-medium' : '')}`;
-  }
-
+function renderInlineTopicsList(materialId, material) {
+  const listEl = $(`materialTopicsList_${materialId}`);
   if (!listEl) return;
+
   const topics = material.topics || [];
   if (topics.length === 0) {
-    listEl.innerHTML = '<p class="muted">No syllabus topics extracted from this document.</p>';
+    listEl.innerHTML = '<p class="muted text-sm">No syllabus topics extracted from this document.</p>';
     return;
   }
 
@@ -3136,6 +3255,12 @@ function renderMaterialTopicsView(material) {
     const statusLabel = t.status_label || "Not Attempted";
     const attempts = t.attempt_count || 0;
     const latestScore = t.latest_score !== null && t.latest_score !== undefined ? `${Math.round(t.latest_score)}%` : null;
+    const matchScore = (typeof t.confidence === "number" && t.confidence > 0)
+      ? Math.round(t.confidence * (t.confidence <= 1.0 ? 100 : 1))
+      : null;
+    const matchBadge = matchScore !== null
+      ? `<span class="notes-confidence-badge">${matchScore}% Match</span>`
+      : "";
 
     let subStatusText = "";
     if (statusKey === "mastered") {
@@ -3153,6 +3278,7 @@ function renderMaterialTopicsView(material) {
         <div class="material-topic-main">
           <div class="material-topic-header">
             <span class="notes-course-tag">${escapeHtml(t.course_code)} - ${escapeHtml(t.course_name)}</span>
+            ${matchBadge}
             <span class="topic-badge-status status-${statusKey}">
               ${escapeHtml(statusLabel)}${subStatusText}
             </span>
@@ -3219,8 +3345,12 @@ async function confirmRemoveMaterial() {
     if (!res.ok) {
       throw new Error(`Failed to remove material: HTTP ${res.status}`);
     }
+    materialTopicsCache.delete(id);
+    if (expandedMaterialId === id) {
+      expandedMaterialId = null;
+    }
     closeRemoveModal();
-    openStudyMaterials();
+    loadStudyMaterials({ forceRefresh: true });
   } catch (err) {
     console.error("Error removing study material:", err);
     alert("Could not remove the study material. Please try again.");
@@ -3237,22 +3367,32 @@ let studyMaterialsListenersInitialized = false;
 function initStudyMaterialsListeners() {
   if (studyMaterialsListenersInitialized) return;
   studyMaterialsListenersInitialized = true;
+
   $("navMaterialsBtn")?.addEventListener("click", () => {
-    openStudyMaterials();
+    if (isGenerating) return;
+    showScreen("notesUploadSection");
+    loadStudyMaterials({ forceRefresh: true });
+  });
+
+  $("materialsRefreshBtn")?.addEventListener("click", () => {
+    materialTopicsCache.clear();
+    loadStudyMaterials({ forceRefresh: true });
+  });
+
+  $("materialsEmptyUploadBtn")?.addEventListener("click", () => {
+    const uploaderCard = $("notesUploaderCard");
+    if (uploaderCard) {
+      uploaderCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    const dropzone = $("notesDropzone");
+    if (dropzone) {
+      dropzone.focus();
+    }
   });
 
   $("materialsUploadNewBtn")?.addEventListener("click", () => {
     if (isGenerating) return;
     showScreen("notesUploadSection");
-  });
-
-  $("materialsEmptyUploadBtn")?.addEventListener("click", () => {
-    if (isGenerating) return;
-    showScreen("notesUploadSection");
-  });
-
-  $("materialDetailBackBtn")?.addEventListener("click", () => {
-    openStudyMaterials();
   });
 
   $("removeModalCancelBtn")?.addEventListener("click", closeRemoveModal);
