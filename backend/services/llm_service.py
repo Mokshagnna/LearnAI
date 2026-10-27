@@ -132,7 +132,8 @@ def _load_local_demo_questions(
     course_code: str,
     topic_name: str,
     concepts: Optional[List[str]] = None,
-    syllabus_context: Optional[str] = None
+    syllabus_context: Optional[str] = None,
+    competing_topics: Optional[List[Any]] = None
 ) -> Optional[Dict[str, Any]]:
     """Safe fallback mechanism for college demonstration if local questions already exist."""
     if not DEMO_QUESTIONS_FILE.is_file():
@@ -158,7 +159,9 @@ def _load_local_demo_questions(
                 data.get("subject", ""),
                 topic_name,
                 concepts=concepts,
-                syllabus_context=syllabus_context
+                syllabus_context=syllabus_context,
+                course_code=course_code,
+                competing_topics=competing_topics
             )
             validated["is_fallback"] = True
             validated["fallback_label"] = "Local Demo Question Bank (Offline Mode)"
@@ -208,7 +211,9 @@ def generate_quiz(
     syllabus_context: str,
     student_id: Optional[str] = None,
     concepts: Optional[List[str]] = None,
-    difficulty: Optional[str] = None
+    difficulty: Optional[str] = None,
+    competing_topics: Optional[List[Any]] = None,
+    disallowed_topics: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Multi-provider quiz generation with:
@@ -219,8 +224,29 @@ def generate_quiz(
     - Adaptive difficulty based on student history (or optional manual override)
     - Anti-repetition prompt enrichment with previously tested concepts
     - Automatic fallback to local demo questions
+    - Strict topic isolation preventing off-topic questions from neighboring or co-occurring syllabus topics
     """
     attempt_id = str(uuid.uuid4())
+
+    # Ensure competing and disallowed topics are populated for strict topic isolation
+    if competing_topics is None:
+        try:
+            from services.curriculum_service import curriculum_service
+            crs = curriculum_service.get_course(course_code)
+            if crs:
+                competing_topics = [
+                    t["name"] for t in crs.get("topics", [])
+                    if t.get("name") and t["name"].strip().lower() != topic_name.strip().lower()
+                ]
+        except Exception:
+            competing_topics = []
+
+    if disallowed_topics is None and competing_topics:
+        disallowed_topics = [
+            (ct if isinstance(ct, str) else ct.get("name", ""))
+            for ct in competing_topics
+            if (ct if isinstance(ct, str) else ct.get("name"))
+        ][:6]
 
     # ── Student context ───────────────────────────────────────────────────────
     student_id = get_or_create_student(student_id)
@@ -330,7 +356,7 @@ def generate_quiz(
             return stored_fallback
 
         local_quiz = _load_local_demo_questions(
-            course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context
+            course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context, competing_topics=competing_topics
         )
         if local_quiz:
             local_quiz["attempt_id"] = attempt_id
@@ -399,7 +425,8 @@ def generate_quiz(
                     topic_name=topic_name,
                     syllabus_context=syllabus_context,
                     difficulty_dist=difficulty_dist,
-                    concepts=concepts
+                    concepts=concepts,
+                    disallowed_topics=disallowed_topics
                 )
                 extra_parts = []
                 if novelty_block:
@@ -423,7 +450,9 @@ def generate_quiz(
                     topic_name,
                     concepts=concepts,
                     syllabus_context=syllabus_context,
-                    difficulty_dist=difficulty_dist
+                    difficulty_dist=difficulty_dist,
+                    course_code=course_code,
+                    competing_topics=competing_topics
                 )
 
                 # ── Bounded Replenishment for missing unique questions ─────────
@@ -444,9 +473,13 @@ def generate_quiz(
                     try:
                         existing_texts = [q["question"] for q in current_unique]
                         concept_str = ", ".join(concepts) if concepts else topic_name
+                        disallowed_str = f"\nNEGATIVE CONSTRAINT: Absolutely do NOT generate questions on competing topics ({', '.join(disallowed_topics)})." if disallowed_topics else ""
                         rep_full_prompt = f"""You are an expert academic AI quiz generator for {course_code} - {course_name}.
 Selected Topic: {topic_name}
-Syllabus Concepts: {concept_str}
+Authorized Syllabus Concepts: {concept_str}
+
+STRICT TOPIC MANDATE: Every question must test ONLY '{topic_name}'.
+{disallowed_str}
 
 We need AT LEAST {ask_count} additional, completely NEW and UNIQUE multiple-choice questions for '{topic_name}' to complete a 10-question set.
 CRITICAL: Do NOT duplicate or rephrase any of these already accepted questions:
@@ -487,7 +520,9 @@ REQUIREMENTS:
                             concepts=concepts,
                             syllabus_context=syllabus_context,
                             min_questions=1,
-                            difficulty_dist=difficulty_dist
+                            difficulty_dist=difficulty_dist,
+                            course_code=course_code,
+                            competing_topics=competing_topics
                         )
                         for cand_q in rep_validated["questions"]:
                             if len(current_unique) >= 10:
@@ -501,18 +536,33 @@ REQUIREMENTS:
                     except Exception as rep_err:
                         logger.warning(f"[REPLENISHMENT FAILED round {rep_attempts}] provider={provider.name}: {rep_err}")
 
-                # If still under 10, supplement with eligible stored questions if available
+                # If still under 10, supplement with eligible stored questions IF they strictly pass topic isolation for topic_name
                 if len(validated_quiz["questions"]) < 10 and eligible_stored:
+                    from services.novelty import is_question_relevant_to_topic
                     for sq in eligible_stored:
                         if len(validated_quiz["questions"]) >= 10:
                             break
-                        if not any(is_question_near_duplicate(ex_q, sq)[0] for ex_q in validated_quiz["questions"]):
+                        is_rel, _ = is_question_relevant_to_topic(
+                            sq,
+                            topic_name=topic_name,
+                            course_code=course_code,
+                            concepts=concepts,
+                            competing_topics=competing_topics,
+                            syllabus_context=syllabus_context
+                        )
+                        if is_rel and not any(is_question_near_duplicate(ex_q, sq)[0] for ex_q in validated_quiz["questions"]):
                             validated_quiz["questions"].append(sq)
 
-                if len(validated_quiz["questions"]) < 10:
-                    raise ValueError(f"Provider {provider.name} generated only {len(validated_quiz['questions'])} unique valid questions (need 10).")
+                if len(validated_quiz["questions"]) < 1:
+                    raise ValueError(f"Provider {provider.name} generated no valid questions strictly isolating '{topic_name}'.")
 
-                # Slice strictly to 10 unique questions
+                if len(validated_quiz["questions"]) < 10:
+                    logger.info(
+                        f"[QUIZ GEN TOPIC ISOLATION] Provider {provider.name} generated {len(validated_quiz['questions'])} "
+                        f"verified topic-isolated questions for '{topic_name}' (returning without off-topic padding)."
+                    )
+
+                # Slice strictly to at most 10 unique questions
                 validated_quiz["questions"] = validated_quiz["questions"][:10]
 
                 # ── Comprehensive Novelty Evaluation (text + concepts) ─────────
@@ -579,7 +629,10 @@ REQUIREMENTS:
                                     course_name,
                                     topic_name,
                                     concepts=concepts,
-                                    syllabus_context=syllabus_context
+                                    syllabus_context=syllabus_context,
+                                    difficulty_dist=difficulty_dist,
+                                    course_code=course_code,
+                                    competing_topics=competing_topics
                                 )
                                 novelty_repair = evaluate_quiz_novelty(
                                     questions=validated_repair["questions"],

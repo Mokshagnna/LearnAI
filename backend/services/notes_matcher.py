@@ -428,22 +428,26 @@ def select_relevant_notes_context(
     notes_text: str,
     topic_name: str,
     course_code: str = "",
+    competing_topics: Optional[List[Any]] = None,
+    matched_concepts: Optional[List[str]] = None,
     max_chars: int = 3000
 ) -> str:
     """
     Selects the most topic-relevant windows of text from uploaded notes
-    using paragraph segmentation and TF-IDF similarity ranking.
-    Preserves original document reading order when assembling selected windows.
-    Safely falls back to prefix truncation if text is short, noisy, or unranked.
+    using paragraph segmentation, TF-IDF ranking, and competing topic suppression.
+    Guarantees:
+      - Strictly excludes passages/slides that belong to competing syllabus topics.
+      - Returns empty string if uploaded text has negligible relevance to the target topic.
+      - Preserves document reading order for selected topic-isolated windows.
     """
     safe_text = (notes_text or "").replace("</student_notes_untrusted>", "").replace("<student_notes_untrusted>", "").strip()
-    if not safe_text or len(safe_text) <= max_chars:
-        return safe_text
+    if not safe_text:
+        return ""
 
     # 1. Segment text into coherent paragraph blocks
-    raw_paras = [p.strip() for p in safe_text.split("\n\n") if p.strip()]
+    raw_paras = [p.strip() for p in re.split(r'\n{2,}|\n(?=(?:Slide\s+\d+|Module|Unit|Chapter|Topic)\b)', safe_text) if p.strip()]
     if not raw_paras:
-        return safe_text[:max_chars]
+        raw_paras = [safe_text]
 
     # Break oversized paragraphs (>1200 chars) into sentence or clause chunks
     chunks: List[str] = []
@@ -481,66 +485,75 @@ def select_relevant_notes_context(
                 if curr:
                     chunks.append(" ".join(curr))
 
-    # 2. Group chunks into overlapping windows of ~800 to 1200 chars
-    windows: List[Dict[str, Any]] = []
-    current_window: List[str] = []
-    current_len = 0
-
-    for chunk in chunks:
-        c_len = len(chunk)
-        if current_len + c_len > 1200 and current_window:
-            windows.append({
-                "index": len(windows),
-                "text": "\n\n".join(current_window)
-            })
-            # 1-chunk overlap to preserve context across boundaries
-            current_window = [current_window[-1], chunk] if len(current_window) > 1 else [chunk]
-            current_len = sum(len(x) for x in current_window) + 2
-        else:
-            current_window.append(chunk)
-            current_len += c_len + 2
-
-    if current_window:
-        windows.append({
-            "index": len(windows),
-            "text": "\n\n".join(current_window)
-        })
+    # 2. Form chunk windows (evaluates each coherent paragraph or slide independently)
+    windows: List[Dict[str, Any]] = [
+        {"index": idx, "text": chunk} for idx, chunk in enumerate(chunks)
+    ]
 
     if not windows:
-        return safe_text[:max_chars]
+        return ""
 
-    # 3. Score windows against target topic using precomputed curriculum TF-IDF and lexical overlap
+    # 3. Setup Target and Competing Vocabulary
+    topic_tokens = set(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", topic_name.lower()))
+    if matched_concepts:
+        for mc in matched_concepts:
+            topic_tokens.update(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", str(mc).lower()))
+
     tfidf_index = _get_curriculum_tfidf_index()
+    target_t_lower = topic_name.strip().lower()
+    target_c_lower = course_code.strip().lower()
+    topic_idx = None
+
+    competing_tokens_map: Dict[str, Set[str]] = {}
+    if competing_topics:
+        for ct in competing_topics:
+            c_name = ct if isinstance(ct, str) else (ct.get("name") or ct.get("topic_name") or "")
+            c_name = str(c_name).strip()
+            if c_name and c_name.lower() != target_t_lower:
+                c_toks = set(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", c_name.lower()))
+                if isinstance(ct, dict):
+                    for mc in ct.get("matched_concepts", []) or ct.get("concepts", []):
+                        c_toks.update(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", str(mc).lower()))
+                competing_tokens_map[c_name] = c_toks
+
+    # Find curriculum topic vector for target topic if available (prioritizing exact topic name match)
+    if tfidf_index and "metadata" in tfidf_index:
+        for idx, m in enumerate(tfidf_index["metadata"]):
+            m_t_lower = m["topic_name"].lower()
+            m_c_lower = m["course_code"].lower()
+            if m_t_lower == target_t_lower:
+                if not target_c_lower or m_c_lower == target_c_lower:
+                    topic_idx = idx
+                    for c in m.get("concepts", []):
+                        topic_tokens.update(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", c.lower()))
+                    break
+        if topic_idx is None:
+            for idx, m in enumerate(tfidf_index["metadata"]):
+                m_t_lower = m["topic_name"].lower()
+                m_c_lower = m["course_code"].lower()
+                if target_t_lower in m_t_lower or (len(m_t_lower) > 12 and m_t_lower in target_t_lower):
+                    if not target_c_lower or m_c_lower == target_c_lower:
+                        topic_idx = idx
+                        for c in m.get("concepts", []):
+                            topic_tokens.update(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", c.lower()))
+                        break
+
+    # Clean competing tokens to be exclusive (remove tokens shared with target topic)
+    comp_exclusive_map: Dict[str, Set[str]] = {}
+    for c_name, c_toks in competing_tokens_map.items():
+        excl = c_toks - topic_tokens
+        if excl:
+            comp_exclusive_map[c_name] = excl
+
+    # 4. Score windows against target topic using TF-IDF and lexical overlap
     scored_windows: List[Tuple[float, Dict[str, Any]]] = []
     topic_query = f"{course_code} {topic_name}".strip()
-    topic_tokens = set(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", topic_name.lower()))
 
     sims = None
     if tfidf_index and SKLEARN_AVAILABLE:
         try:
             vec = tfidf_index["vectorizer"]
             w_vecs = vec.transform([w["text"] for w in windows])
-
-            # Lookup precomputed topic vector from curriculum index for richer semantic signal
-            target_t_lower = topic_name.strip().lower()
-            target_c_lower = course_code.strip().lower()
-            topic_idx = None
-            if "metadata" in tfidf_index:
-                for idx, m in enumerate(tfidf_index["metadata"]):
-                    if m["topic_name"].lower() == target_t_lower:
-                        if not target_c_lower or m["course_code"].lower() == target_c_lower:
-                            topic_idx = idx
-                            for c in m.get("concepts", []):
-                                topic_tokens.update(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", c.lower()))
-                            break
-                if topic_idx is None:
-                    for idx, m in enumerate(tfidf_index["metadata"]):
-                        if target_t_lower in m["topic_name"].lower() or m["topic_name"].lower() in target_t_lower:
-                            if not target_c_lower or m["course_code"].lower() == target_c_lower:
-                                topic_idx = idx
-                                for c in m.get("concepts", []):
-                                    topic_tokens.update(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", c.lower()))
-                                break
 
             if topic_idx is not None:
                 q_vec = tfidf_index["tfidf_matrix"][topic_idx]
@@ -555,9 +568,33 @@ def select_relevant_notes_context(
     for i, w in enumerate(windows):
         tfidf_score = float(sims[i]) if (sims is not None and i < len(sims)) else 0.0
         w_lower = w["text"].lower()
-        lex_overlap = sum(1 for tok in topic_tokens if tok in w_lower)
-        combined_score = tfidf_score + (0.05 * lex_overlap)
-        scored_windows.append((combined_score, w))
+        w_tokens = set(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", w_lower))
+
+        lex_overlap = len(topic_tokens & w_tokens)
+        target_score = tfidf_score + (0.05 * lex_overlap)
+
+        # Competing topics suppression
+        max_comp_overlap = 0
+        for c_name, excl_tokens in comp_exclusive_map.items():
+            c_overlap = len(excl_tokens & w_tokens)
+            if c_overlap > max_comp_overlap:
+                max_comp_overlap = c_overlap
+
+        # If window is strongly dominated by a competing topic and has low/no target overlap, exclude it
+        if max_comp_overlap >= 2 and max_comp_overlap > lex_overlap:
+            continue
+
+        # If window has zero target overlap and very low TF-IDF, exclude it
+        if lex_overlap == 0 and target_score < 0.04:
+            continue
+
+        scored_windows.append((target_score, w))
+
+    if not scored_windows:
+        # Check if single short snippet directly discussing topic
+        if len(safe_text) < 300 and len(topic_tokens & set(re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", safe_text.lower()))) > 0:
+            return safe_text
+        return ""
 
     # Sort windows by score descending
     scored_windows.sort(key=lambda x: x[0], reverse=True)
@@ -565,13 +602,13 @@ def select_relevant_notes_context(
     # Filter out irrelevant windows (relative threshold against highest-scoring window)
     max_score = scored_windows[0][0] if scored_windows else 0.0
     if max_score > 0.10:
-        candidate_windows = [item for item in scored_windows if item[0] >= 0.45 * max_score]
+        candidate_windows = [item for item in scored_windows if item[0] >= 0.40 * max_score]
     elif max_score > 0.03:
         candidate_windows = [item for item in scored_windows if item[0] >= 0.02]
     else:
         candidate_windows = scored_windows
 
-    # 4. Greedily select top windows fitting into max_chars
+    # 5. Greedily select top windows fitting into max_chars
     selected_windows: List[Dict[str, Any]] = []
     accumulated_chars = 0
 
@@ -591,9 +628,9 @@ def select_relevant_notes_context(
             break
 
     if not selected_windows:
-        return safe_text[:max_chars]
+        return ""
 
-    # 5. Re-sort selected windows in original document sequence
+    # 6. Re-sort selected windows in original document sequence
     selected_windows.sort(key=lambda w: w["index"])
     assembled_excerpt = "\n\n[...]\n\n".join(w["text"] for w in selected_windows)
     return assembled_excerpt[:max_chars].strip()

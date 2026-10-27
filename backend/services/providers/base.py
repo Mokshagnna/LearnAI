@@ -33,7 +33,8 @@ def get_quiz_prompt(
     topic_name: str,
     syllabus_context: str,
     difficulty_dist: Optional[Dict[str, int]] = None,
-    concepts: Optional[List[str]] = None
+    concepts: Optional[List[str]] = None,
+    disallowed_topics: Optional[List[str]] = None
 ) -> str:
     """Common standardized prompt for all AI providers with strict topic grounding and anti-duplication directives."""
     if not difficulty_dist:
@@ -66,6 +67,17 @@ Syllabus Concepts to Cover for '{topic_name}':
 - Ensure each question explicitly sets its "concept" field to the relevant syllabus concept name from this list.
 """
 
+    negative_constraint_block = ""
+    if disallowed_topics:
+        clean_disallowed = [t.strip() for t in disallowed_topics if t and t.strip()]
+        if clean_disallowed:
+            negative_constraint_block = (
+                f"- NEGATIVE CONSTRAINT (STRICTLY FORBIDDEN): Absolutely DO NOT generate questions on these "
+                f"competing or adjacent topics, even if they appear in notes or syllabus reference:\n"
+                + "\n".join(f"  * {d}" for d in clean_disallowed)
+                + "\n"
+            )
+
     return f"""You are an expert academic AI quiz generator for university students (B.Tech CSE AI&ML curriculum).
 
 Course: {course_code} - {course_name}
@@ -74,11 +86,12 @@ Selected Topic: {topic_name}
 Syllabus Reference Context:
 {syllabus_context}
 
-CRITICAL RULES FOR RELEVANCE AND INTEGRITY:
-1. STRICT TOPIC RELEVANCE (MANDATORY):
+CRITICAL RULES FOR RELEVANCE AND TOPIC ISOLATION:
+1. STRICT TOPIC ISOLATION (MANDATORY & ABSOLUTE):
    - ALL 10 questions MUST strictly and directly assess the Selected Topic: "{topic_name}".
    - Under NO circumstances should you include questions from other topics, modules, or units of {course_name}.
-   - Do NOT bring in unrelated concepts from other parts of the course syllabus just to fill 10 questions.
+   {negative_constraint_block}   - Do NOT bring in unrelated concepts from other parts of the course syllabus just to fill 10 questions.
+   - If study notes are provided in the reference context, use them ONLY for '{topic_name}'. You MUST completely IGNORE any passages in the notes discussing other topics.
    - Ground all questions solely in the selected topic and its syllabus concepts.
 
 2. ZERO DUPLICATE QUESTIONS (MANDATORY):
@@ -397,15 +410,17 @@ def validate_quiz_data(
     concepts: Optional[List[str]] = None,
     syllabus_context: Optional[str] = None,
     min_questions: int = 5,
-    difficulty_dist: Optional[Dict[str, int]] = None
+    difficulty_dist: Optional[Dict[str, int]] = None,
+    course_code: str = "",
+    competing_topics: Optional[List[Any]] = None
 ) -> Dict[str, Any]:
     """
     Validates that the generated data strictly fulfills quiz requirements:
       - Validates non-empty question statements and 4 non-empty options (A, B, C, D)
       - Verifies that correct answer maps to one of the 4 options
-      - Verifies question relevance to selected topic and syllabus context
+      - Verifies strict topic isolation and relevance against competing syllabus/document topics
       - Detects and removes exact and near-duplicate questions within the quiz
-      - Normalizes concept tags to genuine syllabus concepts
+      - Normalizes concept tags to genuine syllabus concepts only AFTER topic verification
       - NEVER creates fake or '(Application Variation)' duplicate questions
     """
     from services.novelty import (
@@ -440,16 +455,22 @@ def validate_quiz_data(
         if not validated_q:
             continue
 
-        # 1. Normalize concept tag to genuine syllabus concept
-        validated_q["concept"] = normalize_question_concept(validated_q, topic_name, concepts)
-
-        # 2. Check topic relevance
+        # 1. Check topic relevance and isolation BEFORE normalizing concept tag
+        # (Prevents off-topic questions from masking their identity via premature concept substitution)
         is_relevant, rel_reason = is_question_relevant_to_topic(
-            validated_q, topic_name, concepts=concepts, syllabus_context=syllabus_context
+            validated_q,
+            topic_name,
+            concepts=concepts,
+            syllabus_context=syllabus_context,
+            course_code=course_code,
+            competing_topics=competing_topics
         )
         if not is_relevant:
-            logger.warning(f"[RELEVANCE FILTER] Skipped off-topic question: {rel_reason} ('{validated_q['question'][:50]}...')")
+            logger.warning(f"[TOPIC ISOLATION FILTER] Skipped off-topic question: {rel_reason} ('{validated_q['question'][:50]}...')")
             continue
+
+        # 2. Normalize concept tag to genuine syllabus concept only for validated questions
+        validated_q["concept"] = normalize_question_concept(validated_q, topic_name, concepts)
 
         valid_questions.append(validated_q)
 

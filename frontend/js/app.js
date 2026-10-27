@@ -453,7 +453,7 @@ $("retakeBtn").addEventListener("click", async () => {
   if ($("progressPercent")) $("progressPercent").textContent = "0% completed";
 
   // 4. Launch fresh quiz generation for retake
-  await startQuizGeneration(courseCode, topic, true, topicId, activeNotesSessionId);
+  await startQuizGeneration(courseCode, topic, true, topicId, activeNotesSessionId, activeStudyMaterialId);
 
   retakeBtn.disabled = false;
   retakeBtn.textContent = "Retake with New AI Questions";
@@ -523,9 +523,13 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
 
   if (notesSessionId) {
     activeNotesSessionId = notesSessionId;
+  } else if (!isRetake) {
+    activeNotesSessionId = null;
   }
   if (studyMaterialId) {
     activeStudyMaterialId = studyMaterialId;
+  } else if (!isRetake) {
+    activeStudyMaterialId = null;
   }
 
   const generateBtn = $("generateBtn");
@@ -633,6 +637,8 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     // ── Success: Initialize Clean Quiz State ──
     currentQuiz = data;
     if (data.topic_id) activeTopicId = data.topic_id;
+    if (data.study_material_id) activeStudyMaterialId = data.study_material_id;
+    if (data.notes_session_id) activeNotesSessionId = data.notes_session_id;
     currentIndex = 0;
     answers = Array(data.questions.length).fill("");
 
@@ -661,7 +667,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     const retryBtn = $("loadingRetryBtn");
     if (retryBtn) {
       retryBtn.onclick = () => {
-        startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId);
+        startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId);
       };
     }
 

@@ -226,7 +226,8 @@ GENERIC_DOMAIN_WORDS = {
     "overview", "problem", "problems", "theory", "process", "rule", "rules",
     "function", "functions", "model", "models", "structure", "structures",
     "analysis", "technique", "techniques", "simple", "general", "standard",
-    "different", "following", "given", "common", "important", "order", "value", "values"
+    "different", "following", "given", "common", "important", "order", "value", "values",
+    "data", "database", "databases", "query", "queries"
 }
 
 
@@ -234,22 +235,35 @@ def is_question_relevant_to_topic(
     question: Dict[str, Any],
     topic_name: str,
     concepts: Optional[List[str]] = None,
-    syllabus_context: Optional[str] = None
+    syllabus_context: Optional[str] = None,
+    course_code: str = "",
+    competing_topics: Optional[List[Any]] = None
 ) -> Tuple[bool, str]:
     """
-    Verifies whether a question is relevant to the selected topic and its syllabus scope.
-    Prevents AI from generating questions on unrelated topics from the same course.
+    Authoritative topic isolation validator.
+    Verifies that:
+      1. Strips untrusted student notes from syllabus_context so passive reference never dilutes topic boundaries.
+      2. Requires distinctive keyword or concept overlap with the selected topic.
+      3. Verifies that the question does NOT primarily test competing or sibling syllabus topics
+         from the same course or uploaded notes document.
     """
     q_text = str(question.get("question", "")).strip()
     if not q_text:
         return False, "Empty question statement"
 
-    # Extract domain vocabulary
+    # Extract target domain vocabulary (excluding untrusted student notes blocks)
     vocab_sources = [topic_name]
     if concepts:
         vocab_sources.extend(concepts)
     if syllabus_context:
-        vocab_sources.append(syllabus_context)
+        clean_ctx = re.sub(
+            r"<student_notes_untrusted>.*?</student_notes_untrusted>",
+            "",
+            syllabus_context,
+            flags=re.DOTALL | re.IGNORECASE
+        ).strip()
+        if clean_ctx:
+            vocab_sources.append(clean_ctx)
 
     target_text = " ".join(vocab_sources)
     target_norm = normalise_text(target_text)
@@ -259,8 +273,30 @@ def is_question_relevant_to_topic(
         words = set(target_norm.split())
         target_keywords = {w for w in words if w not in COMMON_STOPWORDS and len(w) >= 2}
 
+    # Target concepts set for direct concept matching
+    target_concepts_lower = {str(c).strip().lower() for c in (concepts or []) if str(c).strip()}
+
+    # If course_code is provided, enrich target_keywords and target_concepts with curriculum concepts for target topic
+    if course_code:
+        try:
+            from services.curriculum_service import curriculum_service
+            crs = curriculum_service.get_course(course_code)
+            if crs:
+                target_lower = topic_name.strip().lower()
+                for ct in crs.get("topics", []):
+                    ct_name = ct.get("name", "").strip().lower()
+                    if ct_name == target_lower or ct_name in target_lower or target_lower in ct_name:
+                        for c in ct.get("concepts", []):
+                            target_concepts_lower.add(str(c).strip().lower())
+                            for kw in extract_concept_keywords(normalise_text(str(c))):
+                                target_keywords.add(kw)
+        except Exception:
+            pass
+
     # Question keywords (text + concept + explanation + options)
-    q_full = q_text + " " + str(question.get("concept", "")) + " " + str(question.get("explanation", ""))
+    q_concept_raw = str(question.get("concept", "")).strip()
+    q_explanation_raw = str(question.get("explanation", "")).strip()
+    q_full = q_text + " " + q_concept_raw + " " + q_explanation_raw
     if isinstance(question.get("options"), dict):
         for opt_val in question.get("options", {}).values():
             q_full += " " + str(opt_val)
@@ -268,18 +304,85 @@ def is_question_relevant_to_topic(
     q_norm = normalise_text(q_full)
     q_keywords = extract_concept_keywords(q_norm)
 
-    # Overlap check
+    # 1. Target Overlap check
     shared = target_keywords & q_keywords
     distinctive = shared - GENERIC_DOMAIN_WORDS
+
+    stem_matches = []
+    for kw in target_keywords:
+        if kw not in GENERIC_DOMAIN_WORDS and len(kw) >= 4 and any(kw in qw or qw in kw for qw in q_keywords if len(qw) >= 4):
+            stem_matches.append(kw)
+
+    has_target_relevance = (len(distinctive) >= 1) or (len(shared) >= 2) or (len(stem_matches) >= 1)
+    if not has_target_relevance:
+        return False, f"Question has no relevance to topic '{topic_name}' or its syllabus concepts"
+
+    # 2. Competing Topics Isolation Check
+    competing_specs: List[Dict[str, Any]] = []
+    seen_competing_names = {topic_name.strip().lower()}
+
+    if competing_topics is not None:
+        for ct in competing_topics:
+            if isinstance(ct, str) and ct.strip() and ct.strip().lower() not in seen_competing_names:
+                seen_competing_names.add(ct.strip().lower())
+                competing_specs.append({"name": ct.strip(), "concepts": []})
+            elif isinstance(ct, dict) and ct.get("name") and ct["name"].strip().lower() not in seen_competing_names:
+                seen_competing_names.add(ct["name"].strip().lower())
+                competing_specs.append(ct)
+            elif isinstance(ct, dict) and ct.get("topic_name") and ct["topic_name"].strip().lower() not in seen_competing_names:
+                seen_competing_names.add(ct["topic_name"].strip().lower())
+                competing_specs.append({"name": ct["topic_name"].strip(), "concepts": ct.get("matched_concepts", [])})
+    if course_code:
+        try:
+            from services.curriculum_service import curriculum_service
+            crs = curriculum_service.get_course(course_code)
+            if crs:
+                target_lower = topic_name.strip().lower()
+                for ct in crs.get("topics", []):
+                    ct_name = ct.get("name", "").strip()
+                    if ct_name and ct_name.lower() not in seen_competing_names:
+                        if target_lower in ct_name.lower() or ct_name.lower() in target_lower:
+                            continue
+                        seen_competing_names.add(ct_name.lower())
+                        competing_specs.append(ct)
+        except Exception:
+            pass
+
+    # Check whether question is dominated by any competing topic
+    for comp in competing_specs:
+        c_name = comp.get("name") or comp.get("topic_name") or ""
+        c_concepts = comp.get("concepts", []) or []
+
+        c_vocab = [c_name] + [str(c) for c in c_concepts]
+        c_norm = normalise_text(" ".join(c_vocab))
+        c_kw = extract_concept_keywords(c_norm)
+
+        # Competing keywords exclusive of target topic keywords
+        comp_exclusive = (c_kw - target_keywords) - GENERIC_DOMAIN_WORDS
+        if not comp_exclusive:
+            continue
+
+        comp_overlap = comp_exclusive & q_keywords
+
+        # Check declared concept belonging exclusively to competing topic
+        c_concepts_lower = {str(c).strip().lower() for c in c_concepts if str(c).strip()}
+        c_concept_match = (
+            q_concept_raw.lower() in c_concepts_lower or
+            q_concept_raw.lower() == c_name.lower()
+        ) and (q_concept_raw.lower() not in target_concepts_lower and q_concept_raw.lower() != topic_name.lower())
+
+        if c_concept_match and len(comp_overlap) >= 1 and len(distinctive) == 0:
+            return False, f"Question concept '{q_concept_raw}' belongs to competing topic '{c_name}'"
+
+        if len(comp_overlap) >= 2 and len(comp_overlap) > len(distinctive):
+            return False, f"Question primarily tests competing topic '{c_name}' (matched keywords: {list(comp_overlap)[:4]}) instead of selected topic '{topic_name}'"
+
     if len(distinctive) >= 1:
         return True, f"Distinctive relevant keywords found: {list(distinctive)[:4]}"
     if len(shared) >= 2:
         return True, f"Relevant keywords found: {list(shared)[:4]}"
-
-    # Substring / stem match (e.g. 'matrix' in 'matrices', 'sigmoid' in 'sigmoidal')
-    for kw in target_keywords:
-        if kw not in GENERIC_DOMAIN_WORDS and len(kw) >= 4 and any(kw in qw or qw in kw for qw in q_keywords if len(qw) >= 4):
-            return True, f"Stem match with keyword '{kw}'"
+    if stem_matches:
+        return True, f"Stem match with keyword '{stem_matches[0]}'"
 
     return False, f"Question has no relevance to topic '{topic_name}' or its syllabus concepts"
 
