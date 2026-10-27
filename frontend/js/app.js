@@ -169,6 +169,382 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+// ── Code-Aware Quiz Rendering Engine ─────────────────────────────────────────
+const LearnAICodeRenderer = {
+  TOKEN_PATTERNS: {
+    python: [
+      { type: "comment", regex: /#[^\n]*/g },
+      { type: "string", regex: /\"\"\"[\s\S]*?\"\"\"|'''[\s\S]*?'''|r?f?b?\"(?:\\.|[^\"\\\n])*\"|r?f?b?'(?:\\.|[^'\\\n])*'/g },
+      { type: "number", regex: /\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b|\b0[xX][0-9a-fA-F]+\b/g },
+      { type: "keyword", regex: /\b(?:def|class|return|if|elif|else|for|while|in|not|and|or|is|import|from|as|try|except|finally|with|lambda|yield|raise|pass|break|continue|async|await|assert|global|nonlocal)\b/g },
+      { type: "boolean", regex: /\b(?:True|False|None)\b/g },
+      { type: "builtin", regex: /\b(?:print|len|range|enumerate|zip|sum|min|max|abs|all|any|str|int|float|bool|list|dict|set|tuple|open|type|isinstance|sorted|input)\b/g },
+      { type: "operator", regex: /==|!=|<=|>=|\+=|-=|\*=|[\+\-\*\/%=\<\>]/g }
+    ],
+    sql: [
+      { type: "comment", regex: /--[^\n]*|\/\*[\s\S]*?\*\//g },
+      { type: "string", regex: /'(?:''|[^'])*'|\"(?:\\.|[^\"\\\n])*\"/g },
+      { type: "number", regex: /\b\d+(?:\.\d+)?\b/g },
+      { type: "keyword", regex: /\b(?:SELECT|FROM|WHERE|INSERT|INTO|VALUES|UPDATE|SET|DELETE|JOIN|INNER|LEFT|RIGHT|FULL|OUTER|CROSS|ON|GROUP|BY|HAVING|ORDER|ASC|DESC|LIMIT|OFFSET|CREATE|TABLE|ALTER|DROP|INDEX|PRIMARY|KEY|FOREIGN|REFERENCES|CHECK|UNIQUE|DEFAULT|NOT|NULL|AND|OR|IN|IS|BETWEEN|LIKE|EXISTS|UNION|ALL|AS|DISTINCT|VIEW|TRIGGER|CASE|WHEN|THEN|ELSE|END|WITH)\b/gi },
+      { type: "builtin", regex: /\b(?:COUNT|SUM|AVG|MIN|MAX|ROUND|COALESCE|NOW|CURRENT_TIMESTAMP|UPPER|LOWER|TRIM|SUBSTRING|CONCAT|CAST)\b/gi }
+    ],
+    javascript: [
+      { type: "comment", regex: /\/\/[^\n]*|\/\*[\s\S]*?\*\//g },
+      { type: "string", regex: /\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|`[\s\S]*?`/g },
+      { type: "number", regex: /\b\d+(?:\.\d+)?\b|\b0[xX][0-9a-fA-F]+\b/g },
+      { type: "keyword", regex: /\b(?:function|const|let|var|return|if|else|for|while|do|switch|case|break|continue|default|import|export|from|class|extends|new|this|super|async|await|try|catch|finally|throw|typeof|instanceof|in|of|void|delete)\b/g },
+      { type: "boolean", regex: /\b(?:true|false|null|undefined|NaN)\b/g },
+      { type: "builtin", regex: /\b(?:console|Math|JSON|Promise|Array|Object|String|Number|Boolean|setTimeout|setInterval)\b/g }
+    ],
+    java: [
+      { type: "comment", regex: /\/\/[^\n]*|\/\*[\s\S]*?\*\//g },
+      { type: "string", regex: /\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'/g },
+      { type: "number", regex: /\b\d+(?:\.\d+)?[fFdDlL]?\b|\b0[xX][0-9a-fA-F]+\b/g },
+      { type: "keyword", regex: /\b(?:public|private|protected|class|interface|enum|extends|implements|static|final|abstract|void|int|double|float|long|short|byte|char|boolean|String|return|if|else|for|while|do|switch|case|break|continue|default|new|this|super|try|catch|finally|throw|throws|import|package|instanceof)\b/g },
+      { type: "boolean", regex: /\b(?:true|false|null)\b/g },
+      { type: "builtin", regex: /\b(?:System|out|println|print|Math|Arrays|Collections|Override)\b/g }
+    ],
+    cpp: [
+      { type: "comment", regex: /\/\/[^\n]*|\/\*[\s\S]*?\*\//g },
+      { type: "directive", regex: /#[a-zA-Z_]+[^\n]*/g },
+      { type: "string", regex: /\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'/g },
+      { type: "number", regex: /\b\d+(?:\.\d+)?[fFlLuU]?\b|\b0[xX][0-9a-fA-F]+\b/g },
+      { type: "keyword", regex: /\b(?:int|float|double|char|void|long|short|unsigned|signed|bool|struct|union|enum|typedef|auto|const|static|extern|return|if|else|for|while|do|switch|case|break|continue|default|goto|sizeof|nullptr|class|public|private|protected|virtual|override|namespace|using|template|typename|new|delete|try|catch|throw|inline)\b/g },
+      { type: "boolean", regex: /\b(?:true|false|NULL)\b/g },
+      { type: "builtin", regex: /\b(?:std|cout|cin|endl|string|vector|printf|scanf|malloc|free)\b/g }
+    ]
+  },
+
+  normalizeLanguage(lang) {
+    if (!lang) return "";
+    const l = String(lang).trim().toLowerCase();
+    const map = {
+      py: "python", python: "python", python3: "python",
+      sql: "sql", mysql: "sql", postgresql: "sql", sqlite: "sql", tsql: "sql", plsql: "sql",
+      js: "javascript", javascript: "javascript", node: "javascript", jsx: "javascript",
+      ts: "typescript", typescript: "typescript", tsx: "typescript",
+      java: "java",
+      c: "c",
+      cpp: "cpp", "c++": "cpp", cc: "cpp", cxx: "cpp", h: "cpp", hpp: "cpp",
+      html: "html", htm: "html", xml: "html",
+      css: "css", scss: "css", sass: "css",
+      json: "json",
+      sh: "bash", bash: "bash", shell: "bash", zsh: "bash",
+      pseudo: "pseudocode", pseudocode: "pseudocode", algorithm: "pseudocode"
+    };
+    return map[l] || l;
+  },
+
+  getLanguageLabel(lang) {
+    const norm = this.normalizeLanguage(lang);
+    const labels = {
+      python: "Python",
+      sql: "SQL",
+      java: "Java",
+      c: "C",
+      cpp: "C++",
+      javascript: "JavaScript",
+      typescript: "TypeScript",
+      html: "HTML",
+      css: "CSS",
+      json: "JSON",
+      bash: "Bash",
+      pseudocode: "Pseudocode"
+    };
+    return labels[norm] || (lang ? String(lang).toUpperCase() : "Code");
+  },
+
+  detectLanguage(code) {
+    if (!code || typeof code !== "string") return "";
+    const clean = code.trim();
+
+    if (/^\s*(?:SELECT\b[\s\S]*?\bFROM\b|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|DELETE\s+FROM\b|CREATE\s+TABLE\b|ALTER\s+TABLE\b)/i.test(clean)) {
+      return "sql";
+    }
+    if (/#include\s*<[^>]+>|\bstd::cout\b|\bstd::cin\b|\bint\s+main\s*\(/.test(clean)) {
+      return "cpp";
+    }
+    if (/\bpublic\s+(?:class|interface|static\s+void\s+main)\b|\bSystem\.(?:out|err)\.println\b/.test(clean)) {
+      return "java";
+    }
+    if (/\bdef\s+[a-zA-Z_]\w*\s*\(|\bclass\s+[a-zA-Z_]\w*[:\(]|^\s*(?:import\s+[a-zA-Z_]|from\s+[a-zA-Z_]+\s+import)\b|:\s*\n\s{2,}/m.test(clean)) {
+      return "python";
+    }
+    if (/\b(?:console\.log|const\s+\w+\s*=|let\s+\w+\s*=|function\s*\w*\s*\(|=>\s*\{)/.test(clean)) {
+      return "javascript";
+    }
+    if (/^[\{\[][\s\S]*?[\}\]]$/.test(clean) && /\"[^\"]+\"\s*:/.test(clean)) {
+      return "json";
+    }
+    if (/<!DOCTYPE\s+html|<(?:html|head|body|div|span|p|table|script)\b/i.test(clean)) {
+      return "html";
+    }
+    return "";
+  },
+
+  highlight(code, language) {
+    if (!code) return "";
+    const norm = this.normalizeLanguage(language);
+    const langKey = (norm === "c" ? "cpp" : (norm === "typescript" ? "javascript" : norm));
+    const patterns = this.TOKEN_PATTERNS[langKey];
+    if (!patterns) return escapeHtml(code);
+
+    let tokens = [];
+    patterns.forEach(({ type, regex }) => {
+      regex.lastIndex = 0;
+      let match;
+      while ((match = regex.exec(code)) !== null) {
+        tokens.push({
+          type,
+          start: match.index,
+          end: match.index + match[0].length,
+          text: match[0]
+        });
+      }
+    });
+
+    tokens.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+
+    let nonOverlapping = [];
+    let lastEnd = 0;
+    for (const t of tokens) {
+      if (t.start >= lastEnd) {
+        nonOverlapping.push(t);
+        lastEnd = t.end;
+      }
+    }
+
+    let out = "";
+    let cursor = 0;
+    for (const t of nonOverlapping) {
+      if (t.start > cursor) {
+        out += escapeHtml(code.slice(cursor, t.start));
+      }
+      out += `<span class="code-token token-${t.type}">${escapeHtml(t.text)}</span>`;
+      cursor = t.end;
+    }
+    if (cursor < code.length) {
+      out += escapeHtml(code.slice(cursor));
+    }
+    return out;
+  },
+
+  renderInline(text) {
+    if (text === null || text === undefined) return "";
+    const s = String(text);
+    const parts = [];
+    let lastIndex = 0;
+    const inlineRegex = /`([^`\n]+)`/g;
+    let match;
+    while ((match = inlineRegex.exec(s)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(escapeHtml(s.slice(lastIndex, match.index)));
+      }
+      parts.push(`<code class="inline-code">${escapeHtml(match[1])}</code>`);
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < s.length) {
+      parts.push(escapeHtml(s.slice(lastIndex)));
+    }
+    return parts.join("");
+  },
+
+  parseContent(rawContent, options = {}) {
+    if (!rawContent) return [];
+
+    if (typeof rawContent === "object" && Array.isArray(rawContent.question_segments)) {
+      return rawContent.question_segments;
+    }
+    if (typeof rawContent === "object" && rawContent.code) {
+      return [
+        { type: "text", content: rawContent.question_text || rawContent.question || "" },
+        { type: "code", code: rawContent.code, language: rawContent.language || options.language || "" }
+      ];
+    }
+
+    const text = String(rawContent).trim();
+    if (!text) return [];
+
+    const fenceRegex = /```([a-zA-Z0-9_+#.-]*)\s*\n?([\s\S]*?)(?:```|$)/g;
+    let hasFences = false;
+    let segments = [];
+    let lastIdx = 0;
+    let match;
+
+    while ((match = fenceRegex.exec(text)) !== null) {
+      const rawLang = match[1] ? match[1].trim() : "";
+      const rawSnippet = match[2];
+
+      hasFences = true;
+      if (match.index > lastIdx) {
+        const prose = text.slice(lastIdx, match.index);
+        if (prose.trim()) {
+          segments.push({ type: "text", content: prose.trim() });
+        }
+      }
+
+      const detected = rawLang || this.detectLanguage(rawSnippet) || options.language || "";
+      segments.push({
+        type: "code",
+        code: rawSnippet.replace(/\n+$/, ""),
+        language: detected
+      });
+
+      lastIdx = match.index + match[0].length;
+      if (match[0].indexOf("```", 3) === -1) {
+        break;
+      }
+    }
+
+    if (hasFences) {
+      if (lastIdx < text.length) {
+        const trailing = text.slice(lastIdx);
+        if (trailing.trim()) {
+          segments.push({ type: "text", content: trailing.trim() });
+        }
+      }
+      return segments;
+    }
+
+    const heuristic = this._detectUnformattedCode(text, options);
+    if (heuristic) {
+      return heuristic;
+    }
+
+    return [{ type: "text", content: text }];
+  },
+
+  _detectUnformattedCode(text, options = {}) {
+    const lines = text.split("\n");
+    if (lines.length < 3) return null;
+
+    const sqlStartIdx = lines.findIndex(l => /^\s*SELECT\b/i.test(l) || /^\s*CREATE\s+TABLE\b/i.test(l) || /^\s*INSERT\s+INTO\b/i.test(l));
+    if (sqlStartIdx !== -1) {
+      let sqlEndIdx = sqlStartIdx;
+      for (let i = sqlStartIdx; i < lines.length; i++) {
+        const line = lines[i];
+        if (/(?:FROM|WHERE|JOIN|GROUP|ORDER|HAVING|VALUES|LIMIT|;\s*$)/i.test(line) || /^\s{2,}/.test(line)) {
+          sqlEndIdx = i;
+          if (/;\s*$/.test(line)) break;
+        } else if (i > sqlStartIdx && !line.trim()) {
+          continue;
+        } else if (i > sqlStartIdx) {
+          break;
+        }
+      }
+
+      if (sqlEndIdx > sqlStartIdx || /;\s*$/.test(lines[sqlStartIdx])) {
+        const leading = lines.slice(0, sqlStartIdx).join("\n").trim();
+        const code = lines.slice(sqlStartIdx, sqlEndIdx + 1).join("\n");
+        const trailing = lines.slice(sqlEndIdx + 1).join("\n").trim();
+
+        const segments = [];
+        if (leading) segments.push({ type: "text", content: leading });
+        segments.push({ type: "code", code: code.trim(), language: "sql" });
+        if (trailing) segments.push({ type: "text", content: trailing });
+        return segments;
+      }
+    }
+
+    const codeStartIdx = lines.findIndex(l =>
+      /^\s*(?:def\s+\w+\s*\(|class\s+\w+|for\s+\w+\s+in\s+|if\s+.+:|#include\s*<|public\s+class\s+|int\s+main\s*\()/.test(l)
+    );
+
+    if (codeStartIdx !== -1) {
+      let codeEndIdx = codeStartIdx;
+      for (let i = codeStartIdx + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^\s{2,}|\t/.test(line) || /^\s*(?:return\b|print\(|cout\s*<<|System\.out|\}|else:|elif\b)/.test(line) || !line.trim()) {
+          codeEndIdx = i;
+        } else {
+          break;
+        }
+      }
+
+      if (codeEndIdx > codeStartIdx) {
+        const leading = lines.slice(0, codeStartIdx).join("\n").trim();
+        const code = lines.slice(codeStartIdx, codeEndIdx + 1).join("\n");
+        const trailing = lines.slice(codeEndIdx + 1).join("\n").trim();
+
+        const lang = this.detectLanguage(code) || options.language || "python";
+        const segments = [];
+        if (leading) segments.push({ type: "text", content: leading });
+        segments.push({ type: "code", code: code.trim(), language: lang });
+        if (trailing) segments.push({ type: "text", content: trailing });
+        return segments;
+      }
+    }
+
+    return null;
+  },
+
+  renderToHtml(rawContent, options = {}) {
+    const segments = this.parseContent(rawContent, options);
+    if (!segments || segments.length === 0) return "";
+
+    return segments.map(seg => {
+      if (seg.type === "code") {
+        const lang = seg.language || options.language || "";
+        const label = this.getLanguageLabel(lang);
+        const highlighted = this.highlight(seg.code, lang);
+
+        return (
+          `<div class="code-block-container" role="region" aria-label="${escapeHtml(label)} code snippet">` +
+            `<div class="code-block-header">` +
+              `<span class="code-lang-badge"><span class="code-lang-icon" aria-hidden="true">&lt;/&gt;</span> ${escapeHtml(label)}</span>` +
+              `<button type="button" class="code-copy-btn" aria-label="Copy ${escapeHtml(label)} code to clipboard" title="Copy code">` +
+                `<svg class="copy-icon" aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">` +
+                  `<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>` +
+                  `<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>` +
+                `</svg>` +
+                `<span class="copy-btn-text">Copy</span>` +
+              `</button>` +
+            `</div>` +
+            `<pre class="code-pre" tabindex="0" aria-label="${escapeHtml(label)} code, horizontally scrollable"><code class="code-content language-${escapeHtml(this.normalizeLanguage(lang))}">${highlighted}</code></pre>` +
+          `</div>`
+        );
+      } else {
+        const prose = this.renderInline(seg.content || "");
+        return `<div class="question-prose">${prose}</div>`;
+      }
+    }).join("");
+  },
+
+  renderToElement(rawContent, targetEl, options = {}) {
+    if (!targetEl) return;
+    const segments = this.parseContent(rawContent, options);
+
+    if (segments.length === 1 && segments[0].type === "text" && !/`[^`\n]+`/.test(segments[0].content)) {
+      targetEl.textContent = segments[0].content;
+      return;
+    }
+
+    targetEl.innerHTML = this.renderToHtml(rawContent, options);
+  },
+
+  renderOptionToHtml(optionValue) {
+    if (optionValue === null || optionValue === undefined) return "";
+    const s = String(optionValue);
+    if (/`[^`\n]+`/.test(s)) {
+      return this.renderInline(s);
+    }
+    if (/^\s*(?:SELECT\b|UPDATE\b|DELETE\b|INSERT\b|def\b|class\b|System\.out|console\.|return\b|#include|int\b|float\b|char\b)/i.test(s) || /;\s*$/.test(s) || /^[a-zA-Z_]\w*\s*=\s*.+$/.test(s)) {
+      return `<code class="inline-code">${escapeHtml(s)}</code>`;
+    }
+    return escapeHtml(s);
+  },
+
+  renderOptionToElement(optionValue, targetEl) {
+    if (!targetEl) return;
+    const html = this.renderOptionToHtml(optionValue);
+    if (html.indexOf("<") !== -1) {
+      targetEl.innerHTML = html;
+    } else {
+      targetEl.textContent = optionValue;
+    }
+  }
+};
+
 
 // ── Mutually Exclusive Screen Management ────────────────────────────────────
 // Ensures EXACTLY ONE screen is visible at any time.
@@ -716,7 +1092,13 @@ function renderQuestion() {
   if ($("progressText")) $("progressText").textContent = `Question ${currentIndex + 1} of ${totalQuestions}`;
   if ($("difficultyBadge")) $("difficultyBadge").textContent = q.difficulty || "Standard";
   if ($("concept")) $("concept").textContent = q.concept ? `Concept: ${q.concept}` : "";
-  if ($("question")) $("question").textContent = q.question;
+  if ($("question")) {
+    LearnAICodeRenderer.renderToElement(q.question, $("question"), {
+      structuredSegments: q.question_segments,
+      code: q.code,
+      language: q.language
+    });
+  }
   if ($("progressBar")) {
     $("progressBar").style.width = `${progressPercent}%`;
     const progressEl = $("progressBar").parentElement;
@@ -751,7 +1133,7 @@ function renderQuestion() {
 
     const textSpan = document.createElement("span");
     textSpan.className = "option-text";
-    textSpan.textContent = value; // Safe! Code snippets like <?php, <%, etc. render verbatim!
+    LearnAICodeRenderer.renderOptionToElement(value, textSpan);
 
     div.appendChild(radioCircle);
     div.appendChild(letterSpan);
@@ -779,9 +1161,59 @@ function renderQuestion() {
   if ($("nextBtn")) {
     const isLast = currentIndex === totalQuestions - 1;
     $("nextBtn").textContent = isLast ? "Submit Quiz" : "Next";
-    $("nextBtn").setAttribute("aria-label", 
+    $("nextBtn").setAttribute("aria-label",
       isLast ? "Submit quiz" : "Next question");
   }
+}
+
+// ── Code Snippet Copy-to-Clipboard Handler ──────────────────────────────────
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("click", (e) => {
+    const copyBtn = e.target.closest ? e.target.closest(".code-copy-btn") : null;
+    if (!copyBtn) return;
+
+    const container = copyBtn.closest(".code-block-container");
+    if (!container) return;
+    const codeEl = container.querySelector(".code-content");
+    const codeText = codeEl ? codeEl.textContent : (copyBtn.getAttribute("data-raw-code") || "");
+    if (!codeText) return;
+
+    const btnText = copyBtn.querySelector(".copy-btn-text");
+    const setCopied = () => {
+      copyBtn.classList.add("copied");
+      if (btnText) btnText.textContent = "Copied!";
+      copyBtn.setAttribute("aria-label", "Copied to clipboard");
+      setTimeout(() => {
+        copyBtn.classList.remove("copied");
+        if (btnText) btnText.textContent = "Copy";
+        copyBtn.setAttribute("aria-label", "Copy code to clipboard");
+      }, 2000);
+    };
+
+    if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(codeText).then(setCopied).catch(fallback);
+    } else {
+      fallback();
+    }
+
+    function fallback() {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = codeText;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        ta.style.top = "-9999px";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) setCopied();
+      } catch (err) {
+        console.warn("Could not copy code snippet:", err);
+      }
+    }
+  });
 }
 
 // ── Keyboard Navigation (1-4, A-D, Left/Right Arrows) ───────────────────────
@@ -882,7 +1314,7 @@ function showResult(data) {
       let scoreClass = "mixed";
       if (acc >= 80) scoreClass = "correct";
       else if (acc < 50) scoreClass = "wrong";
-      
+
       diffHtml += `
         <div class="difficulty-item">
           <span class="difficulty-label">${diff}</span>
@@ -901,7 +1333,7 @@ function showResult(data) {
       let scoreClass = "mixed";
       if (acc >= 80) scoreClass = "correct";
       else if (acc < 50) scoreClass = "wrong";
-      
+
       conceptHtml += `
         <div class="concept-item">
           <span class="concept-label">${concept}</span>
@@ -936,13 +1368,14 @@ function showResult(data) {
     "<h3>Answer Review</h3>" +
     (data.details || []).map((d, i) => `
       <div class="review-item">
-        <div><strong>Q${i + 1}. ${escapeHtml(d.question)}</strong></div>
+        <div class="review-question-title"><strong>Q${i + 1}.</strong></div>
+        <div class="review-question-content">${LearnAICodeRenderer.renderToHtml(d.question)}</div>
         <div class="${d.is_correct ? "correct" : "wrong"}">
           ${d.is_correct ? "Correct" : "Incorrect"}
         </div>
-        <div>Your answer: ${escapeHtml(d.selected_answer || "Not answered")}</div>
-        <div>Correct answer: ${escapeHtml(d.correct_answer)}</div>
-        <div class="muted">${escapeHtml(d.explanation)}</div>
+        <div class="review-answer-line">Your answer: ${LearnAICodeRenderer.renderOptionToHtml(d.selected_answer || "Not answered")}</div>
+        <div class="review-answer-line">Correct answer: ${LearnAICodeRenderer.renderOptionToHtml(d.correct_answer)}</div>
+        <div class="muted review-explanation">${LearnAICodeRenderer.renderToHtml(d.explanation)}</div>
       </div>
     `).join("");
 
@@ -3496,6 +3929,7 @@ if (typeof module !== "undefined" && module.exports) {
     getApiBaseUrl,
     apiUrl,
     isTokenExpired,
-    escapeHtml
+    escapeHtml,
+    LearnAICodeRenderer
   };
 }
