@@ -91,9 +91,13 @@ def extract_text_from_txt(file_bytes: bytes) -> str:
     return file_bytes.decode("utf-8", errors="ignore")
 
 
-def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extracts text from PDF using pypdf with layout awareness and regex fallback."""
-    text_parts = []
+def _extract_pdf_pages(file_bytes: bytes) -> list:
+    """Extracts text from PDF page by page, preserving page-level provenance.
+
+    Returns a list of dicts: {"page": <1-based page number>, "text": <page text>}.
+    Only pages that contain readable text are included.
+    """
+    pages = []
     try:
         import pypdf
         reader = pypdf.PdfReader(io.BytesIO(file_bytes))
@@ -112,29 +116,47 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
                 page_text = page.extract_text(extraction_mode="layout") or ""
             except (TypeError, Exception):
                 page_text = page.extract_text() or ""
-            if page_text.strip():
-                text_parts.append(page_text.strip())
+            if page_text and page_text.strip():
+                pages.append({"page": idx + 1, "text": page_text.strip()})
     except ExtractionError:
         raise
     except Exception as e:
         logger.warning(f"pypdf extraction error: {sanitize_error_text(e)}")
 
-    # Fallback to pure regex text stream scan if pypdf returned empty or failed
-    if not text_parts:
+    # Fallback to pure regex text stream scan if pypdf returned empty or failed.
+    # The regex fallback cannot reliably map text to pages, so it is reported as a single
+    # synthetic page when no structured page text was recovered.
+    if not pages:
         try:
-            # Extract plain text chunks enclosed between BT (Begin Text) and ET (End Text)
             matches = re.findall(rb'\((.*?)\)\s*Tj', file_bytes)
+            fallback_parts = []
             for m in matches:
                 try:
                     s = m.decode("latin-1", errors="ignore").strip()
                     if len(s) > 2:
-                        text_parts.append(s)
+                        fallback_parts.append(s)
                 except Exception:
                     pass
+            if fallback_parts:
+                pages.append({"page": 1, "text": "\n".join(fallback_parts)})
         except Exception:
             pass
 
-    return "\n\n".join(text_parts)
+    return pages
+
+
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    """Extracts text from PDF using pypdf with layout awareness and regex fallback."""
+    pages = _extract_pdf_pages(file_bytes)
+    return "\n\n".join(p["text"] for p in pages)
+
+
+def extract_text_from_pdf_pages(file_bytes: bytes) -> list:
+    """Public accessor for per-page PDF text with page numbers.
+
+    Returns a list of {"page": int, "text": str}. Empty list when no readable text.
+    """
+    return _extract_pdf_pages(file_bytes)
 
 
 def extract_text_from_docx(file_bytes: bytes) -> str:
@@ -166,9 +188,12 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
     return "\n".join(paragraphs)
 
 
-def extract_text_from_pptx(file_bytes: bytes) -> str:
-    """Extracts text from PPTX using python-pptx with zip/xml fallback."""
-    slide_texts = []
+def _extract_pptx_slides(file_bytes: bytes) -> list:
+    """Extracts text from PPTX slide by slide, preserving slide-level provenance.
+
+    Returns a list of dicts: {"slide": <1-based slide number>, "text": <slide text>}.
+    """
+    slides = []
     try:
         import pptx
         prs = pptx.Presentation(io.BytesIO(file_bytes))
@@ -178,23 +203,37 @@ def extract_text_from_pptx(file_bytes: bytes) -> str:
                 if hasattr(shape, "text") and shape.text and shape.text.strip():
                     slide_parts.append(shape.text.strip())
             if slide_parts:
-                slide_texts.append(f"[Slide {s_idx + 1}]\n" + "\n".join(slide_parts))
+                slides.append({"slide": s_idx + 1, "text": "\n".join(slide_parts)})
     except Exception as e:
         logger.warning(f"python-pptx error, falling back to direct XML parse: {e}")
         try:
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
                 slide_files = [f for f in z.namelist() if re.match(r"^ppt/slides/slide\d+\.xml$", f)]
                 slide_files.sort()
-                for s_file in slide_files:
+                for s_idx, s_file in enumerate(slide_files):
                     xml_content = z.read(s_file)
                     root = ET.fromstring(xml_content)
                     slide_parts = [elem.text.strip() for elem in root.iter() if elem.tag.endswith("t") and elem.text]
                     if slide_parts:
-                        slide_texts.append("\n".join(slide_parts))
+                        slides.append({"slide": s_idx + 1, "text": "\n".join(slide_parts)})
         except Exception as e2:
             logger.error(f"PPTX XML fallback failed: {e2}")
 
-    return "\n\n".join(slide_texts)
+    return slides
+
+
+def extract_text_from_pptx(file_bytes: bytes) -> str:
+    """Extracts text from PPTX using python-pptx with zip/xml fallback."""
+    slides = _extract_pptx_slides(file_bytes)
+    return "\n\n".join(f"[Slide {s['slide']}]\n{s['text']}" for s in slides)
+
+
+def extract_text_from_pptx_slides(file_bytes: bytes) -> list:
+    """Public accessor for per-slide PPTX text with slide numbers.
+
+    Returns a list of {"slide": int, "text": str}. Empty list when no readable text.
+    """
+    return _extract_pptx_slides(file_bytes)
 
 
 PPT_CONTAINER_RECORD_TYPES = {
@@ -312,15 +351,11 @@ def _extract_blocks_from_container(container_payload: bytes, max_depth: int = 15
     return blocks
 
 
-def extract_text_from_ppt(file_bytes: bytes) -> str:
-    """
-    Extracts structured slide content from legacy binary PowerPoint presentations (PPT, PowerPoint 97-2003).
-    Parses OLE compound document streams and navigates MS-PPT record hierarchies:
-    - Primary extraction: SlideContainer (1006) and Escher shape trees (0xF002-0xF00D)
-    - Secondary extraction: SlideListWithTextContainer (4080) with SlidePersistAtoms (1011)
-    - Preserves slide order, slide boundaries [Slide N], slide titles, and body paragraphs
-    - Joins text runs split across binary records and handles UTF-16 Unicode text
-    - Raises ExtractionError on corrupted OLE structure or missing slide text (no silent garbage fallback)
+def _extract_ppt_slides(file_bytes: bytes) -> list:
+    """Extracts text from legacy PPT slide by slide, preserving slide-level provenance.
+
+    Returns a list of dicts: {"slide": <1-based slide number>, "text": <slide text>}.
+    Raises ExtractionError on corrupted OLE structure or missing slide text.
     """
     try:
         import olefile
@@ -392,14 +427,13 @@ def extract_text_from_ppt(file_bytes: bytes) -> str:
 
     _scan(ppt_stream)
 
-    # Determine slide sequence: prefer rich SlideContainer shapes, fallback to SlideListWithText
     chosen_slides = []
     if slide_container_slides:
         chosen_slides = slide_container_slides
     elif slidelist_slides:
         chosen_slides = slidelist_slides
 
-    formatted_slides = []
+    slides = []
     if chosen_slides:
         for s_idx, parts in enumerate(chosen_slides):
             seen = set()
@@ -411,13 +445,35 @@ def extract_text_from_ppt(file_bytes: bytes) -> str:
                         seen.add(s_line)
                         clean_parts.append(s_line)
             if clean_parts:
-                formatted_slides.append(f"[Slide {s_idx + 1}]\n" + "\n".join(clean_parts))
+                slides.append({"slide": s_idx + 1, "text": "\n".join(clean_parts)})
 
-    result = "\n\n".join(formatted_slides).strip()
-    if not result:
+    if not slides:
         raise ExtractionError("PowerPoint presentation contains no readable slide text or lecture notes.")
 
-    return result
+    return slides
+
+
+def extract_text_from_ppt(file_bytes: bytes) -> str:
+    """
+    Extracts structured slide content from legacy binary PowerPoint presentations (PPT, PowerPoint 97-2003).
+    Parses OLE compound document streams and navigates MS-PPT record hierarchies:
+    - Primary extraction: SlideContainer (1006) and Escher shape trees (0xF002-0xF00D)
+    - Secondary extraction: SlideListWithTextContainer (4080) with SlidePersistAtoms (1011)
+    - Preserves slide order, slide boundaries [Slide N], slide titles, and body paragraphs
+    - Joins text runs split across binary records and handles UTF-16 Unicode text
+    - Raises ExtractionError on corrupted OLE structure or missing slide text (no silent garbage fallback)
+    """
+    slides = _extract_ppt_slides(file_bytes)
+    return "\n\n".join(f"[Slide {s['slide']}]\n{s['text']}" for s in slides)
+
+
+def extract_text_from_ppt_slides(file_bytes: bytes) -> list:
+    """Public accessor for per-slide legacy PPT text with slide numbers.
+
+    Returns a list of {"slide": int, "text": str}. Empty list when no readable text.
+    Raises ExtractionError when the file cannot be processed.
+    """
+    return _extract_ppt_slides(file_bytes)
 
 
 def extract_text_from_image(file_bytes: bytes, ext: str) -> str:
@@ -570,3 +626,79 @@ def extract_text_from_file(filename: str, file_bytes: bytes) -> str:
 
     cleaned = clean_extracted_text(extracted)
     return cleaned
+
+
+def extract_text_with_locations(filename: str, file_bytes: bytes) -> list:
+    """
+    Extracts text while preserving source-location provenance (page number for PDFs,
+    slide number for PowerPoint files, section for other formats).
+
+    Returns a list of dicts:
+        {
+            "location": str,      # e.g. "Page 3", "Slide 2", "Section 1"
+            "location_type": str, # "page" | "slide" | "section"
+            "text": str           # cleaned text for that location
+        }
+
+    Only locations containing readable text are included. Raises ExtractionError on
+    invalid file, format error, or corrupted data.
+    """
+    ext = validate_file_header(filename, file_bytes)
+    locations: list = []
+
+    if ext == ".pdf":
+        pages = _extract_pdf_pages(file_bytes)
+        for p in pages:
+            locations.append({
+                "location": f"Page {p['page']}",
+                "location_type": "page",
+                "page_number": p["page"],
+                "text": clean_extracted_text(p["text"]),
+            })
+    elif ext == ".pptx":
+        slides = _extract_pptx_slides(file_bytes)
+        for s in slides:
+            locations.append({
+                "location": f"Slide {s['slide']}",
+                "location_type": "slide",
+                "slide_number": s["slide"],
+                "text": clean_extracted_text(s["text"]),
+            })
+    elif ext == ".ppt":
+        slides = _extract_ppt_slides(file_bytes)
+        for s in slides:
+            locations.append({
+                "location": f"Slide {s['slide']}",
+                "location_type": "slide",
+                "slide_number": s["slide"],
+                "text": clean_extracted_text(s["text"]),
+            })
+    elif ext == ".docx":
+        extracted = extract_text_from_docx(file_bytes)
+        cleaned = clean_extracted_text(extracted)
+        if cleaned:
+            locations.append({
+                "location": "Section 1",
+                "location_type": "section",
+                "text": cleaned,
+            })
+    elif ext == ".txt":
+        extracted = extract_text_from_txt(file_bytes)
+        cleaned = clean_extracted_text(extracted)
+        if cleaned:
+            locations.append({
+                "location": "Section 1",
+                "location_type": "section",
+                "text": cleaned,
+            })
+    elif ext in {".jpg", ".jpeg", ".png", ".webp"}:
+        extracted = extract_text_from_image(file_bytes, ext)
+        cleaned = clean_extracted_text(extracted)
+        if cleaned:
+            locations.append({
+                "location": "Page 1",
+                "location_type": "page",
+                "text": cleaned,
+            })
+
+    return [loc for loc in locations if loc["text"].strip()]

@@ -481,15 +481,34 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
             course_name TEXT NOT NULL,
             topic_id TEXT NOT NULL,
             topic_name TEXT NOT NULL,
+            original_topic_title TEXT,
+            topic_aliases TEXT DEFAULT '[]',
+            coverage_status TEXT NOT NULL DEFAULT 'needs_review',
+            evidence TEXT DEFAULT '[]',
+            source_location TEXT,
             confidence REAL DEFAULT 1.0,
             matched_concepts TEXT DEFAULT '[]',
             sort_order INTEGER NOT NULL DEFAULT 0,
+            extraction_version TEXT,
+            matching_algorithm_version TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(material_id, course_code, topic_name),
             FOREIGN KEY (material_id) REFERENCES study_materials (id) ON DELETE CASCADE,
             FOREIGN KEY (student_id) REFERENCES students (id)
         )
     """)
+
+    # Idempotent schema migration for existing SQLite databases.
+    for _col, _ddl in (
+        ("original_topic_title", "TEXT"),
+        ("topic_aliases", "TEXT DEFAULT '[]'"),
+        ("coverage_status", "TEXT NOT NULL DEFAULT 'needs_review'"),
+        ("evidence", "TEXT DEFAULT '[]'"),
+        ("source_location", "TEXT"),
+        ("extraction_version", "TEXT"),
+        ("matching_algorithm_version", "TEXT"),
+    ):
+        _ensure_column(cursor, "study_material_topics", _col, _ddl)
 
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_study_materials_student_status
@@ -509,6 +528,79 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_study_material_topics_student_topic
         ON study_material_topics (student_id, course_code, topic_name)
+    """)
+
+    # 8. Student Accounts, Sessions, and Password Reset (Secure Account System)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS student_accounts (
+            id TEXT PRIMARY KEY,
+            student_id TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL UNIQUE,
+            full_name TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            email_verified INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_login_at TEXT,
+            sessions_invalidated_at TEXT,
+            FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_student_accounts_email
+        ON student_accounts (email)
+    """)
+
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_student_accounts_student_id
+        ON student_accounts (student_id)
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS student_sessions (
+            id TEXT PRIMARY KEY,
+            student_id TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            is_revoked INTEGER NOT NULL DEFAULT 0,
+            device_info TEXT DEFAULT '',
+            FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_student_sessions_token_hash
+        ON student_sessions (token_hash)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_student_sessions_student_revoked
+        ON student_sessions (student_id, is_revoked)
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id TEXT PRIMARY KEY,
+            student_id TEXT NOT NULL,
+            email TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_pwd_reset_token_hash
+        ON password_reset_tokens (token_hash)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pwd_reset_student
+        ON password_reset_tokens (student_id)
     """)
 
     conn.commit()
@@ -911,6 +1003,8 @@ def format_attempt_result(
     conn: Optional[sqlite3.Connection] = None
 ) -> Dict[str, Any]:
     """Format an existing completed attempt into the standard evaluation API response."""
+    from services.evaluator import build_effective_option_explanations
+
     quiz_data = attempt.get("quiz_data", {})
     analysis = quiz_data.get("analysis", {
         "summary": "Completed quiz attempt.",
@@ -920,16 +1014,38 @@ def format_attempt_result(
 
     details = []
     student_answers = get_student_answers_for_session(session["id"], conn=conn)
+    session_questions = session.get("questions") or quiz_data.get("questions") or []
+
     if student_answers:
-        for sa in student_answers:
+        for idx, sa in enumerate(student_answers):
+            q_meta = session_questions[idx] if idx < len(session_questions) else {}
+            if not q_meta or q_meta.get("question") != sa["question_text"]:
+                for candidate in session_questions:
+                    if candidate.get("question") == sa["question_text"]:
+                        q_meta = candidate
+                        break
+
+            expl = sa.get("explanation") or q_meta.get("explanation", "")
+            opts = q_meta.get("options", {})
+            opt_expls = q_meta.get("option_explanations") or {}
+            if opts and not opt_expls:
+                opt_expls = build_effective_option_explanations(
+                    options=opts,
+                    correct_answer=sa["correct_answer"],
+                    explanation=expl,
+                    concept=sa["concept"]
+                )
+
             details.append({
                 "question": sa["question_text"],
                 "selected_answer": sa["selected_answer"],
                 "correct_answer": sa["correct_answer"],
                 "is_correct": bool(sa["is_correct"]),
-                "explanation": sa.get("explanation") or "",
+                "explanation": expl,
                 "concept": sa["concept"],
-                "difficulty": sa["difficulty"]
+                "difficulty": sa["difficulty"],
+                "options": opts,
+                "option_explanations": opt_expls
             })
 
     return {
@@ -2442,6 +2558,13 @@ def create_or_update_study_material(
         topic_id = (top.get("topic_id") or f"top_{idx+1}").strip()
         confidence = float(top.get("confidence") or 1.0)
         concepts = json.dumps(top.get("matched_concepts") or [])
+        original_topic_title = (top.get("original_topic_title") or topic_name).strip()
+        topic_aliases = json.dumps(top.get("topic_aliases") or [])
+        coverage_status = (top.get("coverage_status") or "needs_review").strip()
+        evidence = json.dumps(top.get("evidence") or [])
+        source_location = (top.get("source_location") or "").strip()
+        extraction_version = (top.get("extraction_version") or "1.0").strip()
+        matching_algorithm_version = (top.get("matching_algorithm_version") or "1.0").strip()
 
         topic_row_id = str(uuid.uuid4())
         use_mysql = is_mysql_conn(conn) or (is_mysql_active() if conn is None else False)
@@ -2449,37 +2572,57 @@ def create_or_update_study_material(
             cursor.execute("""
                 INSERT INTO study_material_topics (
                     id, material_id, student_id, course_code, course_name,
-                    topic_id, topic_name, confidence, matched_concepts,
-                    sort_order, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    topic_id, topic_name, original_topic_title, topic_aliases,
+                    coverage_status, evidence, source_location, confidence,
+                    matched_concepts, sort_order, extraction_version,
+                    matching_algorithm_version, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     topic_id = VALUES(topic_id),
                     course_name = VALUES(course_name),
+                    original_topic_title = VALUES(original_topic_title),
+                    topic_aliases = VALUES(topic_aliases),
+                    coverage_status = VALUES(coverage_status),
+                    evidence = VALUES(evidence),
+                    source_location = VALUES(source_location),
                     confidence = VALUES(confidence),
                     matched_concepts = VALUES(matched_concepts),
-                    sort_order = VALUES(sort_order)
+                    sort_order = VALUES(sort_order),
+                    extraction_version = VALUES(extraction_version),
+                    matching_algorithm_version = VALUES(matching_algorithm_version)
             """, (
                 topic_row_id, material_id, student_id, course_code, course_name,
-                topic_id, topic_name, confidence, concepts,
-                idx, now
+                topic_id, topic_name, original_topic_title, topic_aliases,
+                coverage_status, evidence, source_location, confidence,
+                concepts, idx, extraction_version, matching_algorithm_version, now
             ))
         else:
             cursor.execute("""
                 INSERT INTO study_material_topics (
                     id, material_id, student_id, course_code, course_name,
-                    topic_id, topic_name, confidence, matched_concepts,
-                    sort_order, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    topic_id, topic_name, original_topic_title, topic_aliases,
+                    coverage_status, evidence, source_location, confidence,
+                    matched_concepts, sort_order, extraction_version,
+                    matching_algorithm_version, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(material_id, course_code, topic_name) DO UPDATE SET
                     topic_id = excluded.topic_id,
                     course_name = excluded.course_name,
+                    original_topic_title = excluded.original_topic_title,
+                    topic_aliases = excluded.topic_aliases,
+                    coverage_status = excluded.coverage_status,
+                    evidence = excluded.evidence,
+                    source_location = excluded.source_location,
                     confidence = excluded.confidence,
                     matched_concepts = excluded.matched_concepts,
-                    sort_order = excluded.sort_order
+                    sort_order = excluded.sort_order,
+                    extraction_version = excluded.extraction_version,
+                    matching_algorithm_version = excluded.matching_algorithm_version
             """, (
                 topic_row_id, material_id, student_id, course_code, course_name,
-                topic_id, topic_name, confidence, concepts,
-                idx, now
+                topic_id, topic_name, original_topic_title, topic_aliases,
+                coverage_status, evidence, source_location, confidence,
+                concepts, idx, extraction_version, matching_algorithm_version, now
             ))
 
     conn.commit()
@@ -2591,7 +2734,9 @@ def get_study_material_detail(
     cursor.execute("""
         SELECT
             smt.id, smt.course_code, smt.course_name, smt.topic_id, smt.topic_name,
-            smt.confidence, smt.matched_concepts, smt.sort_order,
+            smt.original_topic_title, smt.topic_aliases, smt.coverage_status,
+            smt.evidence, smt.source_location, smt.confidence, smt.matched_concepts,
+            smt.sort_order,
             COALESCE(tm.attempt_count, 0) as attempt_count,
             COALESCE(tm.mastery_score, 0.0) as mastery_score,
             COALESCE(tm.current_level, 'mixed') as current_level,
@@ -2669,6 +2814,20 @@ def get_study_material_detail(
             t["matched_concepts"] = json.loads(t["matched_concepts"]) if isinstance(t["matched_concepts"], str) else (t["matched_concepts"] or [])
         except Exception:
             t["matched_concepts"] = []
+
+        try:
+            t["topic_aliases"] = json.loads(t["topic_aliases"]) if isinstance(t["topic_aliases"], str) else (t["topic_aliases"] or [])
+        except Exception:
+            t["topic_aliases"] = []
+
+        try:
+            t["evidence"] = json.loads(t["evidence"]) if isinstance(t["evidence"], str) else (t["evidence"] or [])
+        except Exception:
+            t["evidence"] = []
+
+        t["original_topic_title"] = t.get("original_topic_title") or t.get("topic_name")
+        t["source_location"] = t.get("source_location")
+        t["coverage_status"] = t.get("coverage_status") or "needs_review"
 
         t["status"] = status
         t["status_label"] = status_label
@@ -2787,3 +2946,425 @@ def get_study_material_grounding_text(
     if close_conn:
         conn.close()
     return data.get("extracted_text")
+
+
+# ── Student Accounts & Authentication Persistence ────────────────────────────
+
+def create_student_account(
+    student_id: str,
+    email: str,
+    full_name: str,
+    password_hash: str,
+    conn: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    Creates a new registered student account bound to a unique internal student ID.
+    Enforces unique email address at the database level.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    now = get_utc_now_iso()
+    account_id = str(uuid.uuid4())
+    norm_email = email.strip().lower()
+    clean_name = full_name.strip()
+
+    # Ensure parent students record exists
+    cursor.execute("SELECT id FROM students WHERE id = ?", (student_id,))
+    if not cursor.fetchone():
+        cursor.execute(
+            "INSERT INTO students (id, created_at, last_active) VALUES (?, ?, ?)",
+            (student_id, now, now)
+        )
+
+    cursor.execute("""
+        INSERT INTO student_accounts (
+            id, student_id, email, full_name, password_hash,
+            email_verified, created_at, updated_at, last_login_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        account_id,
+        student_id,
+        norm_email,
+        clean_name,
+        password_hash,
+        0,  # email_verified: false in initial version
+        now,
+        now,
+        now
+    ))
+
+    conn.commit()
+    if close_conn:
+        conn.close()
+
+    return {
+        "id": account_id,
+        "student_id": student_id,
+        "email": norm_email,
+        "full_name": clean_name,
+        "email_verified": False,
+        "created_at": now,
+        "updated_at": now,
+        "last_login_at": now
+    }
+
+
+def get_student_account_by_email(
+    email: str,
+    conn: Optional[Any] = None
+) -> Optional[Dict[str, Any]]:
+    """Look up student account by normalized email address."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    norm_email = email.strip().lower()
+    cursor.execute(
+        "SELECT * FROM student_accounts WHERE email = ?",
+        (norm_email,)
+    )
+    row = cursor.fetchone()
+    if close_conn:
+        conn.close()
+
+    if not row:
+        return None
+    return dict(row)
+
+
+def get_student_account_by_id(
+    student_id: str,
+    conn: Optional[Any] = None
+) -> Optional[Dict[str, Any]]:
+    """Look up student account by internal student_id."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM student_accounts WHERE student_id = ?",
+        (student_id,)
+    )
+    row = cursor.fetchone()
+    if close_conn:
+        conn.close()
+
+    if not row:
+        return None
+    return dict(row)
+
+
+def update_student_password(
+    student_id: str,
+    password_hash: str,
+    conn: Optional[Any] = None
+) -> bool:
+    """Update student password hash and record update timestamp."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    now = get_utc_now_iso()
+    cursor.execute(
+        "UPDATE student_accounts SET password_hash = ?, updated_at = ?, sessions_invalidated_at = ? WHERE student_id = ?",
+        (password_hash, now, now, student_id)
+    )
+    updated = cursor.rowcount > 0
+    conn.commit()
+    if close_conn:
+        conn.close()
+    return updated
+
+
+def record_student_login(
+    student_id: str,
+    conn: Optional[Any] = None
+) -> None:
+    """Update last_login_at on account and last_active on student."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    now = get_utc_now_iso()
+    cursor.execute(
+        "UPDATE student_accounts SET last_login_at = ? WHERE student_id = ?",
+        (now, student_id)
+    )
+    cursor.execute(
+        "UPDATE students SET last_active = ? WHERE id = ?",
+        (now, student_id)
+    )
+    conn.commit()
+    if close_conn:
+        conn.close()
+
+
+def create_student_session(
+    student_id: str,
+    token_hash: str,
+    expires_at: str,
+    device_info: str = "",
+    conn: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Record an active session for an authenticated student."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    now = get_utc_now_iso()
+    session_id = str(uuid.uuid4())
+
+    cursor.execute("SELECT id FROM student_sessions WHERE token_hash = ?", (token_hash,))
+    existing_row = cursor.fetchone()
+    if existing_row:
+        cursor.execute(
+            "UPDATE student_sessions SET expires_at = ?, is_revoked = 0, device_info = ? WHERE token_hash = ?",
+            (expires_at, device_info[:255] if device_info else "", token_hash)
+        )
+        session_id = existing_row[0] if isinstance(existing_row, (list, tuple)) else existing_row["id"]
+    else:
+        cursor.execute("""
+            INSERT INTO student_sessions (
+                id, student_id, token_hash, created_at, expires_at, is_revoked, device_info
+            ) VALUES (?, ?, ?, ?, ?, 0, ?)
+        """, (
+            session_id,
+            student_id,
+            token_hash,
+            now,
+            expires_at,
+            device_info[:255] if device_info else ""
+        ))
+
+    conn.commit()
+    if close_conn:
+        conn.close()
+
+    return {
+        "id": session_id,
+        "student_id": student_id,
+        "token_hash": token_hash,
+        "created_at": now,
+        "expires_at": expires_at,
+        "is_revoked": 0
+    }
+
+
+def revoke_student_session(
+    token_hash: str,
+    conn: Optional[Any] = None
+) -> bool:
+    """Revoke a specific session by its token hash (e.g. on logout)."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE student_sessions SET is_revoked = 1 WHERE token_hash = ?",
+        (token_hash,)
+    )
+    updated = cursor.rowcount > 0
+    conn.commit()
+    if close_conn:
+        conn.close()
+    return updated
+
+
+def invalidate_all_student_sessions(
+    student_id: str,
+    conn: Optional[Any] = None
+) -> int:
+    """Revoke all active sessions for a student (e.g. after password reset)."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    now = get_utc_now_iso()
+    cursor.execute(
+        "UPDATE student_sessions SET is_revoked = 1 WHERE student_id = ? AND is_revoked = 0",
+        (student_id,)
+    )
+    count = cursor.rowcount
+    cursor.execute(
+        "UPDATE student_accounts SET sessions_invalidated_at = ? WHERE student_id = ?",
+        (now, student_id)
+    )
+    conn.commit()
+    if close_conn:
+        conn.close()
+    return count
+
+
+def is_session_revoked(
+    token_hash: str,
+    student_id: str,
+    issued_before_iso: Optional[str] = None,
+    conn: Optional[Any] = None
+) -> bool:
+    """
+    Checks if a session token is revoked or invalidated.
+    Returns True if the token is revoked/invalidated, False if valid.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    now = get_utc_now_iso()
+
+    # 1. Check specific session record if recorded
+    cursor.execute(
+        "SELECT is_revoked, expires_at FROM student_sessions WHERE token_hash = ?",
+        (token_hash,)
+    )
+    row = cursor.fetchone()
+    if row:
+        sess = dict(row)
+        if sess.get("is_revoked"):
+            if close_conn:
+                conn.close()
+            return True
+        if sess.get("expires_at") and str(sess["expires_at"]) < now:
+            if close_conn:
+                conn.close()
+            return True
+
+    # 2. Check if student account had all sessions invalidated
+    cursor.execute(
+        "SELECT sessions_invalidated_at FROM student_accounts WHERE student_id = ?",
+        (student_id,)
+    )
+    acct_row = cursor.fetchone()
+    if acct_row:
+        acct = dict(acct_row)
+        inv_at = acct.get("sessions_invalidated_at")
+        if inv_at and issued_before_iso and issued_before_iso <= inv_at:
+            if close_conn:
+                conn.close()
+            return True
+
+    if close_conn:
+        conn.close()
+    return False
+
+
+def create_password_reset_token(
+    student_id: str,
+    email: str,
+    token_hash: str,
+    ttl_seconds: int = 3600,
+    conn: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    Store single-use cryptographically secure password reset token hash.
+    Invalidates any existing unused tokens for this student.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    now_dt = get_utc_now()
+    created_at = now_dt.isoformat()
+    expires_at = (now_dt + timedelta(seconds=ttl_seconds)).isoformat()
+    record_id = str(uuid.uuid4())
+    norm_email = email.strip().lower()
+
+    # Invalidate previous unused reset tokens for this student
+    cursor.execute(
+        "UPDATE password_reset_tokens SET used_at = ? WHERE student_id = ? AND used_at IS NULL",
+        (created_at, student_id)
+    )
+
+    cursor.execute("""
+        INSERT INTO password_reset_tokens (
+            id, student_id, email, token_hash, created_at, expires_at, used_at
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL)
+    """, (
+        record_id,
+        student_id,
+        norm_email,
+        token_hash,
+        created_at,
+        expires_at
+    ))
+
+    conn.commit()
+    if close_conn:
+        conn.close()
+
+    return {
+        "id": record_id,
+        "student_id": student_id,
+        "email": norm_email,
+        "token_hash": token_hash,
+        "created_at": created_at,
+        "expires_at": expires_at
+    }
+
+
+def get_password_reset_token(
+    token_hash: str,
+    conn: Optional[Any] = None
+) -> Optional[Dict[str, Any]]:
+    """Retrieve password reset token record by token_hash."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM password_reset_tokens WHERE token_hash = ?",
+        (token_hash,)
+    )
+    row = cursor.fetchone()
+    if close_conn:
+        conn.close()
+
+    if not row:
+        return None
+    return dict(row)
+
+
+def mark_password_reset_token_used(
+    token_id: str,
+    conn: Optional[Any] = None
+) -> bool:
+    """Mark a password reset token as used (single-use enforcement)."""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    cursor = conn.cursor()
+    now = get_utc_now_iso()
+    cursor.execute(
+        "UPDATE password_reset_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL",
+        (now, token_id)
+    )
+    updated = cursor.rowcount > 0
+    conn.commit()
+    if close_conn:
+        conn.close()
+    return updated

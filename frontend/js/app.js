@@ -47,6 +47,46 @@ function apiUrl(endpoint, base = API_BASE_URL) {
 
 
 // ── Application State ────────────────────────────────────────────────────────
+const CANONICAL_TOPIC_ALIASES_JS = {
+  "bptt": "Backpropagation through Time",
+  "back propagation through time": "Backpropagation through Time",
+  "backpropagation through time bptt": "Backpropagation through Time",
+  "bptt algorithm": "Backpropagation through Time",
+  "lstm": "Long Short Term Memory (LSTM)",
+  "long short term memory": "Long Short Term Memory (LSTM)",
+  "long short term memory lstm": "Long Short Term Memory (LSTM)",
+  "long short term memory networks": "Long Short Term Memory (LSTM)",
+  "lstm networks": "Long Short Term Memory (LSTM)",
+  "lstm network": "Long Short Term Memory (LSTM)",
+  "lstm cell": "Long Short Term Memory (LSTM)",
+  "gru": "Gated Recurrent Units",
+  "gated recurrent unit": "Gated Recurrent Units",
+  "gated recurrent units gru": "Gated Recurrent Units",
+  "gru networks": "Gated Recurrent Units",
+  "gru cell": "Gated Recurrent Units",
+  "architecture of an rnn": "Architecture of an RNN",
+  "rnn architecture": "Architecture of an RNN",
+  "basic rnn structure": "Architecture of an RNN",
+  "recurrent neural network architecture": "Architecture of an RNN",
+  "structure of an rnn": "Architecture of an RNN",
+  "applications text classification": "Applications- Text Classification",
+  "text classification": "Applications- Text Classification",
+  "sentiment analysis": "Sentiment Analysis",
+  "sgd": "Stochastic Gradient Descent",
+  "stochastic gradient descent": "Stochastic Gradient Descent",
+  "stochastic gradient descent method": "Stochastic Gradient Descent",
+  "dutch national flag": "Algorithm, Pseudo-Code for Expressing Algorithms, Performance Analysis - Space and Time Complexity",
+  "dutch national flag problem": "Algorithm, Pseudo-Code for Expressing Algorithms, Performance Analysis - Space and Time Complexity",
+  "dnf problem": "Algorithm, Pseudo-Code for Expressing Algorithms, Performance Analysis - Space and Time Complexity",
+  "three way partitioning": "Algorithm, Pseudo-Code for Expressing Algorithms, Performance Analysis - Space and Time Complexity",
+  "3 way partitioning": "Algorithm, Pseudo-Code for Expressing Algorithms, Performance Analysis - Space and Time Complexity",
+  "greedy method": "Greedy Method",
+  "greedy approach": "Greedy Method",
+  "greedy algorithm": "Greedy Method",
+  "fractional knapsack": "Greedy Method",
+  "fractional knapsack problem": "Greedy Method"
+};
+
 let curriculum = [];
 let currentQuiz = null;
 let currentIndex = 0;
@@ -60,6 +100,8 @@ let activeAbortController = null;
 let studentId = (typeof localStorage !== "undefined" && localStorage.getItem) ? (localStorage.getItem("learnai_student_id") || null) : null;
 let authToken = (typeof localStorage !== "undefined" && localStorage.getItem) ? (localStorage.getItem("learnai_auth_token") || null) : null;
 let authSessionPromise = null;
+var expandedReviewCourseId = null;
+var lastDashboardData = null;
 
 // ── Student Authentication & Session Management ──────────────────────────────
 function isTokenExpired(token, bufferSeconds = 30) {
@@ -149,12 +191,16 @@ async function authenticatedFetch(url, options = {}) {
   }
   let res = await fetch(resolvedUrl, options);
   if (res.status === 401) {
-    console.warn("[AUTH] 401 Unauthorized received. Renewing session and retrying fetch once...");
-    await ensureAuthSession(true);
-    if (authToken) {
-      options.headers["Authorization"] = `Bearer ${authToken}`;
-      res = await fetch(resolvedUrl, options);
+    console.warn("[AUTH] 401 Unauthorized received. Session expired or revoked.");
+    currentUser = null;
+    authToken = null;
+    if (typeof localStorage !== "undefined" && localStorage.removeItem) {
+      localStorage.removeItem("learnai_auth_token");
+      localStorage.removeItem("learnai_student_id");
+      localStorage.removeItem("learnai_user_name");
     }
+    showScreen("loginSection");
+    showAuthMessage("loginMsg", "Your session has expired or was revoked. Please log in again.");
   }
   return res;
 }
@@ -522,21 +568,160 @@ const LearnAICodeRenderer = {
     targetEl.innerHTML = this.renderToHtml(rawContent, options);
   },
 
-  renderOptionToHtml(optionValue) {
+  _codeSnippetRegex: new RegExp(
+    [
+      // C/C++ I/O & functions
+      '\\b(?:printf|scanf|puts|putchar)\\s*\\([^)]*\\);?',
+      // C++ streams
+      '\\bcout\\s*<<\\s*[^;]+;?',
+      '\\bcin\\s*>>\\s*[^;]+;?',
+      // Python print & common builtins
+      '\\bprint\\s*\\([^)]*\\)',
+      '\\blen\\s*\\([^)]*\\)',
+      '\\brange\\s*\\([^)]*\\)',
+      '\\binput\\s*\\([^)]*\\)',
+      // Java System.out
+      '\\bSystem\\.out\\.(?:println|print|printf)\\s*\\([^)]*\\);?',
+      // JavaScript console
+      '\\bconsole\\.(?:log|error|warn|info|debug)\\s*\\([^)]*\\);?',
+      // SQL statements
+      '\\bSELECT\\s+[\\s\\S]+?\\s+FROM\\s+[^;]+;?',
+      '\\bINSERT\\s+INTO\\s+[^;]+;?',
+      '\\bUPDATE\\s+[^;]+SET\\s+[^;]+;?',
+      '\\bDELETE\\s+FROM\\s+[^;]+;?',
+      // Variable declarations with assignments
+      '\\b(?:int|float|double|char|bool|boolean|let|const|var)\\s+[*&]?[a-zA-Z_]\\w*\\s*=\\s*[^;]+;',
+      // Function/method calls ending in semicolon
+      '\\b[a-zA-Z_]\\w*(?:\\.[a-zA-Z_]\\w*)+\\s*\\([^)]*\\);?',
+      '\\b[a-zA-Z_]\\w*\\s*\\([^)]*\\);',
+      // Statements ending in semicolon with assignment/operators
+      '\\b[a-zA-Z_]\\w*\\s*(?:\\+=|-=|\\*=|/=|%=|=)\\s*[^;]+;'
+    ].map(p => `(${p})`).join('|'),
+    'i'
+  ),
+
+  _entireCodeRegex: new RegExp(
+    [
+      '^\\s*(?:printf|scanf|puts|putchar|cin|cout)\\b',
+      '^\\s*cout\\s*<<',
+      '^\\s*cin\\s*>>',
+      '^\\s*(?:print|input|len|range)\\s*\\(',
+      '^\\s*(?:System\\.out\\.(?:print|println|printf)|console\\.(?:log|error|warn|info))\\s*\\(',
+      '^\\s*(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH)\\b',
+      '^\\s*(?:int|float|double|char|long|short|void|bool|boolean|unsigned|const|let|var|auto)\\s+[*&]?[a-zA-Z_]\\w*',
+      '^\\s*(?:def|class|return|import|from|#include|#define|public|private|protected)\\b',
+      ';\\s*$',
+      '^[a-zA-Z_]\\w*(?:\\.[a-zA-Z_]\\w*)*\\s*\\([^)]*\\)\\s*;?$',
+      '^[a-zA-Z_]\\w*\\s*(?:\\+=|-=|\\*=|/=|%=|=)\\s*.+;?$'
+    ].join('|'),
+    'i'
+  ),
+
+  isQuestionCodeOrOutput(q) {
+    if (!q) return false;
+    const text = q.question || "";
+    if (/```|\bprintf\b|\bscanf\b|\bprint\s*\(|%\d*d|%0\d+d|%-\d*d|%\.\d+f|%[sScpxX]|\\n|\\t|#include|\bSystem\.out\./i.test(text)) {
+      return true;
+    }
+    const opts = q.options || {};
+    for (const val of Object.values(opts)) {
+      if (typeof val === "string") {
+        if (/[ \t]{2,}/.test(val) || /^[ \t]+|[ \t]+$/.test(val) || /[\n\t]/.test(val) || this._entireCodeRegex.test(val.trim())) {
+          return true;
+        }
+      }
+    }
+    return false;
+  },
+
+  isWhitespaceSensitiveOrCode(s) {
+    if (!s || typeof s !== "string") return false;
+    // Multiple consecutive horizontal spaces
+    if (/[ \t]{2,}/.test(s)) return true;
+    // Leading or trailing whitespace
+    if (/^[ \t]+|[ \t]+$/.test(s)) return true;
+    // Tabs or newlines
+    if (/[\n\t]/.test(s)) return true;
+    // Backtick inline code
+    if (/`[^`\n]+`/.test(s)) return true;
+    // Semicolon ending
+    if (/;\s*$/.test(s)) return true;
+    // Variable assignment
+    if (/^[a-zA-Z_]\w*\s*=\s*.+$/.test(s)) return true;
+    // Entire code match
+    if (this._entireCodeRegex.test(s.trim())) return true;
+    // Format specifier tokens
+    if (/%[-+0-9.*]*[diufoxXcspeEgp]/.test(s)) return true;
+    return false;
+  },
+
+  renderOptionToHtml(optionValue, renderOptions = {}) {
     if (optionValue === null || optionValue === undefined) return "";
     const s = String(optionValue);
+    if (!s) return "";
+
+    // 1. Multiline code in option: use light grey code block <pre class="option-pre">
+    if (s.indexOf("\n") !== -1 && (this.isWhitespaceSensitiveOrCode(s) || this._entireCodeRegex.test(s) || s.indexOf("```") !== -1)) {
+      let codeContent = s;
+      const fenceMatch = s.match(/^```[a-zA-Z_-]*\n([\s\S]*?)\n```$/);
+      if (fenceMatch) {
+        codeContent = fenceMatch[1];
+      }
+      return `<pre class="option-pre"><code class="option-code">${escapeHtml(codeContent)}</code></pre>`;
+    }
+
+    // 2. Explicit backticks: render inline code snippets
     if (/`[^`\n]+`/.test(s)) {
       return this.renderInline(s);
     }
-    if (/^\s*(?:SELECT\b|UPDATE\b|DELETE\b|INSERT\b|def\b|class\b|System\.out|console\.|return\b|#include|int\b|float\b|char\b)/i.test(s) || /;\s*$/.test(s) || /^[a-zA-Z_]\w*\s*=\s*.+$/.test(s)) {
+
+    // 3. Question context is code/output (e.g. C formatted I/O %4d)
+    const isCodeContext = Boolean(renderOptions && renderOptions.isCodeOrOutput);
+
+    // 4. Check if the entire string is code or whitespace-sensitive output
+    const isEntirelyCode = this._entireCodeRegex.test(s.trim()) ||
+      (isCodeContext && this.isWhitespaceSensitiveOrCode(s)) ||
+      (isCodeContext && !/^[a-zA-Z0-9\s.,'?!-]{30,}$/.test(s.trim()));
+
+    if (isEntirelyCode) {
       return `<code class="inline-code">${escapeHtml(s)}</code>`;
     }
+
+    // 5. Check if option contains mixed prose and code snippets
+    const codeSnippetMatches = [];
+    const regex = new RegExp(this._codeSnippetRegex.source, 'gi');
+    let m;
+    while ((m = regex.exec(s)) !== null) {
+      codeSnippetMatches.push({
+        start: m.index,
+        end: m.index + m[0].length,
+        text: m[0]
+      });
+    }
+
+    if (codeSnippetMatches.length > 0) {
+      const parts = [];
+      let lastIndex = 0;
+      for (const snippet of codeSnippetMatches) {
+        if (snippet.start > lastIndex) {
+          parts.push(escapeHtml(s.slice(lastIndex, snippet.start)));
+        }
+        parts.push(`<code class="inline-code">${escapeHtml(snippet.text)}</code>`);
+        lastIndex = snippet.end;
+      }
+      if (lastIndex < s.length) {
+        parts.push(escapeHtml(s.slice(lastIndex)));
+      }
+      return parts.join("");
+    }
+
+    // 6. Normal academic text
     return escapeHtml(s);
   },
 
-  renderOptionToElement(optionValue, targetEl) {
+  renderOptionToElement(optionValue, targetEl, renderOptions = {}) {
     if (!targetEl) return;
-    const html = this.renderOptionToHtml(optionValue);
+    const html = this.renderOptionToHtml(optionValue, renderOptions);
     if (html.indexOf("<") !== -1) {
       targetEl.innerHTML = html;
     } else {
@@ -548,9 +733,11 @@ const LearnAICodeRenderer = {
 
 // ── Mutually Exclusive Screen Management ────────────────────────────────────
 // Ensures EXACTLY ONE screen is visible at any time.
-const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection"];
+const AUTH_SCREENS = ["loginSection", "registerSection", "forgotPasswordSection", "resetPasswordSection"];
+const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection", ...AUTH_SCREENS];
 
 let lastActiveScreen = "setup";
+let currentUser = null;
 
 function showScreen(screenId, pushHistory = true) {
   if (screenId === "materialsSection") {
@@ -568,7 +755,21 @@ function showScreen(screenId, pushHistory = true) {
     }
   });
 
-  if (screenId !== "loadingSection") {
+  const isAuthScreen = AUTH_SCREENS.includes(screenId);
+  const mainNav = $("mainNav");
+  const topbarUser = $("topbarUserArea");
+
+  if (isAuthScreen) {
+    mainNav?.classList.add("hidden");
+    topbarUser?.classList.add("hidden");
+  } else {
+    mainNav?.classList.remove("hidden");
+    if (currentUser) {
+      topbarUser?.classList.remove("hidden");
+    }
+  }
+
+  if (screenId !== "loadingSection" && !isAuthScreen) {
     lastActiveScreen = screenId;
   }
 
@@ -577,7 +778,7 @@ function showScreen(screenId, pushHistory = true) {
   $("navDashboardBtn")?.classList.toggle("active", isDashboard);
   $("navNotesBtn")?.classList.toggle("active", isNotes);
   $("navMaterialsBtn")?.classList.toggle("active", isNotes);
-  $("navPracticeBtn")?.classList.toggle("active", !isDashboard && !isNotes);
+  $("navPracticeBtn")?.classList.toggle("active", !isDashboard && !isNotes && !isAuthScreen);
 
   if (isNotes && typeof loadStudyMaterials === "function") {
     const expandId = lastPracticedStudyMaterialId || expandedMaterialId;
@@ -700,11 +901,13 @@ async function loadCourses() {
   }
 }
 
-$("course").addEventListener("change", () => {
-  const course = curriculum.find(c => c.code === $("course").value);
+// ── Topic Dropdown Population ────────────────────────────────────────────────
+function populateTopicDropdown(courseCode) {
   const topicSelect = $("topic");
+  if (!topicSelect) return;
   topicSelect.innerHTML = "";
 
+  const course = (curriculum || []).find(c => c.code === courseCode);
   if (!course) {
     topicSelect.disabled = true;
     topicSelect.innerHTML = '<option value="">Select a course first</option>';
@@ -712,31 +915,128 @@ $("course").addEventListener("change", () => {
     return;
   }
 
-  const first = document.createElement("option");
-  first.value = "";
-  first.textContent = "Select a topic";
-  topicSelect.appendChild(first);
+  // 1. Add default "Select a topic" option
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Select a topic";
+  topicSelect.appendChild(defaultOption);
 
-  const seen = new Set();
-  (course.topics || []).forEach(topic => {
-    if (!topic || !topic.name) return;
+  // 2. Build coverage map from current uploaded material with canonical alias support
+  const coverageMap = new Map();
+  const activeNotes = lastExtractionResult && lastExtractionResult.matched_topics;
+  if (activeNotes && Array.isArray(activeNotes)) {
+    for (const t of activeNotes) {
+      if (t && t.topic_name && (!t.course_code || t.course_code === course.code)) {
+        const rawName = String(t.topic_name).trim().toLowerCase();
+        const normName = rawName.replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim();
+        const status = (t.coverage_status || "needs_review").toLowerCase();
+        coverageMap.set(rawName, status);
+        coverageMap.set(normName, status);
+        if (t.topic_id) coverageMap.set(String(t.topic_id).trim().toLowerCase(), status);
+        const canonName = CANONICAL_TOPIC_ALIASES_JS[normName];
+        if (canonName) {
+          const canonLower = canonName.toLowerCase();
+          const canonNorm = canonLower.replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim();
+          coverageMap.set(canonLower, status);
+          coverageMap.set(canonNorm, status);
+        }
+      }
+    }
+  }
+
+  // 3. Deduplicate syllabus topics by canonical identity strategy:
+  // Priority 1: Stable syllabus topic ID (e.g. 22AM301-Q019-1)
+  // Priority 2: Explicit canonical alias mapping
+  // Priority 3: Normalized topic title
+  const deduplicatedTopics = [];
+  const seenTopicKeys = new Set();
+  for (const topic of (course.topics || [])) {
+    if (!topic || !topic.name) continue;
     const name = String(topic.name).trim();
-    if (!name || seen.has(name.toLowerCase())) return;
-    seen.add(name.toLowerCase());
+    if (!name) continue;
+    const normKey = name.toLowerCase().replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim();
+    const idKey = topic.id ? String(topic.id).trim().toLowerCase() : "";
+    const canonTarget = CANONICAL_TOPIC_ALIASES_JS[normKey]
+      ? CANONICAL_TOPIC_ALIASES_JS[normKey].toLowerCase().replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim()
+      : normKey;
+    const groupKey = idKey || canonTarget;
+    if (seenTopicKeys.has(groupKey) || seenTopicKeys.has(canonTarget) || seenTopicKeys.has(normKey)) {
+      continue;
+    }
+    seenTopicKeys.add(groupKey);
+    seenTopicKeys.add(canonTarget);
+    seenTopicKeys.add(normKey);
+    if (idKey) seenTopicKeys.add(idKey);
+    deduplicatedTopics.push(topic);
+  }
 
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    option.dataset.topicId = topic.id || "";
-    option.dataset.topicName = name;
-    option.dataset.parentTopic = topic.parent_topic || topic.parent_section || topic.source_topic_name || "";
-    option.dataset.module = (topic.module !== undefined && topic.module !== null) ? topic.module : "";
-    option.dataset.unit = (topic.unit !== undefined && topic.unit !== null) ? topic.unit : "";
-    topicSelect.appendChild(option);
-  });
+  // 4. Classify deduplicated topics into three intended groups
+  const covered = [];
+  const partial = [];
+  const other = [];
+
+  for (const topic of deduplicatedTopics) {
+    const rawKey = String(topic.name).trim().toLowerCase();
+    const normKey = rawKey.replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim();
+    const idKey = topic.id ? String(topic.id).trim().toLowerCase() : "";
+
+    let status = coverageMap.get(rawKey) || coverageMap.get(normKey);
+    if (!status && idKey) {
+      status = coverageMap.get(idKey);
+    }
+    if (!status && CANONICAL_TOPIC_ALIASES_JS[normKey]) {
+      const canon = CANONICAL_TOPIC_ALIASES_JS[normKey].toLowerCase();
+      status = coverageMap.get(canon) || coverageMap.get(canon.replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim());
+    }
+
+    if (status === "covered") {
+      covered.push(topic);
+    } else if (status === "partially_covered") {
+      partial.push(topic);
+    } else {
+      other.push(topic);
+    }
+  }
+
+  // 5. Helper to create and append optgroup only if it has options
+  const appendOptGroup = (label, topicList) => {
+    if (!topicList || topicList.length === 0) return;
+    const og = document.createElement("optgroup");
+    og.label = label;
+    for (const topic of topicList) {
+      const name = String(topic.name).trim();
+      const rawKey = name.toLowerCase();
+      const normKey = rawKey.replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim();
+      const idKey = topic.id ? String(topic.id).trim().toLowerCase() : "";
+      const coverage = (coverageMap.get(rawKey) || coverageMap.get(normKey) || (idKey ? coverageMap.get(idKey) : "") || "not_found").toLowerCase();
+
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      option.dataset.topicId = topic.id || "";
+      option.dataset.topicName = name;
+      option.dataset.parentTopic = topic.parent_topic || topic.parent_section || topic.source_topic_name || "";
+      option.dataset.module = (topic.module !== undefined && topic.module !== null) ? topic.module : "";
+      option.dataset.unit = (topic.unit !== undefined && topic.unit !== null) ? topic.unit : "";
+      option.dataset.coverage = coverage;
+      og.appendChild(option);
+    }
+    if (topicList.length > 0) {
+      topicSelect.appendChild(og);
+    }
+  };
+
+  // 6. Append optgroups in priority order (only non-empty optgroups get added!)
+  appendOptGroup("Topics found in your notes", covered);
+  appendOptGroup("Partially covered topics", partial);
+  appendOptGroup("Other syllabus topics (general practice)", other);
 
   topicSelect.disabled = false;
   topicSelect.value = "";
+}
+
+$("course").addEventListener("change", () => {
+  populateTopicDropdown($("course").value);
 });
 
 // ── Navigation Buttons ───────────────────────────────────────────────────────
@@ -746,6 +1046,7 @@ $("generateBtn").addEventListener("click", () => {
   const topic = topicSelect.value;
   const selectedOption = topicSelect.selectedOptions ? topicSelect.selectedOptions[0] : null;
   const topicId = selectedOption?.dataset?.topicId || "";
+  const coverage = (selectedOption?.dataset?.coverage || "").toLowerCase();
 
   if (!courseCode || !topic) {
     $("setupMsg").innerHTML = '<span class="error-msg">Please select both course and topic.</span>';
@@ -753,7 +1054,18 @@ $("generateBtn").addEventListener("click", () => {
   }
   $("setupMsg").innerHTML = "";
 
-  startQuizGeneration(courseCode, topic, false, topicId);
+  // If this topic is found in uploaded notes (covered or partially_covered)
+  // and we have an active notes session or study material, pass it!
+  // If it is general syllabus practice (not_found or no notes), pass null so
+  // quiz generation cleanly treats it as general syllabus practice.
+  let notesSessionId = null;
+  let studyMaterialId = null;
+  if ((coverage === "covered" || coverage === "partially_covered") && lastExtractionResult) {
+    notesSessionId = lastExtractionResult.notes_session_id || null;
+    studyMaterialId = lastExtractionResult.study_material_id || null;
+  }
+
+  startQuizGeneration(courseCode, topic, false, topicId, notesSessionId, studyMaterialId);
 });
 
 $("prevBtn").addEventListener("click", () => {
@@ -838,6 +1150,10 @@ $("retakeBtn").addEventListener("click", async () => {
 
 // ── Explicit Home Navigation & Loading Screen Exit ──────────────────────────
 function goToHome() {
+  if (!currentUser) {
+    showScreen("loginSection");
+    return;
+  }
   if (isGenerating) return;
   clearSessionState();
   showScreen("setup");
@@ -963,6 +1279,9 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     if (activeStudyMaterialId) {
       quizPayload.study_material_id = activeStudyMaterialId;
     }
+    quizPayload.practice_mode = (activeNotesSessionId || activeStudyMaterialId)
+      ? "notes_grounded"
+      : "general_syllabus";
 
     const res = await authenticatedFetch("/api/quiz/generate", {
       method: "POST",
@@ -1112,6 +1431,8 @@ function renderQuestion() {
   if (!options) return;
   options.innerHTML = "";
 
+  const isCodeOrOutput = LearnAICodeRenderer.isQuestionCodeOrOutput(q);
+
   Object.entries(q.options || {}).forEach(([key, value]) => {
     const isSelected = answers[currentIndex] === key;
     const div = document.createElement("div");
@@ -1133,7 +1454,7 @@ function renderQuestion() {
 
     const textSpan = document.createElement("span");
     textSpan.className = "option-text";
-    LearnAICodeRenderer.renderOptionToElement(value, textSpan);
+    LearnAICodeRenderer.renderOptionToElement(value, textSpan, { isCodeOrOutput });
 
     div.appendChild(radioCircle);
     div.appendChild(letterSpan);
@@ -1364,20 +1685,173 @@ function showResult(data) {
   $("analysisRevision").textContent = analysis.revision || "";
   $("analysisRecommendation").textContent = analysis.recommendation || "";
 
-  $("review").innerHTML =
-    "<h3>Answer Review</h3>" +
-    (data.details || []).map((d, i) => `
-      <div class="review-item">
-        <div class="review-question-title"><strong>Q${i + 1}.</strong></div>
-        <div class="review-question-content">${LearnAICodeRenderer.renderToHtml(d.question)}</div>
-        <div class="${d.is_correct ? "correct" : "wrong"}">
-          ${d.is_correct ? "Correct" : "Incorrect"}
+  const reviewHtml = (data.details || []).map((d, i) => {
+    const rawConcept = d.concept || (currentQuiz && currentQuiz.questions && currentQuiz.questions[i] && currentQuiz.questions[i].concept) || "General";
+    const concept = String(rawConcept).trim() || "General";
+    const rawDiff = d.difficulty || (currentQuiz && currentQuiz.questions && currentQuiz.questions[i] && currentQuiz.questions[i].difficulty) || "Medium";
+    const difficulty = String(rawDiff).trim() || "Medium";
+
+    // Options mapping: prefer d.options, fallback to currentQuiz.questions[i].options
+    const options = (d.options && Object.keys(d.options).length > 0)
+      ? d.options
+      : ((currentQuiz && currentQuiz.questions && currentQuiz.questions[i] && currentQuiz.questions[i].options) || {});
+    const hasOptions = options && Object.keys(options).length > 0;
+
+    const selectedKey = (d.selected_answer || "").trim().toUpperCase();
+    const correctKey = (d.correct_answer || "").trim().toUpperCase();
+
+    const hasSelected = Boolean(selectedKey && (!hasOptions || options[selectedKey] !== undefined));
+    const isCorrect = Boolean(d.is_correct);
+    const isSkipped = !hasSelected;
+
+    // Student selected option text
+    let selectedText = "";
+    if (hasSelected && options[selectedKey]) {
+      selectedText = options[selectedKey];
+    } else if (hasSelected && !options[selectedKey]) {
+      selectedText = d.selected_answer;
+    }
+
+    // Correct option text
+    let correctText = "";
+    if (options[correctKey]) {
+      correctText = options[correctKey];
+    } else {
+      correctText = d.correct_answer;
+    }
+
+    const isCodeOrOutput = LearnAICodeRenderer.isQuestionCodeOrOutput(d) ||
+      Boolean(currentQuiz && currentQuiz.questions && currentQuiz.questions[i] && LearnAICodeRenderer.isQuestionCodeOrOutput(currentQuiz.questions[i]));
+
+    // Status pill determination (accessible text + icon)
+    let statusPillHtml = "";
+    if (isCorrect) {
+      statusPillHtml = `
+        <span class="review-status-pill pill-correct">
+          <svg class="review-status-icon" viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
+            <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 111.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/>
+          </svg>
+          Correct
+        </span>
+      `;
+    } else if (isSkipped) {
+      statusPillHtml = `
+        <span class="review-status-pill pill-skipped">
+          <svg class="review-status-icon" viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
+            <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm8-3.25a.75.75 0 01.75.75v3.25H11a.75.75 0 010 1.5H8a.75.75 0 01-.75-.75V5.5A.75.75 0 018 4.75z"/>
+          </svg>
+          Skipped / Unanswered
+        </span>
+      `;
+    } else {
+      statusPillHtml = `
+        <span class="review-status-pill pill-incorrect">
+          <svg class="review-status-icon" viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
+            <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/>
+          </svg>
+          Incorrect
+        </span>
+      `;
+    }
+
+    // Build Distractors List ("Why the other options are incorrect")
+    let distractorsHtml = "";
+    if (hasOptions) {
+      const optionKeys = Object.keys(options).sort();
+      const distractorKeys = optionKeys.filter(k => k.toUpperCase() !== correctKey);
+
+      if (distractorKeys.length > 0) {
+        const optionExplanations = d.option_explanations ||
+          ((currentQuiz && currentQuiz.questions && currentQuiz.questions[i] && currentQuiz.questions[i].option_explanations) || {});
+
+        const itemsHtml = distractorKeys.map(k => {
+          const optVal = options[k];
+          let reason = optionExplanations[k] || optionExplanations[k.toUpperCase()] || "";
+          if (!reason) {
+            reason = `Option ${k} is not the correct solution for this ${concept} question. Refer to the detailed explanation for the step-by-step logic.`;
+          }
+          return `
+            <li class="review-distractor-entry">
+              <span class="distractor-option-label">Option ${escapeHtml(k)}${optVal ? ` (${LearnAICodeRenderer.renderOptionToHtml(optVal, { isCodeOrOutput })})` : ""}:</span>
+              <div class="distractor-explanation">
+                ${LearnAICodeRenderer.renderToHtml(reason)}
+              </div>
+            </li>
+          `;
+        }).join("");
+
+        distractorsHtml = `
+          <div class="review-distractors-block">
+            <h4 class="review-subheading">Why the other options are incorrect</h4>
+            <ul class="review-distractor-list">
+              ${itemsHtml}
+            </ul>
+          </div>
+        `;
+      }
+    }
+
+    return `
+      <div class="review-question-item">
+        <div class="review-item-header">
+          <div class="review-item-meta">
+            <span class="review-q-number">Question ${i + 1}</span>
+            <span class="review-meta-dot" aria-hidden="true">&middot;</span>
+            <span class="review-q-concept">${escapeHtml(concept)}</span>
+            <span class="review-diff-tag diff-${difficulty.toLowerCase()}">${escapeHtml(difficulty)}</span>
+          </div>
+          ${statusPillHtml}
         </div>
-        <div class="review-answer-line">Your answer: ${LearnAICodeRenderer.renderOptionToHtml(d.selected_answer || "Not answered")}</div>
-        <div class="review-answer-line">Correct answer: ${LearnAICodeRenderer.renderOptionToHtml(d.correct_answer)}</div>
-        <div class="muted review-explanation">${LearnAICodeRenderer.renderToHtml(d.explanation)}</div>
+
+        <div class="review-question-body">
+          ${LearnAICodeRenderer.renderToHtml(d.question)}
+        </div>
+
+        <div class="review-answer-summary">
+          <div class="review-answer-line student-answer-line">
+            <span class="review-line-label">Your answer:</span>
+            <div class="review-line-content">
+              ${hasSelected ? `
+                <span class="choice-badge ${isCorrect ? 'badge-choice-correct' : 'badge-choice-incorrect'}">Option ${escapeHtml(selectedKey)}</span>
+                ${selectedText ? `<span class="choice-text">(${LearnAICodeRenderer.renderOptionToHtml(selectedText, { isCodeOrOutput })})</span>` : ""}
+              ` : `
+                <span class="choice-unanswered">Not answered</span>
+              `}
+            </div>
+          </div>
+
+          <div class="review-answer-line correct-answer-line">
+            <span class="review-line-label">Correct answer:</span>
+            <div class="review-line-content">
+              <span class="choice-badge badge-choice-correct">Option ${escapeHtml(correctKey)}</span>
+              ${correctText ? `<span class="choice-text">(${LearnAICodeRenderer.renderOptionToHtml(correctText, { isCodeOrOutput })})</span>` : ""}
+            </div>
+          </div>
+        </div>
+
+        <div class="review-explanation-block">
+          <h4 class="review-subheading">Explanation</h4>
+          <div class="review-prose">
+            ${LearnAICodeRenderer.renderToHtml(d.explanation || "No explanation provided.")}
+          </div>
+        </div>
+
+        ${distractorsHtml}
       </div>
-    `).join("");
+    `;
+  }).join("");
+
+  $("review").innerHTML = `
+    <div class="review-header">
+      <div class="review-header-title-group">
+        <h3>Detailed Question Review &amp; Explanations</h3>
+        <p class="review-header-subtitle">Review each question statement, step-by-step reasoning, and distractor analysis below to strengthen your understanding.</p>
+      </div>
+    </div>
+    <div class="review-items-container">
+      ${reviewHtml}
+    </div>
+  `;
 
   // Load and display attempt history for this topic
   loadAttemptHistory();
@@ -1453,7 +1927,13 @@ async function loadAttemptHistory() {
 // ── Student Progress Dashboard Logic ─────────────────────────────────────────
 
 async function openDashboard() {
+  if (!currentUser) {
+    showScreen("loginSection");
+    return;
+  }
   if (isGenerating) return;
+  expandedReviewCourseId = null;
+  if (typeof window !== "undefined") window.expandedReviewCourseId = null;
   showScreen("dashboardSection");
   window.scrollTo({ top: 0, behavior: "smooth" });
 
@@ -1511,6 +1991,8 @@ function populateDashboardCourseFilter(data) {
 let currentDashboardRequestId = 0;
 
 function onDashboardCourseFilterChange() {
+  expandedReviewCourseId = null;
+  if (typeof window !== "undefined") window.expandedReviewCourseId = null;
   const filterVal = $("dashboardCourseFilter")?.value || "";
   const graphCard = $("performanceGraphCard");
   const trendsWrap = $("trendChartWrap");
@@ -1736,6 +2218,238 @@ function getCourseDisplayName(courseCode, data = null, fallbackName = "") {
   return "Course Practice";
 }
 
+// ── Recommended Review Single-Card Focus Mode Helpers ───────────────────────
+if (typeof expandedReviewCourseId === "undefined") {
+  var expandedReviewCourseId = null;
+}
+if (typeof lastDashboardData === "undefined") {
+  var lastDashboardData = null;
+}
+
+function isCourseExpanded(r, idx, cardId) {
+  if (!expandedReviewCourseId) return false;
+  const target = String(expandedReviewCourseId).trim().toLowerCase();
+  if (cardId && String(cardId).trim().toLowerCase() === target) return true;
+  if (r.course_code && String(r.course_code).trim().toLowerCase() === target) return true;
+  if (r.topic_name && `${r.course_code || ""}:::${r.topic_name}`.trim().toLowerCase() === target) return true;
+  if (r.topic_id && String(r.topic_id).trim().toLowerCase() === target) return true;
+  return false;
+}
+
+function renderReviewTopics(reviewTopics, data) {
+  const reviewListEl = $("reviewTopicsList");
+  if (!reviewListEl) return;
+
+  // Synchronize external window.expandedReviewCourseId if set by caller/test
+  if (typeof window !== "undefined" && window.expandedReviewCourseId !== undefined && window.expandedReviewCourseId !== expandedReviewCourseId) {
+    expandedReviewCourseId = window.expandedReviewCourseId;
+  }
+
+  // If the expanded course disappears from the refreshed Recommended Review data, safely clear selection
+  if (expandedReviewCourseId) {
+    const matchExists = reviewTopics.some((r, idx) => isCourseExpanded(r, idx, `rec-card-${idx}`));
+    if (!matchExists) {
+      expandedReviewCourseId = null;
+      if (typeof window !== "undefined") window.expandedReviewCourseId = null;
+    }
+  }
+
+  const isFocusMode = Boolean(expandedReviewCourseId);
+  if (isFocusMode) {
+    reviewListEl.classList.add("has-focused-card");
+  } else {
+    reviewListEl.classList.remove("has-focused-card");
+  }
+
+  if (!reviewTopics.length) {
+    reviewListEl.innerHTML = `
+      <div class="on-track-card">
+        <div class="on-track-icon" aria-hidden="true">&#x2713;</div>
+        <div>
+          <strong>All Practiced Topics on Track</strong>
+          <p class="muted">You have maintained solid performance across practiced topics. Choose a topic from Practice Quiz to begin a new session.</p>
+        </div>
+      </div>
+    `;
+    const recListEl = $("recommendedTopicsList");
+    if (recListEl) recListEl.innerHTML = reviewListEl.innerHTML;
+    return;
+  }
+
+  // When in single-card focus mode: render strictly the focused course card.
+  // In normal state: render all Recommended Review course cards in the responsive grid.
+  const topicsToRender = isFocusMode
+    ? reviewTopics.filter((r, idx) => isCourseExpanded(r, idx, `rec-card-${idx}`))
+    : reviewTopics;
+
+  const effectiveTopics = topicsToRender.length ? topicsToRender : reviewTopics;
+
+  reviewListEl.innerHTML = effectiveTopics.map((r) => {
+    const origIdx = reviewTopics.indexOf(r);
+    const idx = origIdx >= 0 ? origIdx : 0;
+    const isHigh = r.priority === "high";
+    const cardId = `rec-card-${idx}`;
+    const isFocused = isFocusMode && isCourseExpanded(r, idx, cardId);
+
+    const courseName = getCourseDisplayName(r.course_code, data, r.course_name);
+    const topicName = (r.topic_name || "").trim();
+    const attemptsCount = (typeof r.attempt_count === "number" && r.attempt_count > 0) ? r.attempt_count : 1;
+    const attemptsText = attemptsCount > 1 ? `${attemptsCount} attempts` : "1 attempt";
+
+    const latestScore = (r.latest_score !== undefined && r.latest_score !== null) ? r.latest_score : null;
+    const latestTotal = (r.latest_total !== undefined && r.latest_total !== null) ? r.latest_total : null;
+    const latestAcc = (r.latest_accuracy !== undefined && r.latest_accuracy !== null)
+      ? r.latest_accuracy
+      : (r.recent_accuracy || 0);
+
+    const hasComparison = Boolean(r.attempt_count > 1 && r.score_change !== null && r.score_change !== undefined);
+    let deltaHtml = "";
+    if (hasComparison) {
+      const changeVal = r.score_change;
+      const prevAcc = (r.previous_accuracy !== undefined && r.previous_accuracy !== null) ? r.previous_accuracy : "--";
+      if (r.change_type === "improved" || changeVal > 0) {
+        deltaHtml = `
+          <span class="rec-delta rec-delta-improved" title="Improved by ${changeVal}% compared to previous attempt (${prevAcc}%)">
+            <span class="delta-arrow" aria-hidden="true">&uarr;</span> +${changeVal}% vs prev (${prevAcc}%)
+          </span>
+        `;
+      } else if (r.change_type === "declined" || changeVal < 0) {
+        deltaHtml = `
+          <span class="rec-delta rec-delta-declined" title="Declined by ${Math.abs(changeVal)}% compared to previous attempt (${prevAcc}%)">
+            <span class="delta-arrow" aria-hidden="true">&darr;</span> ${changeVal}% vs prev (${prevAcc}%)
+          </span>
+        `;
+      } else {
+        deltaHtml = `
+          <span class="rec-delta rec-delta-neutral" title="Score unchanged compared to previous attempt">
+            No change (${prevAcc}%)
+          </span>
+        `;
+      }
+    } else if (r.attempt_count === 1) {
+      deltaHtml = `<span class="rec-delta rec-delta-single">First attempt</span>`;
+    }
+
+    let historyItems = (Array.isArray(r.history) && r.history.length > 0) ? r.history : [];
+    if (!historyItems.length && (latestScore !== null || (typeof r.attempt_count === "number" && r.attempt_count > 0))) {
+      historyItems = [{
+        score: latestScore ?? 0,
+        total: latestTotal ?? 10,
+        accuracy: latestAcc ?? 0,
+        recommended_difficulty: r.recommended_difficulty || "mixed",
+        created_at: r.created_at || r.last_practiced_at || null
+      }];
+    }
+    const hasHistory = historyItems.length > 0;
+
+    let historyHtml = "";
+    if (hasHistory) {
+      const rows = historyItems.map((h, hIdx) => {
+        const isLatest = hIdx === 0;
+        const dateStr = h.created_at ? new Date(h.created_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "--";
+        const rowClass = isLatest ? "history-row-current" : "";
+        const attemptLabel = isLatest ? "Latest" : `#${historyItems.length - hIdx}`;
+        return `
+          <tr class="${rowClass}">
+            <td>${isLatest ? `<strong>${attemptLabel}</strong>` : attemptLabel}</td>
+            <td><strong>${h.score}/${h.total}</strong></td>
+            <td>${h.accuracy}%</td>
+            <td><span class="level-chip">${escapeHtml(h.recommended_difficulty || "mixed")}</span></td>
+            <td>${dateStr}</td>
+          </tr>
+        `;
+      }).join("");
+
+      historyHtml = `
+        <div id="history-panel-${cardId}" class="topic-history-panel ${isFocused ? '' : 'hidden'}" aria-hidden="${isFocused ? 'false' : 'true'}">
+          <div class="topic-history-header">
+            <span>Attempt History</span>
+            ${isFocused ? `
+              <button type="button" class="topic-history-close-btn topic-history-toggle-btn" aria-expanded="true" aria-controls="history-panel-${cardId}" data-course-id="${escapeHtml(r.course_code || cardId)}" data-item-key="${escapeHtml(r.course_code ? r.course_code + ':::' + r.topic_name : cardId)}" data-card-id="${cardId}" title="Hide details">
+                &times; Hide details
+              </button>
+            ` : ""}
+          </div>
+          <div class="table-container history-table-container">
+            <table class="history-table" aria-label="Attempt history for ${escapeHtml(r.topic_name)}">
+              <thead>
+                <tr>
+                  <th scope="col">Attempt</th>
+                  <th scope="col">Score</th>
+                  <th scope="col">Accuracy</th>
+                  <th scope="col">Level</th>
+                  <th scope="col">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    const topicContentHtml = topicName
+      ? `<strong class="rec-topic-name">${escapeHtml(topicName)}</strong>`
+      : `<span class="rec-topic-name rec-topic-muted">Topic unavailable</span>`;
+
+    const itemKey = (r.course_code && r.topic_name) ? `${r.course_code}:::${r.topic_name}` : (r.course_code || cardId);
+
+    return `
+      <div class="rec-card ${isHigh ? 'card-review-high' : 'card-review-adv'} ${isFocused ? 'rec-card-focused' : ''}" id="${cardId}">
+        <div class="rec-card-body">
+          <div class="rec-card-header">
+            <h3 class="rec-course-name rec-title">${escapeHtml(courseName)}</h3>
+            <div class="rec-topic-row">
+              <span class="rec-topic-label">Topic:</span>
+              ${topicContentHtml}
+            </div>
+            <div class="rec-attempts-wrap">
+              <span class="rec-attempts-pill">${escapeHtml(attemptsText)}</span>
+            </div>
+          </div>
+
+          <!-- Primary Score & Progress Section -->
+          <div class="rec-score-box">
+            <div class="rec-score-header">
+              <div class="rec-score-primary">
+                <span class="rec-score-pct">${latestAcc}%</span>
+                ${latestScore !== null && latestTotal !== null ? `<span class="rec-score-fraction">(${latestScore}/${latestTotal})</span>` : ""}
+              </div>
+              ${deltaHtml}
+            </div>
+            <div class="rec-progress-track" role="progressbar" aria-valuenow="${latestAcc}" aria-valuemin="0" aria-valuemax="100" aria-label="Latest score: ${latestAcc}%">
+              <div class="rec-progress-fill ${isHigh ? 'fill-warning' : 'fill-brand'}" style="width: ${Math.min(100, Math.max(0, latestAcc))}%"></div>
+            </div>
+          </div>
+
+          <p class="rec-reason">${escapeHtml(r.reason)}</p>
+        </div>
+
+        <div class="rec-card-footer">
+          <div class="rec-actions">
+            <button type="button" class="practice-topic-btn ${isHigh ? 'btn-primary' : 'secondary'}" data-course="${escapeHtml(r.course_code)}" data-topic="${escapeHtml(r.topic_name)}">
+              Practice Topic
+            </button>
+            ${hasHistory ? `
+              <button type="button" class="secondary topic-history-toggle-btn ${isFocused ? 'btn-hide-details' : ''}" aria-expanded="${isFocused ? 'true' : 'false'}" aria-controls="history-panel-${cardId}" data-course-id="${escapeHtml(r.course_code || cardId)}" data-item-key="${escapeHtml(itemKey)}" data-card-id="${cardId}" title="${isFocused ? 'Hide details' : 'View history'}">
+                ${isFocused ? 'Hide details' : 'View history'}
+              </button>
+            ` : ""}
+          </div>
+          ${historyHtml}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const recListEl = $("recommendedTopicsList");
+  if (recListEl && reviewListEl) {
+    recListEl.innerHTML = reviewListEl.innerHTML;
+  }
+}
+
 function renderReturningDashboard(data) {
   const overview = data.overview || {};
 
@@ -1754,170 +2468,12 @@ function renderReturningDashboard(data) {
     }
   }
 
+  // Cache latest dashboard data for client-side interactions and toggles
+  lastDashboardData = data;
+
   // 2. Recommended Review (Topics Needing Review)
-  const reviewListEl = $("reviewTopicsList");
   const reviewTopics = data.review_topics || data.recommended_topics || [];
-
-  if (reviewListEl) {
-    if (!reviewTopics.length) {
-      reviewListEl.innerHTML = `
-        <div class="on-track-card">
-          <div class="on-track-icon" aria-hidden="true">&#x2713;</div>
-          <div>
-            <strong>All Practiced Topics on Track</strong>
-            <p class="muted">You have maintained solid performance across practiced topics. Choose a topic from Practice Quiz to begin a new session.</p>
-          </div>
-        </div>
-      `;
-    } else {
-      reviewListEl.innerHTML = reviewTopics.map((r, idx) => {
-        const isHigh = r.priority === "high";
-        const cardId = `rec-card-${idx}`;
-
-        const courseName = getCourseDisplayName(r.course_code, data, r.course_name);
-        const topicName = (r.topic_name || "").trim();
-        const attemptsCount = (typeof r.attempt_count === "number" && r.attempt_count > 0) ? r.attempt_count : 1;
-        const attemptsText = attemptsCount > 1 ? `${attemptsCount} attempts` : "1 attempt";
-
-        const latestScore = (r.latest_score !== undefined && r.latest_score !== null) ? r.latest_score : null;
-        const latestTotal = (r.latest_total !== undefined && r.latest_total !== null) ? r.latest_total : null;
-        const latestAcc = (r.latest_accuracy !== undefined && r.latest_accuracy !== null)
-          ? r.latest_accuracy
-          : (r.recent_accuracy || 0);
-
-        const hasComparison = Boolean(r.attempt_count > 1 && r.score_change !== null && r.score_change !== undefined);
-        let deltaHtml = "";
-        if (hasComparison) {
-          const changeVal = r.score_change;
-          const prevAcc = (r.previous_accuracy !== undefined && r.previous_accuracy !== null) ? r.previous_accuracy : "--";
-          if (r.change_type === "improved" || changeVal > 0) {
-            deltaHtml = `
-              <span class="rec-delta rec-delta-improved" title="Improved by ${changeVal}% compared to previous attempt (${prevAcc}%)">
-                <span class="delta-arrow" aria-hidden="true">&uarr;</span> +${changeVal}% vs prev (${prevAcc}%)
-              </span>
-            `;
-          } else if (r.change_type === "declined" || changeVal < 0) {
-            deltaHtml = `
-              <span class="rec-delta rec-delta-declined" title="Declined by ${Math.abs(changeVal)}% compared to previous attempt (${prevAcc}%)">
-                <span class="delta-arrow" aria-hidden="true">&darr;</span> ${changeVal}% vs prev (${prevAcc}%)
-              </span>
-            `;
-          } else {
-            deltaHtml = `
-              <span class="rec-delta rec-delta-neutral" title="Score unchanged compared to previous attempt">
-                No change (${prevAcc}%)
-              </span>
-            `;
-          }
-        } else if (r.attempt_count === 1) {
-          deltaHtml = `<span class="rec-delta rec-delta-single">First attempt</span>`;
-        }
-
-
-
-        const historyItems = (Array.isArray(r.history) && r.history.length > 1) ? r.history : [];
-        const hasHistory = historyItems.length > 1;
-
-        let historyHtml = "";
-        if (hasHistory) {
-          const rows = historyItems.map((h, hIdx) => {
-            const isLatest = hIdx === 0;
-            const dateStr = h.created_at ? new Date(h.created_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "--";
-            const rowClass = isLatest ? "history-row-current" : "";
-            const attemptLabel = isLatest ? "Latest" : `#${historyItems.length - hIdx}`;
-            return `
-              <tr class="${rowClass}">
-                <td>${isLatest ? `<strong>${attemptLabel}</strong>` : attemptLabel}</td>
-                <td><strong>${h.score}/${h.total}</strong></td>
-                <td>${h.accuracy}%</td>
-                <td><span class="level-chip">${escapeHtml(h.recommended_difficulty || "mixed")}</span></td>
-                <td>${dateStr}</td>
-              </tr>
-            `;
-          }).join("");
-
-          historyHtml = `
-            <div id="history-panel-${cardId}" class="topic-history-panel hidden" aria-hidden="true">
-              <div class="topic-history-header">Attempt History</div>
-              <div class="table-container">
-                <table class="history-table" aria-label="Attempt history for ${escapeHtml(r.topic_name)}">
-                  <thead>
-                    <tr>
-                      <th scope="col">Attempt</th>
-                      <th scope="col">Score</th>
-                      <th scope="col">Accuracy</th>
-                      <th scope="col">Level</th>
-                      <th scope="col">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${rows}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          `;
-        }
-
-        const topicContentHtml = topicName
-          ? `<strong class="rec-topic-name">${escapeHtml(topicName)}</strong>`
-          : `<span class="rec-topic-name rec-topic-muted">Topic unavailable</span>`;
-
-        return `
-          <div class="rec-card ${isHigh ? 'card-review-high' : 'card-review-adv'}" id="${cardId}">
-            <div class="rec-card-body">
-              <div class="rec-card-header">
-                <h3 class="rec-course-name rec-title">${escapeHtml(courseName)}</h3>
-                <div class="rec-topic-row">
-                  <span class="rec-topic-label">Topic:</span>
-                  ${topicContentHtml}
-                </div>
-                <div class="rec-attempts-wrap">
-                  <span class="rec-attempts-pill">${escapeHtml(attemptsText)}</span>
-                </div>
-              </div>
-
-              <!-- Primary Score & Progress Section -->
-              <div class="rec-score-box">
-                <div class="rec-score-header">
-                  <div class="rec-score-primary">
-                    <span class="rec-score-pct">${latestAcc}%</span>
-                    ${latestScore !== null && latestTotal !== null ? `<span class="rec-score-fraction">(${latestScore}/${latestTotal})</span>` : ""}
-                  </div>
-                  ${deltaHtml}
-                </div>
-                <div class="rec-progress-track" role="progressbar" aria-valuenow="${latestAcc}" aria-valuemin="0" aria-valuemax="100" aria-label="Latest score: ${latestAcc}%">
-                  <div class="rec-progress-fill ${isHigh ? 'fill-warning' : 'fill-brand'}" style="width: ${Math.min(100, Math.max(0, latestAcc))}%"></div>
-                </div>
-              </div>
-
-              <p class="rec-reason">${escapeHtml(r.reason)}</p>
-            </div>
-
-            <div class="rec-card-footer">
-              <div class="rec-actions">
-                <button type="button" class="practice-topic-btn ${isHigh ? 'btn-primary' : 'secondary'}" data-course="${escapeHtml(r.course_code)}" data-topic="${escapeHtml(r.topic_name)}">
-                  Practice Topic
-                </button>
-                ${hasHistory ? `
-                  <button type="button" class="secondary topic-history-toggle-btn" aria-expanded="false" aria-controls="history-panel-${cardId}">
-                    View history
-                  </button>
-                ` : ""}
-              </div>
-              ${historyHtml}
-            </div>
-          </div>
-        `;
-      }).join("");
-    }
-  }
-
-  // Backward compatibility alias for any caller expecting recommendedTopicsList
-  const recListEl = $("recommendedTopicsList");
-  if (recListEl && reviewListEl) {
-    recListEl.innerHTML = reviewListEl.innerHTML;
-  }
+  renderReviewTopics(reviewTopics, data);
 
   // 4. Performance Trends (Conditional Course-Specific Graph + Attempts List)
   const graphCard = $("performanceGraphCard");
@@ -2185,22 +2741,58 @@ function renderReturningDashboard(data) {
 
 function attachHistoryToggleListeners() {
   document.querySelectorAll(".topic-history-toggle-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const panelId = btn.getAttribute("aria-controls");
-      if (!panelId) return;
-      const panel = document.getElementById(panelId);
-      if (!panel) return;
-      const isHidden = panel.classList.contains("hidden");
-      if (isHidden) {
-        panel.classList.remove("hidden");
-        panel.setAttribute("aria-hidden", "false");
-        btn.setAttribute("aria-expanded", "true");
-        btn.textContent = "Hide history";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const isExpanded = btn.getAttribute("aria-expanded") === "true";
+      const itemKey = btn.getAttribute("data-item-key");
+      const courseId = btn.getAttribute("data-course-id");
+      const cardId = btn.getAttribute("data-card-id");
+
+      if (isExpanded) {
+        // User clicked "Hide details" -> Clear expanded course selection and restore all cards
+        expandedReviewCourseId = null;
+        if (typeof window !== "undefined") window.expandedReviewCourseId = null;
       } else {
-        panel.classList.add("hidden");
-        panel.setAttribute("aria-hidden", "true");
-        btn.setAttribute("aria-expanded", "false");
-        btn.textContent = "View history";
+        // User clicked "View history" -> Focus on this selected course card
+        expandedReviewCourseId = itemKey || courseId || cardId;
+        if (typeof window !== "undefined") window.expandedReviewCourseId = expandedReviewCourseId;
+      }
+
+      if (lastDashboardData) {
+        renderReviewTopics(lastDashboardData.review_topics || lastDashboardData.recommended_topics || [], lastDashboardData);
+        attachPracticeTopicListeners();
+        attachHistoryToggleListeners();
+      } else {
+        // Fallback for minimal DOM environments without lastDashboardData
+        const gridEl = $("reviewTopicsList");
+        const allCards = gridEl ? gridEl.querySelectorAll(".rec-card") : [];
+        if (isExpanded) {
+          if (gridEl) gridEl.classList.remove("has-focused-card");
+          allCards.forEach(c => {
+            c.classList.remove("rec-card-focused", "hidden");
+            const p = c.querySelector(".topic-history-panel");
+            if (p) { p.classList.add("hidden"); p.setAttribute("aria-hidden", "true"); }
+            const b = c.querySelector(".topic-history-toggle-btn");
+            if (b) { b.setAttribute("aria-expanded", "false"); b.textContent = "View history"; b.classList.remove("btn-hide-details"); }
+          });
+        } else {
+          if (gridEl) gridEl.classList.add("has-focused-card");
+          allCards.forEach(c => {
+            if (c.id === cardId) {
+              c.classList.add("rec-card-focused");
+              c.classList.remove("hidden");
+              const p = c.querySelector(".topic-history-panel");
+              if (p) { p.classList.remove("hidden"); p.setAttribute("aria-hidden", "false"); }
+              const b = c.querySelector(".topic-history-toggle-btn");
+              if (b) { b.setAttribute("aria-expanded", "true"); b.textContent = "Hide details"; b.classList.add("btn-hide-details"); }
+            } else {
+              c.classList.add("hidden");
+              c.classList.remove("rec-card-focused");
+            }
+          });
+        }
       }
     });
   });
@@ -3231,11 +3823,24 @@ function renderMatchedTopicsUI(data) {
     partialAlert.classList.add("hidden");
   }
 
+  const coverageBadge = (status) => {
+    const s = (status || "needs_review").toString().toLowerCase();
+    if (s === "covered") return '<span class="badge badge-success">Strong Match</span>';
+    if (s === "partially_covered") return '<span class="badge badge-warning">Partial Match</span>';
+    if (s === "needs_review") return '<span class="badge badge-warning">Needs Review</span>';
+    return '<span class="badge badge-error">Not Found</span>';
+  };
+
   listContainer.innerHTML = data.matched_topics.map((t, idx) => {
     const isChecked = idx === selectedTopicIndex;
-    const pct = Math.round((t.confidence || 0) * 100);
-    const concepts = (t.matched_concepts || []).map(c => `
+    const concepts = (t.matched_concepts || []).slice(0, 4).map(c => `
       <span class="notes-concept-chip">${escapeHtml(c)}</span>
+    `).join("");
+    const evidence = (t.evidence || []).map(e => `
+      <div class="notes-evidence">
+        <span class="notes-evidence-loc">${escapeHtml(e.location || "")}</span>
+        <span class="notes-evidence-text">${escapeHtml(e.snippet || "")}</span>
+      </div>
     `).join("");
 
     return `
@@ -3244,10 +3849,11 @@ function renderMatchedTopicsUI(data) {
         <div class="notes-topic-body">
           <div class="notes-topic-header-row">
             <span class="notes-course-tag">${escapeHtml(t.course_code)} - ${escapeHtml(t.course_name)}</span>
-            <span class="notes-confidence-badge">${pct}% Match</span>
+            ${coverageBadge(t.coverage_status)}
           </div>
           <div class="notes-topic-name">${escapeHtml(t.topic_name)}</div>
           ${concepts ? `<div class="notes-concepts-row">${concepts}</div>` : ''}
+          ${evidence ? `<div class="notes-evidence-row">${evidence}</div>` : ''}
         </div>
       </div>
     `;
@@ -3694,12 +4300,14 @@ function renderInlineTopicsList(materialId, material) {
     const statusLabel = t.status_label || "Not Attempted";
     const attempts = t.attempt_count || 0;
     const latestScore = t.latest_score !== null && t.latest_score !== undefined ? `${Math.round(t.latest_score)}%` : null;
-    const matchScore = (typeof t.confidence === "number" && t.confidence > 0)
-      ? Math.round(t.confidence * (t.confidence <= 1.0 ? 100 : 1))
-      : null;
-    const matchBadge = matchScore !== null
-      ? `<span class="notes-confidence-badge">${matchScore}% Match</span>`
-      : "";
+    const coverage = (t.coverage_status || "needs_review").toString().toLowerCase();
+    const matchBadge = coverage === "covered"
+      ? '<span class="badge badge-success">Strong Match</span>'
+      : coverage === "partially_covered"
+        ? '<span class="badge badge-warning">Partial Match</span>'
+        : coverage === "needs_review"
+          ? '<span class="badge badge-warning">Needs Review</span>'
+          : "";
 
     let subStatusText = "";
     if (statusKey === "mastered") {
@@ -3708,7 +4316,7 @@ function renderInlineTopicsList(materialId, material) {
       subStatusText = latestScore ? ` • Latest score: ${latestScore}` : ` • ${attempts} attempt${attempts === 1 ? '' : 's'}`;
     }
 
-    const concepts = (t.matched_concepts || []).map(c => `
+    const concepts = (t.matched_concepts || []).slice(0, 4).map(c => `
       <span class="concept-chip-sm">${escapeHtml(c)}</span>
     `).join("");
 
@@ -3854,12 +4462,447 @@ function initStudyMaterialsListeners() {
   }
 }
 
+
+// ==========================================================================
+// Student Authentication, Registration & Account Management
+// ==========================================================================
+
+function showAuthMessage(containerId, message, type = "error") {
+  const box = $(containerId);
+  if (!box) return;
+  box.textContent = message;
+  box.className = `auth-msg ${type}`;
+  box.classList.remove("hidden");
+}
+
+function clearAuthMessage(containerId) {
+  const box = $(containerId);
+  if (!box) return;
+  box.textContent = "";
+  box.className = "auth-msg hidden";
+}
+
+function setAuthBtnLoading(btnId, isLoading, defaultText = "Submit") {
+  const btn = $(btnId);
+  if (!btn) return;
+  btn.disabled = isLoading;
+  const textSpan = btn.querySelector(".btn-text");
+  const spinnerSpan = btn.querySelector(".btn-spinner");
+  if (textSpan && spinnerSpan) {
+    if (isLoading) {
+      textSpan.textContent = "Please wait...";
+      spinnerSpan.classList.remove("hidden");
+    } else {
+      textSpan.textContent = defaultText;
+      spinnerSpan.classList.add("hidden");
+    }
+  }
+}
+
+function updateUserDisplay(name) {
+  const el = $("userDisplayName");
+  if (el) {
+    el.textContent = name || "Student";
+  }
+}
+
+async function verifyCurrentUser() {
+  if (!authToken && typeof localStorage !== "undefined" && localStorage.getItem) {
+    authToken = localStorage.getItem("learnai_auth_token") || null;
+  }
+  if (!studentId && typeof localStorage !== "undefined" && localStorage.getItem) {
+    studentId = localStorage.getItem("learnai_student_id") || null;
+  }
+
+  if (!authToken || isTokenExpired(authToken)) {
+    currentUser = null;
+    return false;
+  }
+
+  try {
+    const res = await fetch(apiUrl("/api/auth/me"), {
+      headers: { "Authorization": `Bearer ${authToken}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.is_registered) {
+        currentUser = data;
+        studentId = data.student_id;
+        updateUserDisplay(data.full_name || "Student");
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn("[AUTH] Failed to verify user profile:", err);
+  }
+
+  currentUser = null;
+  return false;
+}
+
+async function handleLoginSubmit(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  clearAuthMessage("loginMsg");
+
+  const emailInput = $("loginEmail");
+  const passwordInput = $("loginPassword");
+  const email = (emailInput?.value || "").trim();
+  const password = passwordInput?.value || "";
+
+  if (!email || !password) {
+    showAuthMessage("loginMsg", "Please enter both your email address and password.", "error");
+    return;
+  }
+
+  setAuthBtnLoading("loginSubmitBtn", true, "Login");
+
+  try {
+    const res = await fetch(apiUrl("/api/auth/login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email, password: password })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      const errorMsg = data.detail || "Invalid email address or password.";
+      showAuthMessage("loginMsg", errorMsg, "error");
+      setAuthBtnLoading("loginSubmitBtn", false, "Login");
+      return;
+    }
+
+    // Login successful
+    authToken = data.token;
+    studentId = data.student_id;
+    currentUser = {
+      student_id: data.student_id,
+      full_name: data.full_name,
+      email: data.email,
+      is_registered: true
+    };
+
+    if (typeof localStorage !== "undefined" && localStorage.setItem) {
+      localStorage.setItem("learnai_auth_token", authToken);
+      localStorage.setItem("learnai_student_id", studentId);
+      localStorage.setItem("learnai_user_name", data.full_name || "");
+    }
+
+    updateUserDisplay(data.full_name);
+    if (passwordInput) passwordInput.value = "";
+    clearAuthMessage("loginMsg");
+    setAuthBtnLoading("loginSubmitBtn", false, "Login");
+
+    // Redirect to Student Dashboard as required by specification
+    openDashboard();
+  } catch (err) {
+    console.error("[AUTH] Login error:", err);
+    showAuthMessage("loginMsg", "Connection error. Please check your internet connection.", "error");
+    setAuthBtnLoading("loginSubmitBtn", false, "Login");
+  }
+}
+
+async function handleRegisterSubmit(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  clearAuthMessage("registerMsg");
+
+  const nameInput = $("registerName");
+  const emailInput = $("registerEmail");
+  const passwordInput = $("registerPassword");
+  const confirmPasswordInput = $("registerConfirmPassword");
+
+  const fullName = (nameInput?.value || "").trim();
+  const email = (emailInput?.value || "").trim();
+  const password = passwordInput?.value || "";
+  const confirmPassword = confirmPasswordInput?.value || "";
+
+  // Client-side validations
+  if (!fullName || fullName.length < 2) {
+    showAuthMessage("registerMsg", "Please enter your full name (minimum 2 characters).", "error");
+    nameInput?.focus();
+    return;
+  }
+
+  const emailRegex = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$/;
+  if (!email || !emailRegex.test(email)) {
+    showAuthMessage("registerMsg", "Please enter a valid email address.", "error");
+    emailInput?.focus();
+    return;
+  }
+
+  if (!password || password.length < 8) {
+    showAuthMessage("registerMsg", "Password must be at least 8 characters long.", "error");
+    passwordInput?.focus();
+    return;
+  }
+
+  const hasLetter = /[a-zA-Z]/.test(password);
+  const hasDigit = /[0-9]/.test(password);
+  if (!hasLetter || !hasDigit) {
+    showAuthMessage("registerMsg", "Password must contain at least one letter and one number.", "error");
+    passwordInput?.focus();
+    return;
+  }
+
+  if (password !== confirmPassword) {
+    showAuthMessage("registerMsg", "Passwords do not match. Please re-enter your password.", "error");
+    confirmPasswordInput?.focus();
+    return;
+  }
+
+  setAuthBtnLoading("registerSubmitBtn", true, "Create account");
+
+  try {
+    const res = await fetch(apiUrl("/api/auth/register"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        full_name: fullName,
+        email: email,
+        password: password,
+        confirm_password: confirmPassword
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      const errorMsg = data.detail || "Registration failed. Please check your information.";
+      showAuthMessage("registerMsg", errorMsg, "error");
+      setAuthBtnLoading("registerSubmitBtn", false, "Create account");
+      return;
+    }
+
+    // Registration successful
+    authToken = data.token;
+    studentId = data.student_id;
+    currentUser = {
+      student_id: data.student_id,
+      full_name: data.full_name,
+      email: data.email,
+      is_registered: true
+    };
+
+    if (typeof localStorage !== "undefined" && localStorage.setItem) {
+      localStorage.setItem("learnai_auth_token", authToken);
+      localStorage.setItem("learnai_student_id", studentId);
+      localStorage.setItem("learnai_user_name", data.full_name || "");
+    }
+
+    updateUserDisplay(data.full_name);
+    if (passwordInput) passwordInput.value = "";
+    if (confirmPasswordInput) confirmPasswordInput.value = "";
+    clearAuthMessage("registerMsg");
+    setAuthBtnLoading("registerSubmitBtn", false, "Create account");
+
+    // Enter main application
+    goToHome();
+  } catch (err) {
+    console.error("[AUTH] Registration error:", err);
+    showAuthMessage("registerMsg", "Connection error. Please try again.", "error");
+    setAuthBtnLoading("registerSubmitBtn", false, "Create account");
+  }
+}
+
+async function handleForgotPasswordSubmit(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  clearAuthMessage("forgotMsg");
+  $("devResetNotice")?.classList.add("hidden");
+
+  const emailInput = $("forgotEmail");
+  const email = (emailInput?.value || "").trim();
+
+  if (!email) {
+    showAuthMessage("forgotMsg", "Please enter your registered email address.", "error");
+    return;
+  }
+
+  setAuthBtnLoading("forgotSubmitBtn", true, "Send reset link");
+
+  try {
+    const res = await fetch(apiUrl("/api/auth/forgot-password"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email })
+    });
+
+    const data = await res.json();
+    setAuthBtnLoading("forgotSubmitBtn", false, "Send reset link");
+
+    if (!res.ok) {
+      showAuthMessage("forgotMsg", data.detail || "Unable to request password reset. Please try again.", "error");
+      return;
+    }
+
+    showAuthMessage("forgotMsg", data.message || "If an account is associated with this email, password reset instructions have been generated.", "success");
+
+    // Handle development mode token inspection
+    if (data.dev_reset_token) {
+      const devNotice = $("devResetNotice");
+      const devCode = $("devResetTokenCode");
+      if (devNotice && devCode) {
+        devCode.textContent = data.dev_reset_token;
+        devNotice.classList.remove("hidden");
+      }
+    }
+  } catch (err) {
+    console.error("[AUTH] Forgot password error:", err);
+    showAuthMessage("forgotMsg", "Connection error. Please try again.", "error");
+    setAuthBtnLoading("forgotSubmitBtn", false, "Send reset link");
+  }
+}
+
+async function handleResetPasswordSubmit(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  clearAuthMessage("resetMsg");
+
+  const tokenInput = $("resetTokenInput");
+  const newPwdInput = $("resetNewPassword");
+  const confirmPwdInput = $("resetConfirmPassword");
+
+  const token = (tokenInput?.value || "").trim();
+  const newPassword = newPwdInput?.value || "";
+  const confirmPassword = confirmPwdInput?.value || "";
+
+  if (!token) {
+    showAuthMessage("resetMsg", "Please paste or enter your reset token.", "error");
+    return;
+  }
+
+  if (!newPassword || newPassword.length < 8) {
+    showAuthMessage("resetMsg", "New password must be at least 8 characters long.", "error");
+    return;
+  }
+
+  const hasLetter = /[a-zA-Z]/.test(newPassword);
+  const hasDigit = /[0-9]/.test(newPassword);
+  if (!hasLetter || !hasDigit) {
+    showAuthMessage("resetMsg", "Password must contain at least one letter and one number.", "error");
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    showAuthMessage("resetMsg", "Passwords do not match. Please re-enter your new password.", "error");
+    return;
+  }
+
+  setAuthBtnLoading("resetSubmitBtn", true, "Reset password");
+
+  try {
+    const res = await fetch(apiUrl("/api/auth/reset-password"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: token,
+        new_password: newPassword,
+        confirm_password: confirmPassword
+      })
+    });
+
+    const data = await res.json();
+    setAuthBtnLoading("resetSubmitBtn", false, "Reset password");
+
+    if (!res.ok) {
+      showAuthMessage("resetMsg", data.detail || "Failed to reset password. Token may be invalid or expired.", "error");
+      return;
+    }
+
+    // Success: return to login view with success alert
+    showScreen("loginSection");
+    showAuthMessage("loginMsg", "Password successfully reset! Please log in with your new password.", "success");
+    if (newPwdInput) newPwdInput.value = "";
+    if (confirmPwdInput) confirmPwdInput.value = "";
+    if (tokenInput) tokenInput.value = "";
+  } catch (err) {
+    console.error("[AUTH] Reset password error:", err);
+    showAuthMessage("resetMsg", "Connection error. Please try again.", "error");
+    setAuthBtnLoading("resetSubmitBtn", false, "Reset password");
+  }
+}
+
+async function handleLogout() {
+  if (authToken) {
+    try {
+      await fetch(apiUrl("/api/auth/logout"), {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${authToken}` }
+      });
+    } catch (e) {
+      console.warn("[AUTH] Logout request failed:", e);
+    }
+  }
+
+  currentUser = null;
+  authToken = null;
+  studentId = null;
+
+  if (typeof localStorage !== "undefined" && localStorage.removeItem) {
+    localStorage.removeItem("learnai_auth_token");
+    localStorage.removeItem("learnai_student_id");
+    localStorage.removeItem("learnai_user_name");
+    localStorage.removeItem("learnai_session_state");
+  }
+
+  showScreen("loginSection");
+  showAuthMessage("loginMsg", "You have been logged out.", "success");
+}
+
+function initAuthEventListeners() {
+  $("loginForm")?.addEventListener("submit", handleLoginSubmit);
+  $("registerForm")?.addEventListener("submit", handleRegisterSubmit);
+  $("forgotPasswordForm")?.addEventListener("submit", handleForgotPasswordSubmit);
+  $("resetPasswordForm")?.addEventListener("submit", handleResetPasswordSubmit);
+
+  $("forgotPasswordBtn")?.addEventListener("click", () => {
+    clearAuthMessage("forgotMsg");
+    $("devResetNotice")?.classList.add("hidden");
+    const emailVal = $("loginEmail")?.value || "";
+    if (emailVal && $("forgotEmail")) $("forgotEmail").value = emailVal;
+    showScreen("forgotPasswordSection");
+  });
+
+  $("goToRegisterBtn")?.addEventListener("click", () => {
+    clearAuthMessage("registerMsg");
+    showScreen("registerSection");
+  });
+
+  $("goToLoginBtn")?.addEventListener("click", () => {
+    clearAuthMessage("loginMsg");
+    showScreen("loginSection");
+  });
+
+  $("forgotBackToLoginBtn")?.addEventListener("click", () => {
+    clearAuthMessage("loginMsg");
+    showScreen("loginSection");
+  });
+
+  $("resetBackToLoginBtn")?.addEventListener("click", () => {
+    clearAuthMessage("loginMsg");
+    showScreen("loginSection");
+  });
+
+  $("devUseTokenBtn")?.addEventListener("click", () => {
+    const tokenVal = $("devResetTokenCode")?.textContent || "";
+    showScreen("resetPasswordSection");
+    if ($("resetTokenInput")) $("resetTokenInput").value = tokenVal;
+  });
+
+  $("logoutBtn")?.addEventListener("click", handleLogout);
+}
+
+
 // ── App Initialization ──────────────────────────────────────────────────────
 async function initApp() {
-  await ensureAuthSession();
-  await loadCourses();
+  initAuthEventListeners();
   initNotesUploaderListeners();
   initStudyMaterialsListeners();
+
+  const isAuthenticated = await verifyCurrentUser();
+  if (!isAuthenticated) {
+    showScreen("loginSection");
+    loadCourses().catch(() => {});
+    return;
+  }
+
+  await loadCourses();
   const restored = restoreSessionState();
 
   // Initialize base history state if not already present
@@ -3869,6 +4912,10 @@ async function initApp() {
     } catch (e) {
       // Ignore if sandbox restricts replaceState
     }
+  }
+
+  if (!restored) {
+    showScreen("setup");
   }
 
   // If no active quiz was restored, check URL parameters
@@ -3930,6 +4977,11 @@ if (typeof module !== "undefined" && module.exports) {
     apiUrl,
     isTokenExpired,
     escapeHtml,
-    LearnAICodeRenderer
+    LearnAICodeRenderer,
+    populateTopicDropdown,
+    setCurriculum: (c) => { curriculum = c; },
+    getCurriculum: () => curriculum,
+    setLastExtractionResult: (r) => { lastExtractionResult = r; },
+    getLastExtractionResult: () => lastExtractionResult
   };
 }

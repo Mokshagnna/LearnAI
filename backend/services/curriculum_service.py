@@ -144,6 +144,32 @@ def clean_topic_display_name(raw_name: str) -> str:
     return cleaned
 
 
+def _norm_topic_key(name: str) -> str:
+    """Normalized comparison key for a topic/concept name."""
+    if not name:
+        return ""
+    lower = str(name).lower().strip()
+    lower = re.sub(r"[\-_\:\(\)\[\]\.,;]+", " ", lower)
+    lower = re.sub(r"\s+", " ", lower).strip()
+    return lower
+
+
+def _concepts_for_part(concepts: List[str], part: str) -> List[str]:
+    """
+    Assign a compound (\"A & B\") split topic only the concepts that belong to it.
+    Prevents sibling parts (e.g. LSTM / GRU / Text Classification) from inheriting
+    each other's concepts, which previously made them indistinguishable at match time.
+    Falls back to all concepts when no clear assignment exists (nothing silently dropped).
+    """
+    if not concepts:
+        return []
+    part_key = _norm_topic_key(part)
+    if not part_key:
+        return list(concepts)
+    matched = [c for c in concepts if _norm_topic_key(c) == part_key]
+    return matched if matched else list(concepts)
+
+
 def normalize_topic_entry(
     raw_topic: Dict[str, Any],
     course_code: str,
@@ -429,6 +455,11 @@ class CurriculumService:
                     # Check if compound topic like "First Order Differential Equations & Second Order Differential Equations"
                     if " & " in cleaned_name and ("Differential Equations" in cleaned_name or len(cleaned_name) > 30):
                         parts = [clean_topic_display_name(p) for p in cleaned_name.split(" & ")]
+                        # Give each part only the concepts that belong to it so sibling parts
+                        # (e.g. LSTM / GRU / Text Classification) stay distinguishable.
+                        part_concepts_map = {
+                            p: _concepts_for_part(item.get("concepts", []), p) for p in parts
+                        }
                         for p_idx, part in enumerate(parts):
                             if not part or part.lower() in seen_names:
                                 continue
@@ -437,7 +468,8 @@ class CurriculumService:
                                     **item,
                                     "id": f"{item.get('id', f'{code}-t{idx+1}')}-{p_idx+1}",
                                     "name": part,
-                                    "raw_name": part
+                                    "raw_name": part,
+                                    "concepts": part_concepts_map.get(part, item.get("concepts", [])),
                                 },
                                 course_code=code,
                                 course_name=name,

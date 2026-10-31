@@ -1,3 +1,55 @@
+from typing import Dict, Any, Optional, List
+
+
+def build_effective_option_explanations(
+    options: Dict[str, str],
+    correct_answer: str,
+    explanation: str,
+    concept: str,
+    existing_explanations: Optional[Dict[str, str]] = None
+) -> Dict[str, str]:
+    """
+    Ensures every option in `options` has an educational explanation.
+    Preserves existing option explanations when present.
+    For any option missing an explicit explanation:
+      - The correct option receives the main question explanation.
+      - Each distractor receives clear reasoning explaining why it is incorrect.
+    """
+    result: Dict[str, str] = {}
+    existing = existing_explanations if isinstance(existing_explanations, dict) else {}
+
+    clean_corr = str(correct_answer or "").strip().upper()
+    clean_expl = str(explanation or "").strip()
+    clean_concept = str(concept or "this topic").strip()
+
+    if not isinstance(options, dict):
+        return result
+
+    for opt_key, opt_val in options.items():
+        opt_key_upper = str(opt_key).strip().upper()
+        opt_text = str(opt_val or "").strip()
+
+        # Check existing explanations first
+        if opt_key_upper in existing and existing[opt_key_upper]:
+            result[opt_key_upper] = str(existing[opt_key_upper]).strip()
+            continue
+
+        if opt_key_upper == clean_corr:
+            if clean_expl:
+                result[opt_key_upper] = clean_expl
+            else:
+                result[opt_key_upper] = f"Option {opt_key_upper} is the correct answer according to {clean_concept} principles."
+        else:
+            if opt_text:
+                result[opt_key_upper] = (
+                    f"Option {opt_key_upper} ('{opt_text}') is incorrect. It does not satisfy the requirements of {clean_concept}."
+                )
+            else:
+                result[opt_key_upper] = f"Option {opt_key_upper} is an incorrect distractor for {clean_concept}."
+
+    return result
+
+
 def evaluate_answers(questions, answers):
     correct = 0
     details = []
@@ -30,14 +82,29 @@ def evaluate_answers(questions, answers):
         if is_correct:
             difficulty_stats[difficulty]["correct"] += 1
 
+        options = q.get("options") or {}
+        correct_answer = q.get("correct_answer", "")
+        explanation = q.get("explanation", "")
+        raw_opt_expl = q.get("option_explanations") or {}
+
+        option_explanations = build_effective_option_explanations(
+            options=options,
+            correct_answer=correct_answer,
+            explanation=explanation,
+            concept=concept,
+            existing_explanations=raw_opt_expl
+        )
+
         details.append({
             "question": q["question"],
             "selected_answer": selected,
-            "correct_answer": q["correct_answer"],
+            "correct_answer": correct_answer,
             "is_correct": is_correct,
-            "explanation": q.get("explanation", ""),
+            "explanation": explanation,
             "concept": concept,
-            "difficulty": difficulty
+            "difficulty": difficulty,
+            "options": options,
+            "option_explanations": option_explanations
         })
 
     total = len(questions)

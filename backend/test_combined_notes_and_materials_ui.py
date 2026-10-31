@@ -209,6 +209,7 @@ class TestNodeClientSideStateMachine:
                     topic_name: 'Backpropagation',
                     course_code: '22AM201',
                     course_name: 'AI Foundations',
+                    coverage_status: 'covered',
                     confidence: 0.95,
                     status: 'mastered',
                     status_label: 'Mastered',
@@ -238,8 +239,8 @@ class TestNodeClientSideStateMachine:
         if (!topicsListHtml.includes('Mastered') || !topicsListHtml.includes('Latest score: 90%')) {
             throw new Error('Mastered status or latest score missing in inline list');
         }
-        if (!topicsListHtml.includes('95% Match')) {
-            throw new Error('Match score badge (95% Match) missing in inline topic list');
+        if (!topicsListHtml.includes('Strong Match')) {
+            throw new Error('Coverage badge (Strong Match) missing in inline topic list');
         }
         if (!topicsListHtml.includes('Practice Topic &rarr;') && !topicsListHtml.includes('Practice Topic')) {
             throw new Error('Practice Topic button missing in inline list');

@@ -490,6 +490,8 @@ REQUIREMENTS:
 - Each question must have 4 distinct options (A, B, C, D) with non-empty text.
 - Valid correct_answer letter (A, B, C, or D).
 - Specify the tested concept in the 'concept' field.
+- Detailed step-by-step 'explanation' for why the correct answer is correct.
+- 'option_explanations' object with A, B, C, D explaining why each distractor is incorrect.
 - Return ONLY valid JSON:
 {{
   "questions": [
@@ -499,7 +501,13 @@ REQUIREMENTS:
       "correct_answer": "A",
       "difficulty": "Medium",
       "concept": "{concepts[0] if concepts else topic_name}",
-      "explanation": "1-sentence explanation"
+      "explanation": "Detailed explanation showing step-by-step calculations, rules, or code trace.",
+      "option_explanations": {{
+        "A": "Correct: Satisfies the rule.",
+        "B": "Incorrect: Error or misconception.",
+        "C": "Incorrect: Unrelated or faulty calculation.",
+        "D": "Incorrect: Flawed premise."
+      }}
     }}
   ]
 }}"""

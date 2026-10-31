@@ -3,6 +3,7 @@ import re
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
+from services.output_verifier import clean_option_string, verify_and_calibrate_question_options
 
 logger = logging.getLogger("learnai.providers.base")
 
@@ -105,10 +106,16 @@ CRITICAL RULES FOR RELEVANCE AND TOPIC ISOLATION:
    - Return EXACTLY 10 multiple-choice questions in the "questions" array.
    {diff_req}
    - Every question MUST contain exactly 4 distinct, non-empty options with keys "A", "B", "C", and "D".
+   - ZERO DUPLICATE OPTIONS: All 4 options must be mutually exclusive and semantically distinct. Never generate identical or duplicate options.
+   - FOR CODE OUTPUT & FORMATTED I/O QUESTIONS (e.g. C/C++ printf/scanf, %4d, %04d, \\t, \\n, Python print, string formatting):
+     * Preserve exact spaces, indentation, and alignment in the options.
+     * Ensure the correct option matches the precise compiler/runtime output (e.g. for printf("%4d%4d", 12, 5); field width 4 produces two leading spaces for 12 and three spaces for 5: "  12   5").
+     * Distractor options must test plausible common mistakes (e.g. unformatted single spaces, wrong field widths, no spaces, or left-alignment) and MUST NOT look identical to each other or to the correct option.
    - All option values must be complete, meaningful, and non-empty. Never leave any option blank or with placeholder text.
    - "correct_answer" MUST be the exact uppercase letter corresponding to the correct option: "A", "B", "C", or "D".
    - In the "concept" field, specify the exact syllabus concept or learning objective assessed.
-   - Include a concise 1-sentence explanation for the correct answer.
+   - In "explanation", provide a detailed step-by-step educational explanation demonstrating why the correct answer is correct (including math calculations, code execution traces, or concept principles).
+   - In "option_explanations", provide an object with keys "A", "B", "C", and "D" where the correct option explains why it is right, and each incorrect option explains specifically why it is wrong or what common misconception it represents.
    - Return ONLY valid JSON matching this exact structure:
 
 {{
@@ -126,7 +133,13 @@ CRITICAL RULES FOR RELEVANCE AND TOPIC ISOLATION:
       "correct_answer": "A",
       "difficulty": "Easy",
       "concept": "Specific syllabus concept assessed",
-      "explanation": "Concise 1-sentence explanation"
+      "explanation": "Detailed explanation showing why A is correct, step-by-step calculations, or code execution trace.",
+      "option_explanations": {{
+        "A": "Correct: Explains why option A is correct and satisfies the concept.",
+        "B": "Incorrect: Explains why option B is incorrect or what error it represents.",
+        "C": "Incorrect: Explains why option C is incorrect.",
+        "D": "Incorrect: Explains why option D is incorrect."
+      }}
     }}
   ]
 }}
@@ -281,6 +294,7 @@ def extract_normalized_options(raw_options: Any) -> Optional[Dict[str, str]]:
     Extracts and validates exactly 4 non-empty options for keys A, B, C, D.
     Rejects questions with missing, incomplete, or placeholder options.
     Never invents missing options.
+    Preserves meaningful leading, trailing, and multiple horizontal spaces.
     """
     if not raw_options:
         return None
@@ -294,18 +308,19 @@ def extract_normalized_options(raw_options: Any) -> Optional[Dict[str, str]]:
             if v is None:
                 continue
             k_clean = str(k).strip().upper()
+            cleaned_val = clean_option_string(v)
             if k_clean in {"A", "B", "C", "D"}:
-                options[k_clean] = str(v).strip()
+                options[k_clean] = cleaned_val
             elif any(k_clean.startswith(prefix) for prefix in ("OPTION", "CHOICE", "ANS", "OPT")):
                 sub_k = re.sub(r'^(?:OPTION|CHOICE|ANS|OPT)[_\s\-\.:]*', '', k_clean).strip()
                 if sub_k in {"A", "B", "C", "D"}:
-                    options[sub_k] = str(v).strip()
+                    options[sub_k] = cleaned_val
                 elif sub_k in {"1", "2", "3", "4"}:
                     sub_letter = {"1": "A", "2": "B", "3": "C", "4": "D"}[sub_k]
-                    options[sub_letter] = str(v).strip()
+                    options[sub_letter] = cleaned_val
             elif k_clean in {"1", "2", "3", "4"}:
                 sub_letter = {"1": "A", "2": "B", "3": "C", "4": "D"}[k_clean]
-                options[sub_letter] = str(v).strip()
+                options[sub_letter] = cleaned_val
 
     # Case 2: List of strings or list of dicts
     elif isinstance(raw_options, list) and len(raw_options) >= 4:
@@ -320,15 +335,15 @@ def extract_normalized_options(raw_options: Any) -> Optional[Dict[str, str]]:
                     or item.get("option")
                     or ""
                 )
-                options[letter] = str(text).strip()
+                options[letter] = clean_option_string(text)
             elif isinstance(item, str):
-                cleaned = item.strip()
+                cleaned = item.strip("\r\n")
                 m = re.match(r'^[A-D]\s*[\)\.:\-]\s*(.+)', cleaned, flags=re.IGNORECASE)
                 if m:
-                    cleaned = m.group(1).strip()
-                options[letter] = cleaned
+                    cleaned = m.group(1)
+                options[letter] = clean_option_string(cleaned)
             elif item is not None:
-                options[letter] = str(item).strip()
+                options[letter] = clean_option_string(item)
 
     # Verify exactly 4 options: A, B, C, D
     if set(options.keys()) != {"A", "B", "C", "D"}:
@@ -337,7 +352,7 @@ def extract_normalized_options(raw_options: Any) -> Optional[Dict[str, str]]:
     # Verify all 4 options have meaningful, non-empty text
     for k in ["A", "B", "C", "D"]:
         val = options[k]
-        if not val or val.lower() in PLACEHOLDERS:
+        if not val or not val.strip() or val.strip().lower() in PLACEHOLDERS:
             return None
 
     return options
@@ -348,8 +363,10 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
     Validates a single multiple-choice question strictly:
       - Non-empty question text
       - Exactly four usable options (A, B, C, D) with meaningful text
+      - All 4 options are semantically distinct (no duplicates)
       - Correct answer maps to one of the options
-    Returns cleaned question dict, or None if malformed.
+      - Calibrates and verifies programming output accuracy (printf, scanf, Python print)
+    Returns cleaned and validated question dict, or None if malformed.
     """
     if not isinstance(raw_q, dict):
         return None
@@ -388,19 +405,46 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
         or f"Option {correct_ans} is the correct answer based on {topic_name} principles."
     ).strip()
 
+    raw_opt_expl = (
+        raw_q.get("option_explanations")
+        or raw_q.get("options_explanations")
+        or raw_q.get("distractor_explanations")
+        or raw_q.get("distractors")
+    )
+    option_explanations: Dict[str, str] = {}
+    if isinstance(raw_opt_expl, dict):
+        for k, v in raw_opt_expl.items():
+            k_clean = str(k).strip().upper()
+            if k_clean in {"A", "B", "C", "D"} and v:
+                option_explanations[k_clean] = str(v).strip()
+    elif isinstance(raw_opt_expl, list) and len(raw_opt_expl) >= 4:
+        for idx, item in enumerate(raw_opt_expl[:4]):
+            k_clean = ["A", "B", "C", "D"][idx]
+            if item:
+                option_explanations[k_clean] = str(item).strip()
+
     raw_diff = str(raw_q.get("difficulty") or "").strip().capitalize()
     difficulty = raw_diff if raw_diff in {"Easy", "Medium", "Hard"} else None
 
-    res = {
+    candidate = {
         "question": q_text,
         "options": options,
         "correct_answer": correct_ans,
         "concept": concept,
         "explanation": explanation
     }
+    if option_explanations:
+        candidate["option_explanations"] = option_explanations
     if difficulty:
-        res["difficulty"] = difficulty
-    return res
+        candidate["difficulty"] = difficulty
+
+    # Verify 4-option distinctness, whitespace-sensitive output, and printf/print accuracy
+    is_valid, calibrated, reason = verify_and_calibrate_question_options(candidate)
+    if not is_valid:
+        logger.warning(f"[OPTION VALIDATION] Question rejected: {reason}")
+        return None
+
+    return calibrated
 
 
 def validate_quiz_data(

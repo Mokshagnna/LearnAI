@@ -120,6 +120,12 @@ quiz_submit_limiter = SlidingWindowRateLimiter(
     name="quiz_submit"
 )
 
+auth_limiter = SlidingWindowRateLimiter(
+    default_limit=int(os.getenv("RATE_LIMIT_AUTH_PER_MIN", "60")),
+    window_seconds=60,
+    name="auth"
+)
+
 
 def reset_all_rate_limiters() -> None:
     """
@@ -129,3 +135,4 @@ def reset_all_rate_limiters() -> None:
     """
     quiz_gen_limiter.reset()
     quiz_submit_limiter.reset()
+    auth_limiter.reset()
