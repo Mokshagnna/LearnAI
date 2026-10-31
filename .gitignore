@@ -1,1 +1,45 @@
+<<<<<<< HEAD
 LearnAI/
+=======
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Environment variables & secrets (CRITICAL: Never commit .env)
+backend/.env
+.env
+.env.local
+.env.*.local
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Database & Runtime Data
+backend/data/learnai.db
+*.db
+*.sqlite3
+*.db-wal
+*.db-shm
+*.bak
+backups/
+backend/data/backups/
+
+# Logs & Test Caches
+*.log
+logs/
+.pytest_cache/
+.coverage
+htmlcov/
+>>>>>>> origin/main

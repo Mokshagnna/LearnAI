@@ -1,0 +1,198 @@
+{
+  "22AM803::Introduction and Goals of Computer Vision": {
+    "subject": "Computer Vision",
+    "topic": "Introduction and Goals of Computer Vision",
+    "questions": [
+      {
+        "question": "What is the primary goal of Computer Vision?",
+        "options": {
+          "A": "To enable computers to understand and interpret visual information from digital images or videos",
+          "B": "To increase screen resolution for gaming monitors",
+          "C": "To create vector graphics from scratch",
+          "D": "To compress image files without data loss"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Goals of Computer Vision",
+        "explanation": "Computer vision aims to replicate human vision by enabling software to acquire, process, analyze, and understand digital visual content to make semantic decisions.",
+        "option_explanations": {
+          "A": "Correct: Computer vision seeks to empower computing systems to interpret high-level semantic meaning from digital imagery.",
+          "B": "Incorrect: Increasing display resolution relates to monitor hardware and graphics display engineering, not automated visual perception.",
+          "C": "Incorrect: Generating vector graphics belongs to computer graphics and computer-aided design (CAD), which synthesize images rather than perceiving them.",
+          "D": "Incorrect: Lossless image compression is a data encoding and file storage technique, not visual understanding."
+        }
+      },
+      {
+        "question": "How does computer vision fundamentally differ from traditional image processing?",
+        "options": {
+          "A": "Computer vision only works with 3D models while image processing works with 2D",
+          "B": "Computer vision focuses on image understanding and semantics, while image processing focuses on image-to-image transformations",
+          "C": "Image processing requires neural networks whereas computer vision uses only heuristics",
+          "D": "There is no functional difference between the two fields"
+        },
+        "correct_answer": "B",
+        "difficulty": "Easy",
+        "concept": "Computer Vision vs Image Processing",
+        "explanation": "Traditional image processing focuses on image-to-image transformations (e.g., filtering, contrast enhancement, smoothing), whereas computer vision extracts high-level semantic meaning, structures, and decisions (e.g., object recognition, 3D reconstruction).",
+        "option_explanations": {
+          "A": "Incorrect: Both disciplines frequently operate on 2D images and can extend to 3D representations.",
+          "B": "Correct: Image processing transforms images into modified images, while computer vision extracts semantic information and knowledge from visual input.",
+          "C": "Incorrect: Both fields can utilize heuristic or machine learning approaches; neural networks are widely used in computer vision as well.",
+          "D": "Incorrect: There is a fundamental conceptual boundary: image processing produces processed images, while computer vision produces semantic descriptions."
+        }
+      },
+      {
+        "question": "In the human visual system (bio-vision), which cells in the retina are primarily responsible for daylight and color perception?",
+        "options": {
+          "A": "Rod cells",
+          "B": "Cone cells",
+          "C": "Bipolar cells",
+          "D": "Horizontal cells"
+        },
+        "correct_answer": "B",
+        "difficulty": "Easy",
+        "concept": "Bio-Vision vs Computer Vision",
+        "explanation": "In biological vision, cone cells are concentrated in the fovea, function under photopic (bright light) conditions, and contain three photopigments that mediate color vision. Rod cells operate under scotopic (low light) conditions and do not detect color.",
+        "option_explanations": {
+          "A": "Incorrect: Rods are extremely sensitive in dim/night light but do not discern color and have lower spatial acuity.",
+          "B": "Correct: Cone photoreceptors operate in daylight and provide trichromatic color perception and fine spatial detail.",
+          "C": "Incorrect: Bipolar cells are intermediary interneurons that transfer signals between photoreceptors and ganglion cells, not the primary light transducers.",
+          "D": "Incorrect: Horizontal cells provide lateral inhibition across photoreceptors to enhance edge contrast, rather than detecting color."
+        }
+      },
+      {
+        "question": "Which of the following describes the pinhole camera model concept in early image formation?",
+        "options": {
+          "A": "Light rays from an object pass through a single point to form an inverted image on a sensor plane",
+          "B": "Multiple lenses diffract incoming light into distinct spectral bands",
+          "C": "Digital sensors emit lasers that bounce back from target surfaces",
+          "D": "An electronic shutter calculates photon velocity directly"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Image Formation History",
+        "explanation": "The camera obscura and ideal pinhole model allow light rays originating from a 3D scene point to pass through an infinitesimal aperture (center of projection) and form an inverted, reversed image on the opposite image plane without geometric distortion.",
+        "option_explanations": {
+          "A": "Correct: The pinhole model assumes light rays converge through a single aperture point, forming an inverted projection on the sensor plane.",
+          "B": "Incorrect: Pinhole cameras deliberately do not use lenses or chromatic diffraction.",
+          "C": "Incorrect: Pinhole cameras are passive optical collectors of ambient light, not active laser sensors (such as LiDAR).",
+          "D": "Incorrect: Calculating photon velocity relates to time-of-flight sensors, whereas pinhole models describe geometric ray projection."
+        }
+      },
+      {
+        "question": "Why is image understanding considered an 'inverse problem' in computer vision?",
+        "options": {
+          "A": "Because digital images are always stored in inverse matrix format",
+          "B": "Because 3D physical scene properties must be reconstructed from a lower-dimensional (2D) projection",
+          "C": "Because algorithms invert pixel intensities before feature detection",
+          "D": "Because computer vision models only train on negative image pairs"
+        },
+        "correct_answer": "B",
+        "difficulty": "Medium",
+        "concept": "Inverse Problem in Vision",
+        "explanation": "Image formation is a forward projection from a 3D physical world to a 2D image plane, inherently discarding depth along projection rays. Reconstructing 3D structure, illumination, and reflectance from 2D images is an ill-posed inverse problem because infinitely many 3D scenes could produce the identical 2D projection.",
+        "option_explanations": {
+          "A": "Incorrect: The term 'inverse problem' relates to mathematical physics and reconstruction, not inverted memory storage matrices.",
+          "B": "Correct: Projecting 3D to 2D is a many-to-one mapping (loss of depth); estimating original 3D scene attributes from 2D pixels is mathematically ill-posed.",
+          "C": "Incorrect: Inverting pixel intensities is a trivial photographic negative operation, not why scene understanding is fundamentally difficult.",
+          "D": "Incorrect: Computer vision models train on diverse positive visual data and contrastive pairs, not purely negative images."
+        }
+      },
+      {
+        "question": "In digital image representation, how is a standard 8-bit RGB image stored in memory?",
+        "options": {
+          "A": "As a single continuous 1D Fourier spectrum",
+          "B": "As a 3D tensor of height × width × 3 color channels with values from 0 to 255",
+          "C": "As an array of complex floating-point numbers between -1.0 and 1.0",
+          "D": "As a set of SVG mathematical vectors"
+        },
+        "correct_answer": "B",
+        "difficulty": "Medium",
+        "concept": "Digital Image Representation",
+        "explanation": "A standard digital color image is stored in memory as a 3D tensor of shape (Height × Width × Channels), where the 3 channels correspond to Red, Green, and Blue. For an 8-bit depth representation, each discrete channel value is an unsigned byte ranging from 0 to 255 (2^8 - 1).",
+        "option_explanations": {
+          "A": "Incorrect: 1D Fourier spectra represent frequency decompositions, not spatial raster bitmap storage.",
+          "B": "Correct: Standard 8-bit color images use a 3D tensor (H × W × 3) with integer intensities between 0 and 255.",
+          "C": "Incorrect: Unsigned 8-bit integers (0 to 255) are standard for bitmap storage; floating-point complexes are used in frequency domain analysis.",
+          "D": "Incorrect: SVG vectors represent scalable path commands, whereas digital raster photographs are stored as pixel arrays."
+        }
+      },
+      {
+        "question": "Which biological mechanism inspired early artificial receptive fields and convolutional filter architectures?",
+        "options": {
+          "A": "Hubel and Wiesel's discovery of orientation-selective neurons in the primary visual cortex (V1)",
+          "B": "The peristaltic motion of the optical nerve fluid",
+          "C": "The chemical regeneration of rhodopsin pigment in rods",
+          "D": "The accommodation reflex of the ciliary muscles in the lens"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Bio-Vision Inspiration",
+        "explanation": "Hubel and Wiesel's seminal physiological experiments in mammalian primary visual cortex (V1) discovered simple and complex cells with localized, orientation-tuned receptive fields. This hierarchical edge-detection architecture directly inspired Fukushima's Neocognitron and modern Convolutional Neural Networks (CNNs).",
+        "option_explanations": {
+          "A": "Correct: Hubel and Wiesel's Nobel Prize-winning work on orientation-selective receptive fields in V1 directly inspired convolutional filters.",
+          "B": "Incorrect: The optic nerve transmits electrical action potentials along axons; it does not utilize peristaltic fluid motion.",
+          "C": "Incorrect: Rhodopsin bleaching and regeneration is a biochemical adaptation cycle, not the architectural inspiration for spatial convolutions.",
+          "D": "Incorrect: Ciliary muscle accommodation controls physical lens curvature/focus, not hierarchical receptive field processing."
+        }
+      },
+      {
+        "question": "What is meant by the 'semantic gap' in computer vision?",
+        "options": {
+          "A": "The difference between optical sensor refresh rates and display monitor frequencies",
+          "B": "The disparity between low-level pixel intensity values and high-level human semantic concepts",
+          "C": "The delay introduced by data serialization over network connections",
+          "D": "The discrepancy between RGB color spaces and CMYK printing profiles"
+        },
+        "correct_answer": "B",
+        "difficulty": "Medium",
+        "concept": "Semantic Gap",
+        "explanation": "The semantic gap describes the profound fundamental difference between raw, objective sensor readings (e.g., a 2D matrix of numbers representing RGB pixel values) and high-level subjective human concepts (e.g., identifying a 'golden retriever playing in a park').",
+        "option_explanations": {
+          "A": "Incorrect: Refresh rates and monitor frequencies are hardware display timing parameters.",
+          "B": "Correct: The semantic gap is the fundamental mismatch between low-level pixel intensity arrays and high-level human semantic concepts.",
+          "C": "Incorrect: Data serialization latency is a network and systems performance issue.",
+          "D": "Incorrect: RGB to CMYK conversion is a color gamut mapping problem, not the semantic gap."
+        }
+      },
+      {
+        "question": "Consider a camera observing a Lambertian surface. If the surface orientation tilts such that the angle between surface normal and illuminant doubles from 30° to 60°, how does the reflected radiance change according to Lambert's Cosine Law?",
+        "options": {
+          "A": "It remains exactly identical because Lambertian surfaces reflect uniformly regardless of incident angle",
+          "B": "It drops from cos(30°) ≈ 0.866 to cos(60°) = 0.5 of maximum irradiance",
+          "C": "It doubles because illuminance is inversely proportional to distance squared",
+          "D": "It drops to zero due to total internal reflection"
+        },
+        "correct_answer": "B",
+        "difficulty": "Hard",
+        "concept": "Radiometry and Surface Reflectance",
+        "explanation": "According to Lambert's Cosine Law, the radiant intensity observed from an ideal diffuse (Lambertian) surface is directly proportional to the cosine of the angle theta between the surface normal and the incident illuminant vector: E = E_0 * cos(theta).\n1. For theta = 30°: cos(30°) = sqrt(3)/2 ≈ 0.866 of maximum.\n2. For theta = 60°: cos(60°) = 0.5 of maximum.\n3. Ratio of change: 0.5 / 0.866 ≈ 57.7% of the 30° radiance (dropping from 0.866 to 0.5).",
+        "option_explanations": {
+          "A": "Incorrect: While a Lambertian surface reflects radiance equally in all viewing directions, the incident irradiance received still depends strictly on the cosine of the illuminant incident angle.",
+          "B": "Correct: Incident irradiance follows cos(theta); as angle increases from 30° to 60°, the factor drops from cos(30°) ≈ 0.866 to cos(60°) = 0.5.",
+          "C": "Incorrect: Irradiance decreases as the incident angle becomes more oblique; doubling the angle does not double irradiance.",
+          "D": "Incorrect: Total internal reflection occurs when light travels from a denser to a rarer optical medium beyond the critical angle, not on exterior diffuse reflection."
+        }
+      },
+      {
+        "question": "Under perspective projection, which geometric property is NOT invariant when a 3D planar scene is projected onto a 2D camera image plane?",
+        "options": {
+          "A": "Collinearity of straight line segments",
+          "B": "Cross-ratio of four collinear points",
+          "C": "Parallelism of lines in the scene plane (non-parallel to the image plane)",
+          "D": "Incidence of points on lines"
+        },
+        "correct_answer": "C",
+        "difficulty": "Hard",
+        "concept": "Projective Geometry Invariants",
+        "explanation": "Perspective projection is a projective transformation (homography). It preserves incidence (points lying on lines remain on lines), collinearity (straight lines project to straight lines), and the cross-ratio of four collinear points. However, affine properties such as parallelism, angle, distance, and area are NOT preserved; parallel scene lines converge toward a vanishing point.",
+        "option_explanations": {
+          "A": "Incorrect: Collinearity is a projective invariant: straight 3D lines are always mapped to straight 2D lines under ideal pinhole projection.",
+          "B": "Incorrect: The cross-ratio of four collinear points is the fundamental invariant of projective transformations.",
+          "C": "Correct: Parallel lines in 3D that are not parallel to the camera image plane converge at vanishing points, so parallelism is NOT preserved.",
+          "D": "Incorrect: Incidence (whether a point lies on a line) is strictly preserved under perspective projection."
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "buildPath": "code",
+  "hook": {
+    "enabled": true,
+    "limits": {
+      "maxFindings": 5,
+      "maxChars": 8000
+    }
+  },
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "animate-bounce",
+        "createdAt": "2026-10-23T17:51:07.075Z",
+        "reason": "Required by test_frontend_css_tailwind_and_notes_classes regression test suite"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "bounce",
+        "createdAt": "2026-10-23T17:51:14.378Z",
+        "reason": "Required by test_frontend_css_tailwind_and_notes_classes regression test suite"
+      }
+    ]
+  }
+}

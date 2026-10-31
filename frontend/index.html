@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>LearnAI</title>
+
+<link rel="stylesheet" href="css/style.css">
+
+</head>
+
+<body>
+
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <header class="topbar">
+
+    <div class="topbar-left">
+
+      <div id="brandLogo" class="brand" title="Back to Home">LearnAI</div>
+
+      <div class="tag">AI-Powered Adaptive Quiz Platform</div>
+
+    </div>
+
+    <nav id="mainNav" class="topbar-nav hidden" aria-label="Main Navigation">
+
+      <button id="navPracticeBtn" type="button" class="nav-tab active">Practice Quiz</button>
+
+      <button id="navNotesBtn" type="button" class="nav-tab">Notes &amp; Slides</button>
+
+      <button id="navMaterialsBtn" type="button" class="hidden" style="display:none;" aria-hidden="true"></button>
+
+      <button id="navDashboardBtn" type="button" class="nav-tab">Student Dashboard</button>
+
+    </nav>
+
+    <div id="topbarUserArea" class="topbar-user hidden">
+
+      <span class="user-greeting">
+
+        <span class="user-avatar" aria-hidden="true">
+
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+
+            <circle cx="12" cy="7" r="4"></circle>
+
+          </svg>
+
+        </span>
+
+        <span id="userDisplayName" class="user-name">Student</span>
+
+      </span>
+
+      <button id="logoutBtn" type="button" class="btn-logout" title="Log out of LearnAI">
+
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+
+          <polyline points="16 17 21 12 16 7"></polyline>
+
+          <line x1="21" y1="12" x2="9" y2="12"></line>
+
+        </svg>
+
+        <span>Logout</span>
+
+      </button>
+
+    </div>
+
+  </header>
+
+
+
+  <main id="main-content" class="container">
+
+  <!-- Student Login Screen -->
+
+  <section id="loginSection" class="card auth-card" aria-labelledby="loginTitle">
+
+    <div class="auth-header">
+
+      <div class="auth-brand">LearnAI</div>
+
+      <h1 id="loginTitle" class="auth-title">Welcome back!</h1>
+
+      <p class="auth-subtitle">Sign in to your account to continue your learning progress.</p>
+
+    </div>
+
+
+
+    <form id="loginForm" class="auth-form" novalidate>
+
+      <div class="form-group">
+
+        <label for="loginEmail">Gmail address</label>
+
+        <input type="email" id="loginEmail" name="email" placeholder="Enter your Gmail address" autocomplete="email" required>
+
+      </div>
+
+
+
+      <div class="form-group">
+
+        <div class="label-with-action">
+
+          <label for="loginPassword">Password</label>
+
+          <button id="forgotPasswordBtn" type="button" class="btn-link">Forgot password?</button>
+
+        </div>
+
+        <input type="password" id="loginPassword" name="password" placeholder="Enter your password" autocomplete="current-password" required>
+
+      </div>
+
+
+
+      <div id="loginMsg" class="auth-msg hidden" role="alert"></div>
+
+
+
+      <button id="loginSubmitBtn" type="submit" class="btn-primary auth-submit-btn">
+
+        <span class="btn-text">Login</span>
+
+        <span class="btn-spinner hidden" aria-hidden="true"><span class="spinner-small"></span></span>
+
+      </button>
+
+    </form>
+
+
+
+    <div class="auth-footer">
+
+      <span>Don't have an account?</span>
+
+      <button id="goToRegisterBtn" type="button" class="btn-link-strong">Create your account</button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- Student Registration Screen -->
+
+  <section id="registerSection" class="card auth-card hidden" aria-labelledby="registerTitle">
+
+    <div class="auth-header">
+
+      <div class="auth-brand">LearnAI</div>
+
+      <h1 id="registerTitle" class="auth-title">Create your account</h1>
+
+      <p class="auth-subtitle">Get started with AI-generated quizzes grounded in your course syllabus.</p>
+
+    </div>
+
+
+
+    <form id="registerForm" class="auth-form" novalidate>
+
+      <div class="form-group">
+
+        <label for="registerName">Full name</label>
+
+        <input type="text" id="registerName" name="full_name" placeholder="Enter your full name" autocomplete="name" required minlength="2" maxlength="100">
+
+      </div>
+
+
+
+      <div class="form-group">
+
+        <label for="registerEmail">Email address</label>
+
+        <input type="email" id="registerEmail" name="email" placeholder="Enter your Gmail address" autocomplete="email" required>
+
+      </div>
+
+
+
+      <div class="form-group">
+
+        <label for="registerPassword">Password</label>
+
+        <input type="password" id="registerPassword" name="password" placeholder="Create a password" autocomplete="new-password" required minlength="8">
+
+        <small class="field-hint">Must be at least 8 characters with at least one letter and one number.</small>
+
+      </div>
+
+
+
+      <div class="form-group">
+
+        <label for="registerConfirmPassword">Confirm password</label>
+
+        <input type="password" id="registerConfirmPassword" name="confirm_password" placeholder="Re-enter your password" autocomplete="new-password" required minlength="8">
+
+      </div>
+
+
+
+      <div id="registerMsg" class="auth-msg hidden" role="alert"></div>
+
+
+
+      <button id="registerSubmitBtn" type="submit" class="btn-primary auth-submit-btn">
+
+        <span class="btn-text">Create account</span>
+
+        <span class="btn-spinner hidden" aria-hidden="true"><span class="spinner-small"></span></span>
+
+      </button>
+
+    </form>
+
+
+
+    <div class="auth-footer">
+
+      <span>Already have an account?</span>
+
+      <button id="goToLoginBtn" type="button" class="btn-link-strong">Log in</button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- Forgot Password Screen -->
+
+  <section id="forgotPasswordSection" class="card auth-card hidden" aria-labelledby="forgotTitle">
+
+    <div class="auth-header">
+
+      <div class="auth-brand">LearnAI</div>
+
+      <h1 id="forgotTitle" class="auth-title">Reset your password</h1>
+
+      <p class="auth-subtitle">Enter your registered email address to receive password reset instructions.</p>
+
+    </div>
+
+
+
+    <form id="forgotPasswordForm" class="auth-form" novalidate>
+
+      <div class="form-group">
+
+        <label for="forgotEmail">Email address</label>
+
+        <input type="email" id="forgotEmail" name="email" placeholder="Enter your Gmail address" autocomplete="email" required>
+
+      </div>
+
+
+
+      <div id="forgotMsg" class="auth-msg hidden" role="alert"></div>
+
+
+
+      <button id="forgotSubmitBtn" type="submit" class="btn-primary auth-submit-btn">
+
+        <span class="btn-text">Send reset link</span>
+
+        <span class="btn-spinner hidden" aria-hidden="true"><span class="spinner-small"></span></span>
+
+      </button>
+
+    </form>
+
+
+
+    <div id="devResetNotice" class="dev-reset-box hidden">
+
+      <div class="dev-reset-header">Development Mode Password Reset</div>
+
+      <p class="dev-reset-text">Email delivery is not configured on this server. For local testing, your secure reset token is:</p>
+
+      <code id="devResetTokenCode" class="dev-token-code"></code>
+
+      <div class="dev-reset-actions">
+
+        <button id="devUseTokenBtn" type="button" class="btn-secondary-sm">Proceed with this token &rarr;</button>
+
+      </div>
+
+    </div>
+
+
+
+    <div class="auth-footer">
+
+      <button id="forgotBackToLoginBtn" type="button" class="btn-link-strong">&larr; Back to login</button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- Reset Password Screen -->
+
+  <section id="resetPasswordSection" class="card auth-card hidden" aria-labelledby="resetTitle">
+
+    <div class="auth-header">
+
+      <div class="auth-brand">LearnAI</div>
+
+      <h1 id="resetTitle" class="auth-title">Set a new password</h1>
+
+      <p class="auth-subtitle">Choose a new, secure password for your LearnAI student account.</p>
+
+    </div>
+
+
+
+    <form id="resetPasswordForm" class="auth-form" novalidate>
+
+      <div class="form-group">
+
+        <label for="resetTokenInput">Reset token</label>
+
+        <input type="text" id="resetTokenInput" name="token" placeholder="Paste your reset token" required>
+
+      </div>
+
+
+
+      <div class="form-group">
+
+        <label for="resetNewPassword">New password</label>
+
+        <input type="password" id="resetNewPassword" name="new_password" placeholder="Create a new password" required minlength="8">
+
+        <small class="field-hint">Must be at least 8 characters with at least one letter and one number.</small>
+
+      </div>
+
+
+
+      <div class="form-group">
+
+        <label for="resetConfirmPassword">Confirm new password</label>
+
+        <input type="password" id="resetConfirmPassword" name="confirm_password" placeholder="Re-enter your new password" required minlength="8">
+
+      </div>
+
+
+
+      <div id="resetMsg" class="auth-msg hidden" role="alert"></div>
+
+
+
+      <button id="resetSubmitBtn" type="submit" class="btn-primary auth-submit-btn">
+
+        <span class="btn-text">Reset password</span>
+
+        <span class="btn-spinner hidden" aria-hidden="true"><span class="spinner-small"></span></span>
+
+      </button>
+
+    </form>
+
+
+
+    <div class="auth-footer">
+
+      <button id="resetBackToLoginBtn" type="button" class="btn-link-strong">&larr; Back to login</button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- 1. Home / Setup Screen -->
+
+  <section id="setup" class="card hero-card hidden">
+
+    <h1>Choose a course and topic</h1>
+
+    <p>Select a course, choose a syllabus topic, and LearnAI will generate a fresh 10-question quiz.</p>
+
+
+
+    <label for="course">Course</label>
+
+    <select id="course">
+
+      <option value="">Select a course</option>
+
+    </select>
+
+
+
+    <label for="topic">Topic</label>
+
+    <select id="topic" disabled>
+
+      <option value="">Select a course first</option>
+
+    </select>
+
+
+
+    <div class="pattern">
+
+      <span>4 Easy</span>
+
+      <span>4 Medium</span>
+
+      <span>2 Hard</span>
+
+    </div>
+
+
+
+    <button id="generateBtn">Generate Questions with AI</button>
+
+    <p id="setupMsg" class="message"></p>
+
+    <div class="setup-divider"><span>OR</span></div>
+
+    <button id="setupNotesBtn" type="button" class="btn-notes-cta">
+
+      <span class="notes-icon" aria-hidden="true">
+
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+
+          <polyline points="14 2 14 8 20 8"></polyline>
+
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+
+        </svg>
+
+      </span>
+
+      <span>Generate Quiz from Notes or Slides</span>
+
+    </button>
+
+  </section>
+
+
+
+  <!-- 2. Loading Screen (Calm, Minimal, Academic) -->
+
+  <section id="loadingSection" class="card loading-card hidden" role="status" aria-live="polite">
+
+    <div class="loading-spinner-wrap">
+
+      <div class="spinner" aria-hidden="true"></div>
+
+    </div>
+
+    <h2 class="loading-title">Preparing Your Quiz</h2>
+
+    <p class="loading-desc">We're creating 10 questions based on your selected syllabus topic.</p>
+
+    <div id="loadingTopicLabel" class="loading-topic-label">—</div>
+
+    <p class="loading-hint">This may take a few moments...</p>
+
+    <div class="loading-actions">
+
+      <button id="loadingCancelBtn" type="button" class="secondary cancel-btn">Cancel</button>
+
+    </div>
+
+    <div id="loadingErrorBox" class="loading-error-box hidden">
+
+      <div id="loadingErrorMsg" class="loading-error-msg"></div>
+
+      <div class="loading-error-actions">
+
+        <button id="loadingRetryBtn" type="button">Retry</button>
+
+        <button id="loadingBackBtn" type="button" class="secondary">Choose Another Topic</button>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- 3. Active Quiz Screen -->
+
+  <section id="quizSection" class="hidden">
+
+    <header class="quiz-header">
+
+      <div class="quiz-header-main">
+
+        <div id="quizCourse" class="quiz-course-label"></div>
+
+        <h1 id="quizTitle" class="quiz-topic-title"></h1>
+
+      </div>
+
+      <div class="quiz-meta-subtle">
+
+        <span id="quizAttemptNumber" class="quiz-attempt-tag"></span>
+
+      </div>
+
+    </header>
+
+
+
+    <div class="quiz-progress-bar-wrap">
+
+      <div class="quiz-progress-meta">
+
+        <span id="progressText" class="progress-question-count">Question 1 of 10</span>
+
+        <span id="difficultyBadge" class="difficulty-tag">Easy</span>
+
+      </div>
+
+      <div class="progress" role="progressbar" aria-valuenow="10" aria-valuemin="0" aria-valuemax="100" aria-label="Quiz progress">
+
+        <div id="progressBar"></div>
+
+      </div>
+
+    </div>
+
+
+
+    <div class="card question-card">
+
+      <div id="concept" class="question-concept-subtle"></div>
+
+      <div id="question" class="question-heading" role="heading" aria-level="2"></div>
+
+      <div id="options" class="options" role="radiogroup" aria-label="Answer options"></div>
+
+      <div id="quizAlert" class="message quiz-alert" aria-live="polite"></div>
+
+      <div class="nav-row">
+
+        <button id="prevBtn" class="secondary" aria-label="Previous question">Previous</button>
+
+        <button id="nextBtn" aria-label="Next question">Next</button>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- 4. Result Screen -->
+
+  <section id="resultSection" class="hidden">
+
+    <div class="card result-card">
+
+      <div class="badge">Quiz Completed</div>
+
+      <h1 id="scoreText"></h1>
+
+      <h2 id="statusText"></h2>
+
+      <p id="percentageText" class="muted"></p>
+
+
+
+      <div class="results-grid">
+
+        <div class="result-section">
+
+          <h3>Difficulty-wise Performance</h3>
+
+          <div id="difficultyPerformance"></div>
+
+        </div>
+
+        <div class="result-section">
+
+          <h3>Concept-wise Performance</h3>
+
+          <div id="conceptPerformance"></div>
+
+        </div>
+
+      </div>
+
+
+
+      <div class="analysis-grid">
+
+        <div>
+
+          <h3>Strong Concepts</h3>
+
+          <div id="strongConcepts"></div>
+
+        </div>
+
+        <div>
+
+          <h3>Weak Concepts</h3>
+
+          <div id="weakConcepts"></div>
+
+        </div>
+
+      </div>
+
+
+
+      <div class="ai-box">
+
+        <h3>AI Performance Analysis</h3>
+
+        <p id="analysisSummary"></p>
+
+        <h4>Revision</h4>
+
+        <p id="analysisRevision"></p>
+
+        <h4>Recommended Next Step</h4>
+
+        <p id="analysisRecommendation"></p>
+
+      </div>
+
+
+
+      <div id="review"></div>
+
+
+
+      <!-- Attempt History for this Topic -->
+
+      <div id="attemptHistorySection" class="attempt-history-section hidden">
+
+        <h3>Attempt History for this Topic</h3>
+
+        <div id="attemptHistoryList"></div>
+
+      </div>
+
+
+
+      <div class="nav-row result-actions">
+
+        <button id="retakeBtn">Retake with New AI Questions</button>
+
+        <button id="viewDashboardFromResultBtn" type="button" class="secondary">View Student Dashboard</button>
+
+        <button id="newTopicBtn" class="secondary">Choose Another Topic</button>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- 5. Student Progress Dashboard Screen -->
+
+  <section id="dashboardSection" class="hidden">
+
+    <div class="dashboard-header card">
+
+      <div class="dashboard-header-main">
+
+        <h1 class="dashboard-title">Student Progress &amp; Analytics</h1>
+
+        <p class="muted">Track your syllabus mastery, performance trends, and targeted practice recommendations.</p>
+
+      </div>
+
+      <div class="dashboard-filters">
+
+        <label for="dashboardCourseFilter" class="visually-hidden">Filter by Course</label>
+
+        <select id="dashboardCourseFilter" aria-label="Filter by course">
+
+          <option value="">All Courses</option>
+
+        </select>
+
+        <button id="dashboardRefreshBtn" type="button" class="secondary" title="Refresh analytics">Refresh</button>
+
+      </div>
+
+    </div>
+
+
+
+    <!-- Loading State for Dashboard -->
+
+    <div id="dashboardLoading" class="card dashboard-state-card hidden">
+
+      <div class="spinner state-spinner" aria-hidden="true"></div>
+
+      <p class="dashboard-loading-text">Loading your learning analytics...</p>
+
+    </div>
+
+
+
+    <!-- Error State for Dashboard -->
+
+    <div id="dashboardError" class="card dashboard-error-card hidden">
+
+      <p id="dashboardErrorMsg" class="dashboard-error-msg"></p>
+
+      <button id="dashboardRetryBtn" type="button">Retry</button>
+
+    </div>
+
+
+
+    <!-- First-Time Student State (No Quizzes Completed) -->
+
+    <div id="dashboardEmptyState" class="first-time-container hidden">
+
+      <div class="card first-time-welcome-card">
+
+        <div class="first-time-badge" aria-hidden="true">
+
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+
+            <path d="M9 7h6"></path>
+
+            <path d="M9 11h6"></path>
+
+          </svg>
+
+        </div>
+
+        <h2 class="first-time-heading">Your learning journey starts here.</h2>
+
+        <p class="first-time-lead">Complete your first practice quiz to see your progress and personalized study recommendations.</p>
+
+        <div class="first-time-actions">
+
+          <button id="dashboardStartQuizBtn" type="button" class="btn-primary">Start Your First Quiz &rarr;</button>
+
+        </div>
+
+
+
+        <div class="first-time-benefits">
+
+          <div class="benefit-item">
+
+            <div class="benefit-num">1</div>
+
+            <div class="benefit-content">
+
+              <span class="benefit-title">Adaptive Practice</span>
+
+              <p class="benefit-desc">Calibrate practice questions to your knowledge level.</p>
+
+            </div>
+
+          </div>
+
+          <div class="benefit-item">
+
+            <div class="benefit-num">2</div>
+
+            <div class="benefit-content">
+
+              <span class="benefit-title">Topic Mastery</span>
+
+              <p class="benefit-desc">Track cumulative accuracy and progress across each topic.</p>
+
+            </div>
+
+          </div>
+
+          <div class="benefit-item">
+
+            <div class="benefit-num">3</div>
+
+            <div class="benefit-content">
+
+              <span class="benefit-title">Targeted Insights</span>
+
+              <p class="benefit-desc">Pinpoint specific concepts for focused revision.</p>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+
+
+    <!-- Main Dashboard Content (Returning Students With Completed Quizzes) -->
+
+    <div id="dashboardContent" class="hidden">
+
+      <!-- 1. Overview Metric Cards -->
+
+      <div class="stats-grid">
+
+        <div class="stat-card">
+
+          <div class="stat-label">Quizzes Completed</div>
+
+          <div id="statCompletedQuizzes" class="stat-value">0</div>
+
+          <div class="stat-subtext">Graded attempts</div>
+
+        </div>
+
+        <div class="stat-card">
+
+          <div class="stat-label">Questions Answered</div>
+
+          <div id="statTotalQuestions" class="stat-value">0</div>
+
+          <div id="statTotalCorrectSub" class="stat-subtext">0 correct</div>
+
+        </div>
+
+        <div class="stat-card">
+
+          <div class="stat-label">Overall Accuracy</div>
+
+          <div id="statOverallAccuracy" class="stat-value">0%</div>
+
+          <div class="stat-subtext">Across all quizzes</div>
+
+        </div>
+
+        <div class="stat-card">
+
+          <div class="stat-label">Topics Practiced</div>
+
+          <div id="statTopicsPracticed" class="stat-value">0</div>
+
+          <div id="statLastPracticed" class="stat-subtext">Never</div>
+
+        </div>
+
+      </div>
+
+
+
+      <!-- 2. Recommended Review Section (Topics Needing Review) -->
+
+      <div class="card dashboard-card">
+
+        <div class="section-title-row">
+
+          <div>
+
+            <h2 class="section-title">Recommended Review</h2>
+
+            <p class="muted section-subtitle">
+
+              Prioritized topics based on recent quiz performance and concepts requiring reinforcement.
+
+            </p>
+
+          </div>
+
+        </div>
+
+        <div id="reviewTopicsWrap">
+
+          <div id="reviewTopicsList" class="recommendations-grid"></div>
+
+        </div>
+
+        <!-- Hidden alias container for backward compatibility -->
+
+        <div id="recommendedTopicsList" class="hidden" aria-hidden="true"></div>
+
+      </div>
+
+
+
+      <!-- 3. Course Performance Graph (Visible only when a specific course is selected) -->
+
+      <div id="performanceGraphCard" class="card dashboard-card hidden" aria-hidden="true">
+
+        <div class="section-title-row">
+
+          <div>
+
+            <h2 class="section-title" id="performanceGraphTitle">Course Performance Trend</h2>
+
+            <p class="muted section-subtitle" id="performanceGraphSubtitle">Historical score progression for the selected course.</p>
+
+          </div>
+
+          <span id="trendsCountTag" class="tag-chip tag-chip-sm">Recent attempts</span>
+
+        </div>
+
+        <div id="trendChartWrap" class="trend-chart-container"></div>
+
+      </div>
+
+
+
+      <!-- 4. Recent Quiz Attempts Log -->
+
+      <div id="recentAttemptsCard" class="card dashboard-card">
+
+        <div class="section-title-row">
+
+          <div>
+
+            <h2 class="section-title">Recent Quiz Attempts</h2>
+
+            <p class="muted section-subtitle">Historical quiz submissions and performance details.</p>
+
+          </div>
+
+        </div>
+
+        <div id="recentAttemptsTableWrap" class="table-wrap"></div>
+
+      </div>
+
+
+
+      <!-- 5. Topic Mastery & Progression -->
+
+      <div class="card dashboard-card">
+
+        <div class="section-title-row">
+
+          <div>
+
+            <h2 class="section-title">Syllabus Topic Mastery</h2>
+
+            <p class="muted section-subtitle">
+
+              Cumulative accuracy, recent 10-question trajectory, and current adaptive difficulty level.
+
+            </p>
+
+          </div>
+
+        </div>
+
+        <div id="topicProgressList" class="topic-progress-grid"></div>
+
+      </div>
+
+
+
+      <!-- 6. Concept Insights Cloud -->
+
+      <div class="results-grid dashboard-concepts-grid">
+
+        <div class="result-section">
+
+          <h3 class="strong-concepts-header">Strong Concepts</h3>
+
+          <p class="muted concepts-subtitle">Concepts consistently answered correctly.</p>
+
+          <div id="dashboardStrongConcepts"></div>
+
+        </div>
+
+        <div class="result-section">
+
+          <h3 class="weak-concepts-header">Concepts Needing Review</h3>
+
+          <p class="muted concepts-subtitle">Concepts with recent incorrect answers.</p>
+
+          <div id="dashboardWeakConcepts"></div>
+
+        </div>
+
+      </div>
+
+
+
+      <!-- 7. Pedagogical Practice Notice -->
+
+      <div class="disclaimer-box">
+
+        <strong>Pedagogical Practice Notice:</strong> Mastery levels, difficulty recommendations, and concept insights are algorithmic practice heuristics intended to guide active revision. They are not accredited psychometric or institutional grading assessments.
+
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- 6. Notes & Slides (Upload & Saved Materials Combined Screen) -->
+
+  <section id="notesUploadSection" class="hidden">
+
+    <!-- 1. Page Heading -->
+
+    <div class="notes-header card">
+
+      <div class="notes-header-main">
+
+        <h1 class="notes-title">Notes &amp; Slides</h1>
+
+        <p class="muted notes-subtitle">Upload lecture notes or slide decks to extract syllabus topics, or practice anytime with your saved study materials.</p>
+
+      </div>
+
+    </div>
+
+
+
+    <!-- 2. Upload Panel -->
+
+    <div class="notes-page-wrapper flex flex-col items-center justify-center py-8 px-4 w-full bg-gradient-to-br from-gray-50 to-gray-200 rounded-2xl mb-8">
+
+      <div id="notesUploaderCard" class="notes-uploader-card bg-white rounded-2xl shadow-xl p-8 w-full max-w-md border border-gray-100 animate-fade-in">
+
+        <h2 class="text-2xl font-bold mb-6 text-center text-gray-900 tracking-tight">
+
+          Upload Files
+
+        </h2>
+
+
+
+        <input
+
+          id="notesFileInput"
+
+          type="file"
+
+          class="hidden"
+
+          aria-label="File input"
+
+          multiple
+
+          accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,.txt,.ppt,.pptx,image/jpeg,image/png,image/webp"
+
+        />
+
+
+
+        <div
+
+          id="notesDropzone"
+
+          class="notes-dropzone w-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all duration-200 mb-5 cursor-pointer border-gray-300 bg-gray-50 hover:border-blue-400"
+
+          style="min-height: 120px;"
+
+          role="button"
+
+          tabindex="0"
+
+          aria-label="Choose files or drag files here"
+
+        >
+
+          <div class="flex flex-col items-center py-6">
+
+            <span class="text-4xl mb-2 animate-bounce">📁</span>
+
+            <span class="text-gray-700 font-medium text-center">
+
+              Drag &amp; drop files here, or <span class="text-blue-600 underline">browse</span>
+
+            </span>
+
+            <span class="text-xs text-gray-400 mt-1 text-center px-2">
+
+              (PNG, JPG, PDF, etc. up to 5MB each)
+
+            </span>
+
+          </div>
+
+        </div>
+
+
+
+        <!-- Screen-reader live announcement region for notes staging -->
+
+        <div
+
+          id="notesLiveStatus"
+
+          class="sr-only"
+
+          role="status"
+
+          aria-live="polite"
+
+          aria-atomic="true"
+
+        ></div>
+
+
+
+        <!-- Selected files list (single FilePreview or multi-file pill list) -->
+
+        <div id="notesFilesList" class="mb-4"></div>
+
+
+
+        <!-- Progress bar matching exact reference component -->
+
+        <div id="notesProgressWrap" class="w-full bg-gray-200 rounded-full h-3 mb-4 overflow-hidden animate-fade-in hidden">
+
+          <div
+
+            id="notesProgressBar"
+
+            class="bg-green-500 h-3 rounded-full transition-all duration-300"
+
+            style="width: 0%;"
+
+            role="progressbar"
+
+            aria-valuemin="0"
+
+            aria-valuemax="100"
+
+            aria-valuenow="0"
+
+          ></div>
+
+        </div>
+
+
+
+        <!-- Upload Action Button -->
+
+        <button
+
+          id="notesUploadBtn"
+
+          type="button"
+
+          disabled
+
+          class="w-full py-2 px-4 rounded-lg font-semibold text-base transition focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 shadow-lg flex items-center justify-center gap-2 bg-gray-300 text-gray-500 cursor-not-allowed"
+
+          style="min-height: 40px;"
+
+        >
+
+          <svg
+
+            id="notesSpinner"
+
+            class="animate-spin h-6 w-6 text-white hidden"
+
+            xmlns="http://www.w3.org/2000/svg"
+
+            fill="none"
+
+            viewBox="0 0 24 24"
+
+            aria-hidden="true"
+
+          >
+
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+
+          </svg>
+
+          <span id="notesUploadBtnText">Upload &amp; Find Topics</span>
+
+        </button>
+
+      </div>
+
+
+
+      <!-- Toast notifications container -->
+
+      <div id="notesToastContainer" aria-live="polite"></div>
+
+
+
+      <!-- Topic Preview & Selection Card -->
+
+      <div id="notesTopicResultsCard" class="card notes-results-card hidden w-full max-w-2xl mt-6 animate-fade-in" style="display: none;" aria-hidden="true">
+
+        <div class="notes-results-header">
+
+          <div class="badge badge-success" id="notesResultsBadge">Curriculum Match Found</div>
+
+          <h2 class="notes-results-title">Matched Syllabus Topics</h2>
+
+          <p class="muted notes-results-subtitle">
+
+            We extracted your study notes and matched them to syllabus topics. Choose a topic to generate a grounded 10-question quiz.
+
+          </p>
+
+        </div>
+
+
+
+        <!-- Partial relevance alert -->
+
+        <div id="notesPartialAlert" class="notes-alert notes-alert-warning hidden">
+
+          <span class="notes-alert-icon" aria-hidden="true">
+
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+              <circle cx="12" cy="12" r="10"></circle>
+
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+
+            </svg>
+
+          </span>
+
+          <div>
+
+            <strong>Partial Syllabus Coverage:</strong>
+
+            <span>Your notes focus on specific concepts within this topic. The AI quiz generator will prioritize those concepts.</span>
+
+          </div>
+
+        </div>
+
+
+
+        <!-- Irrelevant document notice -->
+
+        <div id="notesIrrelevantAlert" class="notes-alert notes-alert-error hidden">
+
+          <span class="notes-alert-icon" aria-hidden="true">
+
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+
+            </svg>
+
+          </span>
+
+          <div>
+
+            <strong>No Syllabus Match Found:</strong>
+
+            <span id="notesIrrelevantMsg">We could not identify any matching curriculum courses or topics in these notes.</span>
+
+          </div>
+
+        </div>
+
+
+
+        <!-- Topic options container -->
+
+        <div id="notesTopicOptions" class="notes-topics-list"></div>
+
+
+
+        <!-- Action buttons -->
+
+        <div class="notes-actions-row">
+
+          <button id="notesGenerateQuizBtn" type="button" class="btn-primary">Generate Quiz from Notes</button>
+
+          <button id="notesResetBtn" type="button" class="secondary">Upload Different Notes</button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+
+
+    <!-- 3. Saved Study Materials Section (Beneath Upload Panel) -->
+
+    <div id="savedMaterialsSection" class="card materials-card">
+
+      <div class="materials-header">
+
+        <div class="materials-header-text">
+
+          <h2 class="materials-title">Saved Study Materials</h2>
+
+          <p class="materials-subtitle">Access previously uploaded notes, review extracted topics, and generate grounded practice quizzes without re-uploading.</p>
+
+        </div>
+
+        <div class="materials-header-actions">
+
+          <button id="materialsRefreshBtn" type="button" class="secondary btn-sm" title="Refresh saved materials">
+
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+
+              <path d="M23 4v6h-6"></path>
+
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+
+            </svg>
+
+            <span>Refresh</span>
+
+          </button>
+
+        </div>
+
+      </div>
+
+
+
+      <!-- Loading state -->
+
+      <div id="materialsLoading" class="materials-loading hidden" role="status">
+
+        <div class="spinner" aria-hidden="true"></div>
+
+        <p class="muted">Loading your saved study materials...</p>
+
+      </div>
+
+
+
+      <!-- Empty state -->
+
+      <div id="materialsEmptyState" class="first-time-container hidden">
+
+        <div class="card first-time-welcome-card">
+
+          <div class="first-time-badge" aria-hidden="true">
+
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+
+              <polyline points="14 2 14 8 20 8"></polyline>
+
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+
+            </svg>
+
+          </div>
+
+          <h3 class="first-time-heading">No study materials saved yet</h3>
+
+          <p class="first-time-lead">Upload your course notes, slides, or syllabus sheets above to extract topics and take practice quizzes anytime.</p>
+
+          <div class="first-time-actions">
+
+            <button id="materialsEmptyUploadBtn" type="button" class="btn-primary">Upload Your First Notes &uarr;</button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+
+      <!-- Materials List View -->
+
+      <div id="materialsListView">
+
+        <div id="materialsGrid" class="materials-grid"></div>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- Backward-compatibility alias element -->
+
+  <div id="materialsSection" class="hidden" style="display:none;" aria-hidden="true"></div>
+
+
+
+<!-- Safe Material Removal Confirmation Modal -->
+
+  <div id="materialRemoveModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="removeModalTitle">
+
+    <div class="modal-dialog">
+
+      <div class="modal-header">
+
+        <div class="modal-warning-icon" aria-hidden="true">
+
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+
+          </svg>
+
+        </div>
+
+        <h3 id="removeModalTitle" class="modal-title">Remove Study Material?</h3>
+
+      </div>
+
+      <div class="modal-body">
+
+        <p>Are you sure you want to remove <strong id="removeMaterialFilename">this file</strong>?</p>
+
+        <div class="safe-removal-notice">
+
+          <strong>Safe Removal Guarantee:</strong> Your historical quiz attempts, scores, and topic mastery will remain 100% intact on your student dashboard. Only the uploaded notes document will be removed.
+
+        </div>
+
+      </div>
+
+      <div class="modal-actions">
+
+        <button id="removeModalCancelBtn" type="button" class="secondary">Cancel</button>
+
+        <button id="removeModalConfirmBtn" type="button" class="btn-danger">Remove Material</button>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</main>
+
+
+
+<script src="js/app.js?v=2.4.0"></script>
+
+</body>
+
+</html>
