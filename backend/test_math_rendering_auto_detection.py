@@ -37,7 +37,7 @@ if (typeof global.document === 'undefined') {
     function mockEl(id) {
         if (!domElements.has(id)) {
             domElements.set(id, {
-                id, innerHTML: '', textContent: '', value: '', style: {}, dataset: {},
+                nodeType: 1, id, innerHTML: '', textContent: '', value: '', style: {}, dataset: {},
                 classList: {
                     _classes: new Set(),
                     add(c) { this._classes.add(c); },
@@ -54,7 +54,13 @@ if (typeof global.document === 'undefined') {
                 },
                 replaceChild(n, o) {
                     const idx = this.childNodes.indexOf(o);
-                    if (idx !== -1) this.childNodes[idx] = n;
+                    if (idx !== -1) {
+                        if (n && n.nodeType === 11 && Array.isArray(n.childNodes)) {
+                            this.childNodes.splice(idx, 1, ...n.childNodes);
+                        } else {
+                            this.childNodes[idx] = n;
+                        }
+                    }
                     return o;
                 },
                 setAttribute() {}, getAttribute() { return null; }, removeAttribute() {},
@@ -66,14 +72,40 @@ if (typeof global.document === 'undefined') {
     global.document = {
         getElementById: mockEl,
         createElement: (tag) => ({
-            tagName: tag.toUpperCase(), className: '', innerHTML: '', textContent: '', style: {}, dataset: {},
+            nodeType: 1, tagName: tag.toUpperCase(), className: '', innerHTML: '', textContent: '', style: {}, dataset: {},
             classList: {
                 _classes: new Set(),
                 add(c) { this._classes.add(c); },
                 remove(c) { this._classes.delete(c); },
                 contains(c) { return this._classes.has(c); }
             },
-            childNodes: [], appendChild(c) { this.childNodes.push(c); return c; },
+            childNodes: [],
+            get firstChild() { return this.childNodes[0] || null; },
+            appendChild(c) {
+                c.parentNode = this;
+                const prev = this.childNodes[this.childNodes.length - 1];
+                if (prev) { prev.nextSibling = c; c.previousSibling = prev; }
+                this.childNodes.push(c);
+                return c;
+            },
+            removeChild(c) {
+                const idx = this.childNodes.indexOf(c);
+                if (idx !== -1) this.childNodes.splice(idx, 1);
+                return c;
+            },
+            replaceChild(n, o) {
+                const idx = this.childNodes.indexOf(o);
+                if (idx !== -1) {
+                    if (n && n.nodeType === 11 && Array.isArray(n.childNodes)) {
+                        n.childNodes.forEach(ch => { ch.parentNode = this; });
+                        this.childNodes.splice(idx, 1, ...n.childNodes);
+                    } else {
+                        if (n) n.parentNode = this;
+                        this.childNodes[idx] = n;
+                    }
+                }
+                return o;
+            },
             setAttribute() {}, getAttribute() { return null; }, addEventListener() {}
         }),
         createTextNode: (t) => ({ nodeType: 3, textContent: t, data: t }),
@@ -865,3 +897,185 @@ class TestSafetyAndIdempotency:
         results = json.loads(run_node_eval(script))
         for r in results:
             assert r["match"], f"Idempotency failed for {r['s']}:\nOnce:  {r['once']}\nTwice: {r['twice']}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Huber Loss and Mixed Prose/Equation Regression Suite
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestHuberLossAndMixedProseRegression:
+    def test_exact_huber_loss_screenshot_option(self):
+        r"""The exact Huber loss option from the screenshot must be properly typeset into mixed prose and KaTeX."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "It behaves as 0.5 * e² for small errors |e| <= delta (smooth and differentiable), and transitions to delta * (|e| - 0.5 * delta) for large errors |e| > delta (linear, robust to outliers).";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        const tokens = LearnAIMathRenderer.tokenize(converted);
+        const mathTokens = tokens.filter(t => t.type === 'math');
+        const renders = mathTokens.map(t => ({
+            content: t.content,
+            html: LearnAIMathRenderer.renderToString(t.content, t.display),
+            hasKatex: LearnAIMathRenderer.renderToString(t.content, t.display).includes('class="katex"')
+        }));
+        console.log(JSON.stringify({ converted, mathCount: mathTokens.length, renders }));
+        """
+        res = json.loads(run_node_eval(script))
+        # Must have detected the 4 mathematical units
+        assert res["mathCount"] == 4, f"Expected 4 math tokens, got {res['mathCount']}: {res['converted']}"
+        # All 4 must render without error
+        for r in res["renders"]:
+            assert r["hasKatex"], f"Token failed KaTeX render: {r['content']}"
+            assert "katex-error" not in r["html"], f"Token has KaTeX error: {r['content']}"
+
+        # Check specific expressions normalized
+        contents = [r["content"] for r in res["renders"]]
+        assert any(r"\frac{1}{2}" in c and "e^{2}" in c for c in contents), f"0.5 * e^2 failed: {contents}"
+        assert any(r"\leq" in c and r"\delta" in c for c in contents), f"|e| <= delta failed: {contents}"
+        assert any(r"\delta" in c and r"\frac{1}{2}\delta" in c for c in contents), f"delta * (...) failed: {contents}"
+        assert any(">" in c and r"\delta" in c for c in contents), f"|e| > delta failed: {contents}"
+
+    def test_piecewise_huber_loss_definition(self):
+        r"""Piecewise definition using if/for must produce a LaTeX cases environment."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "L_delta(e) = 0.5 * e^2 if |e| <= delta; delta * (|e| - 0.5 * delta) if |e| > delta";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        const tokens = LearnAIMathRenderer.tokenize(converted);
+        const mathTok = tokens.find(t => t.type === 'math');
+        const html = mathTok ? LearnAIMathRenderer.renderToString(mathTok.content, mathTok.display) : '';
+        console.log(JSON.stringify({ converted, hasCases: converted.includes('begin{cases}'), hasKatex: html.includes('class="katex"') }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["hasCases"], f"Piecewise cases not generated: {res['converted']}"
+        assert res["hasKatex"], "Piecewise KaTeX failed to render"
+
+    def test_mixed_prose_and_equations(self):
+        r"""Prose containing equations must preserve English text while typesetting formulas."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "The objective function combines quadratic penalty 0.5 * e^2 with linear penalty delta * |e|.";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert "The objective function combines quadratic penalty" in res["converted"]
+        assert "with linear penalty" in res["converted"]
+        assert r"\frac{1}{2}e^2" in res["converted"] or r"\frac{1}{2}e^{2}" in res["converted"]
+
+    def test_multiple_mathematical_expressions_in_one_sentence(self):
+        r"""Multiple expressions in a single sentence are all independently tokenized."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "When x >= 0 and y <= 1, the model predicts y = 2 * x + 1.";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        const tokens = LearnAIMathRenderer.tokenize(converted);
+        const mathTokens = tokens.filter(t => t.type === 'math');
+        console.log(JSON.stringify({ converted, mathCount: mathTokens.length }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["mathCount"] >= 3, f"Expected at least 3 math expressions, got {res['mathCount']}"
+
+    def test_absolute_value_expressions(self):
+        r"""Absolute values |e| and |x - y| are converted to LaTeX delimiters."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('|e|');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('|x - y|');
+        console.log(JSON.stringify({ r1, r2 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert r"\left|e\right|" in res["r1"] or "|e|" in res["r1"]
+        assert r"\left|x-y\right|" in res["r2"] or "|x-y|" in res["r2"]
+
+    def test_inequalities_formatting(self):
+        r"""Inequality symbols <=, >=, != are converted to \leq, \geq, \neq."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('x <= 1');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('x >= 0');
+        const r3 = LearnAIMathRenderer.normalizeMathExpression('x != 0');
+        console.log(JSON.stringify({ r1, r2, r3 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert r"\leq" in res["r1"]
+        assert r"\geq" in res["r2"]
+        assert r"\neq" in res["r3"]
+
+    def test_decimal_coefficients_normalization(self):
+        r"""0.5 * term is normalized to \frac{1}{2} term."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('0.5 * e^2');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('0.5 * delta');
+        const r3 = LearnAIMathRenderer.normalizeMathExpression('-0.5 * delta');
+        console.log(JSON.stringify({ r1, r2, r3 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert r"\frac{1}{2}e^2" in res["r1"]
+        assert r"\frac{1}{2}\delta" in res["r2"]
+        assert r"-\frac{1}{2}\delta" in res["r3"]
+
+    def test_unicode_superscripts_normalized(self):
+        r"""Unicode superscripts like ², ³, ⁻¹ are converted to LaTeX powers."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeSuperscripts('e²');
+        const r2 = LearnAIMathRenderer.normalizeSuperscripts('x³');
+        const r3 = LearnAIMathRenderer.normalizeSuperscripts('e⁻¹');
+        console.log(JSON.stringify({ r1, r2, r3 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["r1"] == "e^{2}"
+        assert res["r2"] == "x^{3}"
+        assert res["r3"] == "e^{-1}"
+
+    def test_piecewise_guard_rejects_ordinary_prose(self):
+        r"""Ordinary sentences containing if/for words must NOT be converted to cases."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "Take 2 pills if headache persists for more than 3 hours.";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted, hasCases: converted.includes('begin{cases}') }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert not res["hasCases"], f"Ordinary prose falsely converted to cases: {res['converted']}"
+
+    def test_repeated_typesetting_idempotency(self):
+        r"""Repeated convertPlainTextMath calls produce idempotent results without delimiter compounding."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "It behaves as 0.5 * e² for small errors |e| <= delta (smooth and differentiable), and transitions to delta * (|e| - 0.5 * delta) for large errors |e| > delta (linear, robust to outliers).";
+        const once = LearnAIMathRenderer.convertPlainTextMath(input);
+        const twice = LearnAIMathRenderer.convertPlainTextMath(once);
+        console.log(JSON.stringify({ match: once === twice, once, twice }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["match"], f"Idempotency failed:\nOnce:  {res['once']}\nTwice: {res['twice']}"
+
+    def test_code_and_urls_preserved(self):
+        r"""Programming code and URLs are not modified into mathematics."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.convertPlainTextMath('See https://example.com/huber-loss for details');
+        const r2 = LearnAIMathRenderer.convertPlainTextMath('Use `if x <= 10: print(x)` to filter');
+        console.log(JSON.stringify({ r1, r2 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert r"https://example.com/huber-loss" in res["r1"]
+        assert "`if x <= 10: print(x)`" in res["r2"]
+
+    def test_dom_typeset_replaces_text_node_with_katex(self):
+        r"""typeset(root) in a mock DOM replaces option text node with KaTeX rendered spans."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const optText = "It behaves as 0.5 * e² for small errors |e| <= delta (smooth and differentiable), and transitions to delta * (|e| - 0.5 * delta) for large errors |e| > delta (linear, robust to outliers).";
+        const container = document.createElement('div');
+        const textNode = document.createTextNode(optText);
+        container.appendChild(textNode);
+        LearnAIMathRenderer.typeset(container);
+        const hasKatexSpan = container.childNodes.some(c => c.innerHTML && c.innerHTML.includes('class="katex"'));
+        console.log(JSON.stringify({ childCount: container.childNodes.length, hasKatexSpan }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["childCount"] > 1, f"DOM text node was not split/wrapped: {res['childCount']} children"
+        assert res["hasKatexSpan"], "DOM did not receive rendered KaTeX spans"

@@ -243,6 +243,9 @@ const LearnAIMathRenderer = {
     if (/\\\(|\\\[|\$\$|\\begin\{[a-zA-Z*]+\}/.test(text)) {
       return true;
     }
+    if (typeof this._hasPlainTextMath === "function" && this._hasPlainTextMath(text)) {
+      return true;
+    }
     const tokens = this.tokenize(text);
     return tokens.some(t => t.type === "math");
   },
@@ -325,7 +328,7 @@ const LearnAIMathRenderer = {
   },
 
   renderToString(mathStr, displayMode = false) {
-    const k = (typeof katex !== "undefined" ? katex : (typeof window !== "undefined" && window.katex ? window.katex : null));
+    const k = (typeof katex !== "undefined" ? katex : (typeof globalThis !== "undefined" && globalThis.katex ? globalThis.katex : (typeof window !== "undefined" && window.katex ? window.katex : null)));
     if (!k || typeof k.renderToString !== "function") {
       return escapeHtml(displayMode ? `\\[ ${mathStr} \\]` : `\\( ${mathStr} \\)`);
     }
@@ -346,13 +349,90 @@ const LearnAIMathRenderer = {
   },
 
   // ── Stage 1: Mathematical Expression Normalizer ───────────────────────────
+  // Unicode superscripts map
+  _superscriptsMap: {
+    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+    '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+    '⁺': '+', '⁻': '-', '⁼': '=', '⁽': '(', '⁾': ')'
+  },
+
+  normalizeSuperscripts(str) {
+    if (!str || typeof str !== 'string') return str;
+    return str.replace(/([a-zA-Z0-9_\)\]\|])([\u2070\u00B9\u00B2\u00B3\u2074-\u2079\u207A\u207B\u207C\u207D\u207E]+)/g, (m, base, sups) => {
+      let exp = '';
+      for (const ch of sups) {
+        exp += this._superscriptsMap[ch] || ch;
+      }
+      return `${base}^{${exp}}`;
+    });
+  },
+
+  // Parses piecewise function syntax into LaTeX cases environments
+  parsePiecewise(text) {
+    if (!text || typeof text !== 'string') return null;
+    const trimmed = text.trim();
+
+    // Guard: Must not look like prose or contain prose connectives
+    if (this._looksLikeProse(trimmed)) return null;
+    if (/\b(?:and|or|transition|transitions|behave|behaves|because|therefore)\b/i.test(trimmed)) return null;
+
+    // Must contain if, for, or when with at least two branches
+    if (!/\b(?:if|for|when)\b/i.test(trimmed)) return null;
+
+    // Check for LHS: e.g. L_delta(e) = ... or f(x) = ...
+    const eqMatch = trimmed.match(/^([a-zA-Z_]\w*(?:\([^)]*\))?)\s*=\s*(.+)$/s);
+    let lhs = '';
+    let rhs = trimmed;
+    if (eqMatch) {
+      lhs = eqMatch[1].trim();
+      rhs = eqMatch[2].trim();
+    } else {
+      if (!rhs.includes(';') && !rhs.includes('\n') && !(rhs.startsWith('{') && rhs.endsWith('}'))) {
+        return null;
+      }
+    }
+
+    if (rhs.startsWith('{') && rhs.endsWith('}')) {
+      rhs = rhs.slice(1, -1).trim();
+    }
+
+    let branches = rhs.split(/;\s*|\n+/).map(b => b.trim()).filter(Boolean);
+    if (branches.length < 2) {
+      const commaBranches = rhs.split(/,\s*(?=[^,]+?\b(?:if|for|when)\b)/i).map(b => b.trim()).filter(Boolean);
+      if (commaBranches.length >= 2 && !commaBranches.some(b => this._looksLikeProse(b))) {
+        branches = commaBranches;
+      }
+    }
+
+    if (branches.length < 2) return null;
+
+    const rows = [];
+    for (const b of branches) {
+      const parts = b.split(/\s+\b(?:if|for|when)\b\s+/i);
+      if (parts.length !== 2) return null;
+      if (this._looksLikeProse(parts[0]) || this._looksLikeProse(parts[1])) return null;
+      const val = this.normalizeMathExpression(parts[0].trim());
+      const cond = this.normalizeMathExpression(parts[1].trim());
+      rows.push(`${val} & ${cond}`);
+    }
+
+    const casesLatex = `\\begin{cases} ${rows.join(' \\\\ ')} \\end{cases}`;
+    if (lhs) {
+      const normLhs = this.normalizeMathExpression(lhs);
+      return `\\[ ${normLhs} = ${casesLatex} \\]`;
+    }
+    return `\\[ ${casesLatex} \\]`;
+  },
+
   // Converts programming-style and plain-text mathematical expressions into
-  // standard mathematically correct LaTeX syntax (e.g. * to juxtaposition,
-  // max(...) to \max\{...\}, exp(...) to e^{...}, log/ln to \log/\ln, etc.)
+  // standard mathematically correct LaTeX syntax
   normalizeMathExpression(expr) {
     if (!expr || typeof expr !== "string") return expr;
     let s = expr.trim();
     if (!s) return s;
+
+    // Pre-normalize unicode superscripts
+    s = this.normalizeSuperscripts(s);
 
     // Helper: Find matching closing parenthesis, bracket, or brace
     function findMatching(str, openIdx) {
@@ -397,6 +477,21 @@ const LearnAIMathRenderer = {
       return `${fnName}(${cleanArgs})`;
     });
 
+    // Greek letters normalization: (?<=^|[^a-zA-Z\\]) so _delta becomes _\delta
+    const greekPattern = /(?<=^|[^a-zA-Z\\])(alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Alpha|Beta|Gamma|Delta|Epsilon|Theta|Lambda|Mu|Pi|Sigma|Phi|Psi|Omega)(?=[^a-zA-Z]|$)/g;
+    const greekMap = {
+      alpha:"\\alpha",beta:"\\beta",gamma:"\\gamma",delta:"\\delta",
+      epsilon:"\\epsilon",zeta:"\\zeta",eta:"\\eta",theta:"\\theta",
+      iota:"\\iota",kappa:"\\kappa",lambda:"\\lambda",mu:"\\mu",
+      nu:"\\nu",xi:"\\xi",rho:"\\rho",sigma:"\\sigma",tau:"\\tau",
+      upsilon:"\\upsilon",phi:"\\phi",chi:"\\chi",psi:"\\psi",
+      omega:"\\omega",Alpha:"\\Alpha",Beta:"\\Beta",Gamma:"\\Gamma",
+      Delta:"\\Delta",Epsilon:"\\Epsilon",Theta:"\\Theta",
+      Lambda:"\\Lambda",Mu:"\\Mu",Pi:"\\Pi",Sigma:"\\Sigma",
+      Phi:"\\Phi",Psi:"\\Psi",Omega:"\\Omega"
+    };
+    s = s.replace(greekPattern, (m) => greekMap[m] || m);
+
     // Transform known mathematical functions
     function transformFunctions(str) {
       let res = '';
@@ -412,7 +507,7 @@ const LearnAIMathRenderer = {
 
             if (fnName === 'max' || fnName === 'min') {
               const args = splitTopLevel(innerContent, ',').map(a => transformFunctions(normalizeSubExpr(a)));
-              res += `\\${fnName}\\{${args.join(',')}\\}`;
+              res += '\\' + fnName + '\\{' + args.join(',') + '\\}';
             } else if (fnName === 'exp') {
               const innerNorm = transformFunctions(normalizeSubExpr(innerContent));
               res += `e^{${innerNorm}}`;
@@ -422,7 +517,10 @@ const LearnAIMathRenderer = {
             } else if (fnName === 'abs') {
               const innerNorm = transformFunctions(normalizeSubExpr(innerContent));
               res += `\\left|${innerNorm}\\right|`;
-            } else if (['log', 'ln', 'sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh', 'arcsin', 'arccos', 'arctan', 'det', 'lim'].includes(fnName)) {
+            } else if (['log', 'ln'].includes(fnName)) {
+              const innerNorm = transformFunctions(normalizeSubExpr(innerContent));
+              res += `\\${fnName}(${innerNorm})`;
+            } else if (['sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh', 'arcsin', 'arccos', 'arctan', 'det', 'lim'].includes(fnName)) {
               const innerNorm = transformFunctions(normalizeSubExpr(innerContent));
               res += `\\${fnName}(${innerNorm})`;
             } else {
@@ -439,115 +537,39 @@ const LearnAIMathRenderer = {
       return res;
     }
 
-    // Transform fractions (division operator /)
+    // Transform division 'a / b' into '\frac{a}{b}'
     function transformFractions(str) {
-      // Guards: do not turn dates, paths, or URLs into fractions
-      if (/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(str)) return str;
-      if (/^\/[a-zA-Z0-9_\-]+(?:\/[a-zA-Z0-9_\-]+)+/.test(str)) return str;
-      if (/\b[a-zA-Z0-9_\-]+\/[a-zA-Z0-9_\-]+\/[a-zA-Z0-9_\-]+\b/.test(str)) return str;
-      if (/https?:\/\/|www\./i.test(str)) return str;
-      if (/\b(?:km\/h|m\/s|cm\/s|bytes\/sec|MB\/s|GB\/s)\b/i.test(str)) return str;
+      if (str.includes('/')) {
+        // Skip dates, URLs, Unix paths, and units
+        if (/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(str)) return str;
+        if (/https?:\/\//.test(str)) return str;
+        if (/^\/[a-zA-Z0-9_.-]+/.test(str)) return str;
+        if (/\b(km\/h|m\/s|MB\/s|GB\/s)\b/i.test(str)) return str;
 
-      let res = str;
-      let changed = true;
-      let guard = 0;
-      while (changed && guard++ < 10) {
-        changed = false;
-        for (let i = 0; i < res.length; i++) {
-          if (res[i] === '/' && (i === 0 || res[i-1] !== '\\')) {
-            if (i > 4 && res.slice(i-5, i+1) === 'http:/') continue;
-            if (i > 5 && res.slice(i-6, i+1) === 'https:/') continue;
-
-            let numStart = -1;
-            let numEnd = i;
-            let leftSlice = res.slice(0, i).trimEnd();
-            if (leftSlice.endsWith(')')) {
-              const closeIdx = leftSlice.length - 1;
-              let depth = 1;
-              let openIdx = -1;
-              for (let j = closeIdx - 1; j >= 0; j--) {
-                if (leftSlice[j] === ')') depth++;
-                else if (leftSlice[j] === '(') {
-                  depth--;
-                  if (depth === 0) { openIdx = j; break; }
-                }
-              }
-              if (openIdx !== -1) {
-                numStart = openIdx;
-                numEnd = closeIdx + 1;
-              }
-            } else {
-              const match = leftSlice.match(/([a-zA-Z0-9_\^\+\-]+|\\[a-zA-Z]+(?:\{[^}]+\})?)$/);
-              if (match) {
-                numStart = leftSlice.length - match[0].length;
-                numEnd = leftSlice.length;
-              }
-            }
-
-            let denStart = -1;
-            let denEnd = -1;
-            let rightSlice = res.slice(i + 1);
-            let offset = i + 1 + (rightSlice.length - rightSlice.trimStart().length);
-            let trimmedRight = rightSlice.trimStart();
-
-            if (trimmedRight.startsWith('(')) {
-              const closeIdx = findMatching(trimmedRight, 0);
-              if (closeIdx !== -1) {
-                denStart = offset;
-                denEnd = offset + closeIdx + 1;
-              }
-            } else {
-              const match = trimmedRight.match(/^([a-zA-Z0-9_\^\+\-]+|\\[a-zA-Z]+(?:\{[^}]+\})?)/);
-              if (match) {
-                denStart = offset;
-                denEnd = offset + match[0].length;
-              }
-            }
-
-            if (numStart !== -1 && denStart !== -1) {
-              let num = res.slice(numStart, numEnd).trim();
-              let den = res.slice(denStart, denEnd).trim();
-              if (num.startsWith('(') && num.endsWith(')') && findMatching(num, 0) === num.length - 1) {
-                num = num.slice(1, -1).trim();
-              }
-              if (den.startsWith('(') && den.endsWith(')') && findMatching(den, 0) === den.length - 1) {
-                den = den.slice(1, -1).trim();
-              }
-              const replacement = `\\frac{${num}}{${den}}`;
-              res = res.slice(0, numStart) + replacement + res.slice(denEnd);
-              changed = true;
-              break;
-            }
-          }
-        }
+        // 1 / (1 + e^{-x}) -> \frac{1}{1+e^{-x}}
+        str = str.replace(/(?:^|(?<=[=+\-*\s(]))([a-zA-Z0-9_.]+|\\?[a-zA-Z]+)\s*\/\s*\(([^()]+)\)/g, (match, num, den) => {
+          return `\\frac{${num}}{${den}}`;
+        });
+        // (a) / (b) -> \frac{a}{b}
+        str = str.replace(/\(([^()]+)\)\s*\/\s*\(([^()]+)\)/g, (match, num, den) => {
+          return `\\frac{${num}}{${den}}`;
+        });
+        // (a) / b -> \frac{a}{b}
+        str = str.replace(/\(([^()]+)\)\s*\/\s*([a-zA-Z0-9_.]+|\\?[a-zA-Z]+)/g, (match, num, den) => {
+          return `\\frac{${num}}{${den}}`;
+        });
+        // a / b -> \frac{a}{b} (for short alphanumeric variables or numbers)
+        str = str.replace(/(?:^|(?<=[=+\-*\s(]))([a-zA-Z0-9_.]+|\\?[a-zA-Z]+)\s*\/\s*([a-zA-Z0-9_.]+|\\?[a-zA-Z]+)(?=$|[=+\-*\s),;])/g, (match, num, den) => {
+          return `\\frac{${num}}{${den}}`;
+        });
       }
-      return res;
+      return str;
     }
 
-    // Sub-expression normalizer for algebraic operators, multiplication, exponents, and Greek letters
-    function normalizeSubExpr(str) {
-      let sub = str.trim();
-
-      // Multiplication:
-      // 1) number * variable -> number variable (e.g. 2 * x -> 2x)
-      sub = sub.replace(/(\b\d+)\s*\*\s*([a-zA-Z]\b)/g, '$1$2');
-      // 2) variable * variable -> juxtaposition (e.g. y * s -> ys)
-      sub = sub.replace(/([a-zA-Z])\s*\*\s*([a-zA-Z]\b)/g, '$1$2');
-      // 3) operand * ( -> operand( (e.g. x * (y + z) -> x(y+z))
-      sub = sub.replace(/([a-zA-Z0-9\)])\s*\*\s*\(/g, '$1(');
-      // 4) ) * operand -> )operand (e.g. (a + b) * c -> (a+b)c)
-      sub = sub.replace(/\)\s*\*\s*([a-zA-Z0-9])/g, ')$1');
-      // 5) operand * \command -> operand\command (e.g. -y * \log(s) -> -y\log(s), y * \log -> y\log)
-      sub = sub.replace(/([a-zA-Z0-9\)])\s*\*\s*(\\[a-zA-Z]+)/g, '$1$2');
-      // 6) number * number -> number \cdot number (e.g. 2 * 3 -> 2 \cdot 3)
-      sub = sub.replace(/(\b\d+)\s*\*\s*(\b\d+)/g, '$1 \\cdot $2');
-      // 7) General variable/closing * something -> juxtaposition
-      sub = sub.replace(/([a-zA-Z0-9_\)\}])\s*\*\s*([a-zA-Z0-9_\(\{])/g, '$1$2');
-
-      // Exponents: a^(n+1) -> a^{n+1}
-      sub = sub.replace(/\^\(([^)]+)\)/g, '^{$1}');
-      // Exponents with negative sign: e^-x or a^-1 -> e^{-x}, a^{-1}
-      sub = sub.replace(/\^-\s*([a-zA-Z0-9]+)/g, '^{-$1}');
+    function normalizeSubExpr(sub) {
+      // 0.5 * -> \frac{1}{2} (and 1/2 * -> \frac{1}{2})
+      sub = sub.replace(/(^|[^a-zA-Z0-9_\.])0\.5\s*\*?\s*(?=[a-zA-Z0-9_\.\\|(\[])/g, '$1\\frac{1}{2}');
+      sub = sub.replace(/(^|[^a-zA-Z0-9_\.])1\s*\/\s*2\s*\*?\s*(?=[a-zA-Z0-9_\.\\|(\[])/g, '$1\\frac{1}{2}');
 
       // Relational operators
       sub = sub.replace(/(?<![<>!])<=(?![=])/g, '\\leq');
@@ -555,23 +577,38 @@ const LearnAIMathRenderer = {
       sub = sub.replace(/!=(?![=])/g, '\\neq');
       sub = sub.replace(/\b(infinity|infty)\b/gi, '\\infty');
 
-      // Greek letters
-      const greekMap = {
-        alpha:"\\alpha",beta:"\\beta",gamma:"\\gamma",delta:"\\delta",
-        epsilon:"\\epsilon",zeta:"\\zeta",eta:"\\eta",theta:"\\theta",
-        iota:"\\iota",kappa:"\\kappa",lambda:"\\lambda",mu:"\\mu",
-        nu:"\\nu",xi:"\\xi",rho:"\\rho",sigma:"\\sigma",tau:"\\tau",
-        upsilon:"\\upsilon",phi:"\\phi",chi:"\\chi",psi:"\\psi",
-        omega:"\\omega",Alpha:"\\Alpha",Beta:"\\Beta",Gamma:"\\Gamma",
-        Delta:"\\Delta",Epsilon:"\\Epsilon",Theta:"\\Theta",
-        Lambda:"\\Lambda",Mu:"\\Mu",Pi:"\\Pi",Sigma:"\\Sigma",
-        Phi:"\\Phi",Psi:"\\Psi",Omega:"\\Omega"
-      };
-      sub = sub.replace(/\b(alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Alpha|Beta|Gamma|Delta|Epsilon|Theta|Lambda|Mu|Pi|Sigma|Phi|Psi|Omega)\b/g,
-        (m) => greekMap[m] || m);
+      // Absolute values: |e| -> \left|e\right|
+      sub = sub.replace(/(?:\\left\||\\right\||\|([^|\n]+)\|)/g, (match, inner) => {
+        if (match.startsWith('\\left') || match.startsWith('\\right')) {
+          return match;
+        }
+        return `\\left|${inner}\\right|`;
+      });
 
-      // Clean whitespace around binary + and - inside terms (e.g. 1 - ys -> 1-ys, 1 + e^{-ys} -> 1+e^{-ys})
-      // preserving unary minus at start or after open delimiter or =
+      // Multiplications:
+      // a * b -> ab (letters/subscripts/commands)
+      sub = sub.replace(/(\b[a-zA-Z_]\w*|\\(?:[a-zA-Z]+))\s*\*\s*(\b[a-zA-Z_]\w*|\\(?:[a-zA-Z]+))/g, '$1$2');
+      // number * variable -> 2x
+      sub = sub.replace(/(\b\d+(?:\.\d+)?)\s*\*\s*(\b[a-zA-Z_]\w*|\\(?:[a-zA-Z]+))/g, '$1$2');
+      // term * (expr) -> term\left(expr\right) or term(expr)
+      sub = sub.replace(/(\b[a-zA-Z0-9_\.]+|\\(?:[a-zA-Z]+)|\))\s*\*\s*\(([^()]+)\)/g, (m, left, inner) => {
+        if (inner.includes('\\frac') || inner.includes('\\left') || inner.includes('|')) {
+          return `${left}\\left(${inner}\\right)`;
+        }
+        return `${left}(${inner})`;
+      });
+      // (expr) * term -> (expr)term
+      sub = sub.replace(/\(([^()]+)\)\s*\*\s*(\b[a-zA-Z_]\w*|\\(?:[a-zA-Z]+))/g, '($1)$2');
+      // (expr) * (expr) -> (expr)(expr)
+      sub = sub.replace(/\(([^()]+)\)\s*\*\s*\(([^()]+)\)/g, '($1)($2)');
+      // number * number -> 2 \cdot 3
+      sub = sub.replace(/(\b\d+)\s*\*\s*(\b\d+)/g, '$1 \\cdot $2');
+
+      // Exponents grouping
+      sub = sub.replace(/\^\(([^()]+)\)/g, '^{$1}');
+      sub = sub.replace(/\^-\s*([a-zA-Z0-9]+)/g, '^{-$1}');
+
+      // Clean whitespace around binary + and - inside terms
       sub = sub.replace(/\s*([\+\-])\s*/g, (match, op, offset) => {
         const prevChar = offset === 0 ? '' : sub[offset - 1];
         if (op === '-' && (offset === 0 || '(=[{,'.includes(prevChar))) {
@@ -601,9 +638,6 @@ const LearnAIMathRenderer = {
   },
 
   // ── Plain-text math auto-detection ─────────────────────────────────────────
-  // Detects math written as plain text (no LaTeX delimiters) and wraps them in
-  // \(...\) so the existing tokenizer/renderer picks them up.
-  // Conservative: prefers false-negatives over corrupting prose/URLs/code.
   convertPlainTextMath(text) {
     if (!text || typeof text !== "string") return text;
     if (text.length < 3) return text;
@@ -617,23 +651,23 @@ const LearnAIMathRenderer = {
 
     const trimmed = text.trim();
 
-    // Check if the entire string is a single standalone mathematical expression
+    // Check 1: Piecewise function definition covering the expression
+    const piecewise = this.parsePiecewise(trimmed);
+    if (piecewise) {
+      return piecewise;
+    }
+
+    // Check 2: Full standalone mathematical expression
     const isFullMathExpr = (
-      // Equation with =, <=, >=, !=, <, >
       /^[a-zA-Z_][a-zA-Z_0-9]*(?:\([a-zA-Z_0-9, ]*\))?\s*(?:=|<=|>=|!=|<|>)\s*.+$/.test(trimmed) ||
       /^P\([^)]+\)\s*=\s*.+$/.test(trimmed) ||
-      // Function call covering the whole string: max(...), min(...), exp(...), log(...), sqrt(...)
       /^(?:max|min|exp|log|ln|sqrt|abs|sin|cos|tan|sigmoid|softmax|relu)\s*\(.+\)$/i.test(trimmed) ||
-      // Parenthesized expression: (1 - y * s)^2, (a + b) / (c + d)
       /^\([^)]+\)(?:\s*[\^\/\*\+\-]\s*.+)?$/.test(trimmed) ||
-      // Fraction expression: a / b, 1 / (...)
       /^(?:[a-zA-Z0-9_\.]+|\([^)]+\))\s*\/\s*.+$/.test(trimmed) ||
-      // Simple algebraic term with operators: -y * log(s), 2*x + 3*y
       /^[-+]?[a-zA-Z0-9_\.]+\s*[\*\^\/]\s*.+$/.test(trimmed)
     ) && !this._looksLikeProse(trimmed);
 
     if (isFullMathExpr) {
-      // If already has \(...\) or \[...] delimiters, strip and re-wrap normalized
       let exprToNorm = trimmed;
       if (exprToNorm.startsWith("\\(") && exprToNorm.endsWith("\\)")) {
         exprToNorm = exprToNorm.slice(2, -2).trim();
@@ -643,25 +677,34 @@ const LearnAIMathRenderer = {
       return "\\(" + this.normalizeMathExpression(exprToNorm) + "\\)";
     }
 
+    // Pre-normalize unicode superscripts in text (e.g. e² -> e^{2})
+    const preprocessed = this.normalizeSuperscripts(text);
+
     // Skip if already contains LaTeX markup in mixed prose
-    if (text.includes("\\") || /\\\(|\\\[|\$\$|\\begin\{/.test(text)) return text;
+    if (preprocessed.includes("\\") || /\\\(|\\\[|\$\$|\\begin\{/.test(preprocessed)) return text;
 
     const inlinePatterns = [
-      // Embedded equations: L(y, s) = max(0, 1 - y * s)
+      // 1. Embedded equations: L(y, s) = max(...) or y = 2*x + 1
       /\b[a-zA-Z_][a-zA-Z_0-9]*(?:\([a-zA-Z_0-9, ]+\))?\s*=\s*(?:max|min|exp|log|ln|sqrt|abs|sin|cos|tan)?\s*[^\n,;.?!]{2,60}/g,
-      // Function calls: max(0, 1 - y * s), log(1 + exp(-y * s)), sin(x)
-      /\b(?:sin|cos|tan|sinh|cosh|tanh|arcsin|arccos|arctan|log|ln|exp|sqrt|abs|sigmoid|softmax|relu|max|min|gcd|lcm|det|tr|rank)\s*\([^)]{1,60}\)/gi,
-      // Big-O: O(n), O(log n)
-      /\bO\([^)]{1,30}\)/g,
-      // Parenthesized expressions with exponents or division: (1 - y * s)^2, (a + b)/(c + d)
+      // 2. Expressions with multiplication: delta * (|e| - 0.5 * delta), 0.5 * e^{2}, 2 * x, a * b
+      /(?:[-+]?\d+(?:\.\d+)?|\\?[a-zA-Z_]\w*|\([^)]+\))\s*\*\s*(?:\([^)]+\)|\|[^|]+\||[-+]?\d+(?:\.\d+)?|\\?[a-zA-Z_]\w*(?:\^[a-zA-Z0-9\-+{}]+)?)/g,
+      // 3. Inequalities: |e| <= delta, |e| > delta, x >= 0
+      /(?:\|[^|\n,;()]+\||[a-zA-Z_]\w*(?:\^[0-9a-zA-Z\-+{}]+|_[0-9a-zA-Z\-+{}]+)?|\d+(?:\.\d+)?)\s*(?:<=|>=|!=|<|>)\s*(?:\|[^|\n,;()]+\||[a-zA-Z_]\w*(?:\^[0-9a-zA-Z\-+{}]+|_[0-9a-zA-Z\-+{}]+)?|\d+(?:\.\d+)?)/g,
+      // 4. Standalone absolute values: |e|, |x - y|
+      /\|[-+]?[a-zA-Z0-9_\.]+(?:\s*[-+*/]\s*[-+]?[a-zA-Z0-9_\.]+)*\|/g,
+      // 5. Function calls: max(...), exp(...)
+      /\b(?:sin|cos|tan|sinh|cosh|tanh|arcsin|arccos|arctan|log|ln|exp|sqrt|abs|sigmoid|softmax|relu|max|min|gcd|lcm|det|tr|rank)\s*\([^)\n]{1,60}\)/gi,
+      // 6. Parenthesized expressions with exponents or division
       /\([^)]+\)\s*[\^\/]\s*(?:[a-zA-Z0-9\-+{}]+|\([^)]+\))/g,
-      // Exponents: x^2, e^{-x}, a^(n+1)
+      // 7. Exponents: x^2, e^{-x}, a^(n+1)
       /[a-zA-Z0-9)]\^[\{(]?[a-zA-Z0-9\-+][a-zA-Z0-9\-+{}() ]*[\})]?/g,
-      // Subscripts: x_1, a_n
+      // 8. Subscripts: x_1, a_n, L_delta
       /[a-zA-Z][_][{]?[a-zA-Z0-9+\-][a-zA-Z0-9+\-{}]*[}]?/g,
-      // Fractions: a/b, 1/2
+      // 9. Fractions: a/b, 1/2
       /(?<![a-zA-Z0-9_\/])(?:\d+|[a-zA-Z](?:\^\d+)?)\s*\/\s*(?:\d+|[a-zA-Z](?:\^\d+)?)(?![a-zA-Z0-9_\/])/g,
-      // Greek letter words: alpha, beta, etc.
+      // 10. Big-O: O(n)
+      /\bO\([^)\n]{1,30}\)/g,
+      // 11. Greek letter words: alpha, beta, etc.
       /\b(?:alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Alpha|Beta|Gamma|Delta|Epsilon|Theta|Lambda|Mu|Pi|Sigma|Phi|Psi|Omega)\b/g
     ];
 
@@ -669,11 +712,11 @@ const LearnAIMathRenderer = {
     for (const pattern of inlinePatterns) {
       const re = new RegExp(pattern.source, pattern.flags || "g");
       let m;
-      while ((m = re.exec(text)) !== null) {
+      while ((m = re.exec(preprocessed)) !== null) {
         const start = m.index;
         const end = m.index + m[0].length;
         if (matched.some(r => start < r.end && end > r.start)) continue;
-        if (start > 0 && text[start - 1] === "$") continue;
+        if (start > 0 && preprocessed[start - 1] === "$") continue;
         matched.push({ start, end, content: m[0] });
       }
     }
@@ -684,11 +727,11 @@ const LearnAIMathRenderer = {
     let out = "";
     let cursor = 0;
     for (const seg of matched) {
-      out += text.slice(cursor, seg.start);
+      out += preprocessed.slice(cursor, seg.start);
       out += "\\(" + this.normalizeMathExpression(seg.content) + "\\)";
       cursor = seg.end;
     }
-    out += text.slice(cursor);
+    out += preprocessed.slice(cursor);
     return out;
   },
 
@@ -701,7 +744,7 @@ const LearnAIMathRenderer = {
   _hasPlainTextMath(text) {
     if (!text || text.length < 3) return false;
     return (
-      /\bO\([^)]{1,30}\)/.test(text) ||
+      /\bO\([^)\n]{1,30}\)/.test(text) ||
       /\b(?:sin|cos|tan|log|ln|exp|sqrt|sigmoid|softmax|relu|max|min|argmax|argmin|det|lim|abs)\s*\(/.test(text) ||
       /[a-zA-Z0-9)]\^[{(]?[a-zA-Z0-9\-+]/.test(text) ||
       /[a-zA-Z]_[{]?[a-zA-Z0-9]/.test(text) ||
@@ -709,13 +752,17 @@ const LearnAIMathRenderer = {
       /(?:\d+|\w)\s*\/\s*(?:\d+|\w)(?![a-zA-Z]{2})/.test(text) ||
       /^[a-zA-Z_]\w*(?:\([^)]*\))?\s*=\s*.+$/.test(text.trim()) ||
       /^\([^)]+\)\s*[\^\/\*\+\-]/.test(text.trim()) ||
-      /^[-+]?[a-zA-Z0-9_\.]+\s*[\*\^\/]/.test(text.trim())
+      /^[-+]?[a-zA-Z0-9_\.]+\s*[\*\^\/]/.test(text.trim()) ||
+      /\|[^|\n]+\|/.test(text) ||
+      /(?:<=|>=|!=)/.test(text) ||
+      /[\u2070\u00B9\u00B2\u00B3\u2074-\u2079\u207A\u207B\u207C\u207D\u207E]/.test(text) ||
+      /\b\d+(?:\.\d+)?\s*\*\s*[a-zA-Z]/.test(text)
     );
   },
 
   typeset(rootEl) {
     if (!rootEl) return;
-    const k = (typeof katex !== "undefined" ? katex : (typeof window !== "undefined" && window.katex ? window.katex : null));
+    const k = (typeof katex !== "undefined" ? katex : (typeof globalThis !== "undefined" && globalThis.katex ? globalThis.katex : (typeof window !== "undefined" && window.katex ? window.katex : null)));
     if (!k) {
       if (typeof window !== "undefined") {
         setTimeout(() => this.typeset(rootEl), 100);
