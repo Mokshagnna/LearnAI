@@ -110,6 +110,7 @@ global.katex = require({json.dumps(katex_path)});
     res = subprocess.run(
         ["node", "-e", full_script],
         capture_output=True, text=True,
+        encoding="utf-8",
         cwd=str(REPO_ROOT), timeout=20
     )
     if res.returncode != 0:
@@ -620,3 +621,247 @@ class TestHasMathRegression:
         results = json.loads(run_node_eval(script))
         for i, (s, r) in enumerate(zip(samples, results)):
             assert r == 0, f"Currency sample {i} incorrectly tokenized as math: {s!r} → {r} math tokens"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Mandatory Screenshot Regression Cases
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMandatoryScreenshotOptions:
+    def test_option_a_max_formula(self):
+        r"""Option A: L(y, s) = max(0, 1 - y * s) -> \(L(y,s)=\max\{0,1-ys\}\)"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = 'L(y, s) = max(0, 1 - y * s)';
+        const actual = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ actual }));
+        """
+        res = json.loads(run_node_eval(script))
+        expected = r"\(L(y,s)=\max\{0,1-ys\}\)"
+        assert res["actual"] == expected, f"Option A mismatch:\nActual:   {res['actual']}\nExpected: {expected}"
+
+    def test_option_b_squared_formula(self):
+        r"""Option B: L(y, s) = (1 - y * s)^2 -> \(L(y,s)=(1-ys)^2\)"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = 'L(y, s) = (1 - y * s)^2';
+        const actual = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ actual }));
+        """
+        res = json.loads(run_node_eval(script))
+        expected = r"\(L(y,s)=(1-ys)^2\)"
+        assert res["actual"] == expected, f"Option B mismatch:\nActual:   {res['actual']}\nExpected: {expected}"
+
+    def test_option_c_log_exp_formula(self):
+        r"""Option C: L(y, s) = log(1 + exp(-y * s)) -> \(L(y,s)=\log(1+e^{-ys})\)"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = 'L(y, s) = log(1 + exp(-y * s))';
+        const actual = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ actual }));
+        """
+        res = json.loads(run_node_eval(script))
+        expected = r"\(L(y,s)=\log(1+e^{-ys})\)"
+        assert res["actual"] == expected, f"Option C mismatch:\nActual:   {res['actual']}\nExpected: {expected}"
+
+    def test_option_d_negative_log_formula(self):
+        r"""Option D: L(y, s) = -y * log(s) -> \(L(y,s)=-y\log(s)\)"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = 'L(y, s) = -y * log(s)';
+        const actual = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ actual }));
+        """
+        res = json.loads(run_node_eval(script))
+        expected = r"\(L(y,s)=-y\log(s)\)"
+        assert res["actual"] == expected, f"Option D mismatch:\nActual:   {res['actual']}\nExpected: {expected}"
+
+    def test_screenshot_options_render_valid_katex(self):
+        """All four options must produce valid KaTeX markup with no syntax or rendering errors."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const options = [
+            'L(y, s) = max(0, 1 - y * s)',
+            'L(y, s) = (1 - y * s)^2',
+            'L(y, s) = log(1 + exp(-y * s))',
+            'L(y, s) = -y * log(s)'
+        ];
+        const results = options.map(opt => {
+            const converted = LearnAIMathRenderer.convertPlainTextMath(opt);
+            const tokens = LearnAIMathRenderer.tokenize(converted);
+            const mathToken = tokens.find(t => t.type === 'math');
+            const html = mathToken ? LearnAIMathRenderer.renderToString(mathToken.content, mathToken.display) : '';
+            return {
+                opt,
+                hasKatex: html.includes('class="katex"'),
+                hasError: html.includes('katex-error')
+            };
+        });
+        console.log(JSON.stringify(results));
+        """
+        results = json.loads(run_node_eval(script))
+        for res in results:
+            assert res["hasKatex"], f"Option failed KaTeX render: {res['opt']}"
+            assert not res["hasError"], f"Option produced KaTeX error: {res['opt']}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Multiplication Normalization Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+    def test_variable_multiplication(self):
+        """y * s -> ys, a * b -> ab, 2 * x -> 2x"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const samples = [
+            { in: 'y * s', expected: 'ys' },
+            { in: 'a * b', expected: 'ab' },
+            { in: '2 * x', expected: '2x' },
+            { in: '10 * y', expected: '10y' }
+        ];
+        const results = samples.map(s => ({
+            in: s.in,
+            out: LearnAIMathRenderer.normalizeMathExpression(s.in),
+            expected: s.expected
+        }));
+        console.log(JSON.stringify(results));
+        """
+        results = json.loads(run_node_eval(script))
+        for r in results:
+            assert r["out"] == r["expected"], f"Failed: {r['in']} -> {r['out']} (expected {r['expected']})"
+
+    def test_parentheses_multiplication(self):
+        """x * (y + z) -> x(y+z), (a + b) * (c + d) -> (a+b)(c+d)"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const samples = [
+            { in: 'x * (y + z)', expected: 'x(y+z)' },
+            { in: '(a + b) * (c + d)', expected: '(a+b)(c+d)' },
+            { in: '(a + b) * c', expected: '(a+b)c' }
+        ];
+        const results = samples.map(s => ({
+            in: s.in,
+            out: LearnAIMathRenderer.normalizeMathExpression(s.in),
+            expected: s.expected
+        }));
+        console.log(JSON.stringify(results));
+        """
+        results = json.loads(run_node_eval(script))
+        for r in results:
+            assert r["out"] == r["expected"], f"Failed: {r['in']} -> {r['out']}"
+
+    def test_numeric_multiplication_uses_cdot(self):
+        r"""2 * 3 must become 2 \cdot 3 for clarity (not 23)."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const out = LearnAIMathRenderer.normalizeMathExpression('2 * 3');
+        console.log(JSON.stringify({ out }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert "cdot" in res["out"], f"Numeric multiplication missing \\cdot: {res['out']}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. Function and Operator Normalization Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestFunctionAndOperatorNormalization:
+    def test_max_and_min_functions(self):
+        r"""max(0, 1 - y * s) -> \max\{0,1-ys\}, min(a, b) -> \min\{a,b\}"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('max(0, 1 - y * s)');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('min(a, b)');
+        console.log(JSON.stringify({ r1, r2 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["r1"] == r"\max\{0,1-ys\}", f"max failed: {res['r1']}"
+        assert res["r2"] == r"\min\{a,b\}", f"min failed: {res['r2']}"
+
+    def test_exponential_normalization(self):
+        r"""exp(-y * s) -> e^{-ys}, exp(x^2) -> e^{x^2}"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('exp(-y * s)');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('exp(x^2)');
+        console.log(JSON.stringify({ r1, r2 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["r1"] == "e^{-ys}", f"exp failed: {res['r1']}"
+        assert res["r2"] == "e^{x^2}", f"exp failed: {res['r2']}"
+
+    def test_log_and_ln_preserved(self):
+        r"""log(x) -> \log(x), ln(x) -> \ln(x)"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('log(x)');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('ln(x)');
+        console.log(JSON.stringify({ r1, r2 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["r1"] == r"\log(x)", f"log failed: {res['r1']}"
+        assert res["r2"] == r"\ln(x)", f"ln failed: {res['r2']}"
+
+    def test_fractions_normalization(self):
+        r"""1 / (1 + e^{-x}) -> \frac{1}{1+e^{-x}}, a / b -> \frac{a}{b}"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('1 / (1 + e^{-x})');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('a / b');
+        console.log(JSON.stringify({ r1, r2 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["r1"] == r"\frac{1}{1+e^{-x}}", f"fraction 1 failed: {res['r1']}"
+        assert res["r2"] == r"\frac{a}{b}", f"fraction 2 failed: {res['r2']}"
+
+    def test_exponents_grouping(self):
+        """a^(n+1) -> a^{n+1}, (1-ys)^2 -> (1-ys)^2"""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('a^(n+1)');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('(1-ys)^2');
+        console.log(JSON.stringify({ r1, r2 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert res["r1"] == "a^{n+1}", f"exp grouping failed: {res['r1']}"
+        assert res["r2"] == "(1-ys)^2", f"exp grouping failed: {res['r2']}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. Safety Guards & Idempotency Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSafetyAndIdempotency:
+    def test_dates_and_paths_not_converted(self):
+        """Dates (12/05/2024) and paths (/usr/local/bin) must NOT be converted to fractions."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const r1 = LearnAIMathRenderer.normalizeMathExpression('12/05/2024');
+        const r2 = LearnAIMathRenderer.normalizeMathExpression('/usr/local/bin');
+        console.log(JSON.stringify({ r1, r2 }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert "frac" not in res["r1"], f"Date converted to fraction: {res['r1']}"
+        assert "frac" not in res["r2"], f"Path converted to fraction: {res['r2']}"
+
+    def test_normalization_is_idempotent(self):
+        """Running normalizeMathExpression twice must yield the exact same result."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const samples = [
+            'L(y, s) = max(0, 1 - y * s)',
+            'L(y, s) = (1 - y * s)^2',
+            'L(y, s) = log(1 + exp(-y * s))',
+            'L(y, s) = -y * log(s)',
+            'f(x) = 1 / (1 + e^{-x})',
+            '2 * x + 3 * y'
+        ];
+        const results = samples.map(s => {
+            const once = LearnAIMathRenderer.normalizeMathExpression(s);
+            const twice = LearnAIMathRenderer.normalizeMathExpression(once);
+            return { s, once, twice, match: once === twice };
+        });
+        console.log(JSON.stringify(results));
+        """
+        results = json.loads(run_node_eval(script))
+        for r in results:
+            assert r["match"], f"Idempotency failed for {r['s']}:\nOnce:  {r['once']}\nTwice: {r['twice']}"
