@@ -227,7 +227,8 @@ def generate_quiz(
     difficulty: Optional[str] = None,
     competing_topics: Optional[List[Any]] = None,
     disallowed_topics: Optional[List[str]] = None,
-    num_questions: int = 10
+    num_questions: int = 10,
+    allow_partial: bool = False
 ) -> Dict[str, Any]:
     """
     Multi-provider quiz generation with:
@@ -266,6 +267,7 @@ def generate_quiz(
     # ── Student context & historical queries (single connection reuse) ────────
     from services.database import get_connection
 
+    t_db_start = time.monotonic()
     conn = None
     try:
         conn = get_connection()
@@ -344,6 +346,12 @@ def generate_quiz(
                 conn.close()
             except Exception:
                 pass
+    t_db_context = time.monotonic() - t_db_start
+
+    t_llm_primary_total = 0.0
+    t_json_val_total = 0.0
+    t_replenishment_total = 0.0
+    t_novelty_repair_total = 0.0
     
     novelty_block = build_exclusion_prompt_block(
         history_fingerprints=all_fingerprints,
@@ -460,6 +468,7 @@ def generate_quiz(
                     extra_parts.append(adaptive_context)
                 full_prompt = base_prompt + ("\n\n" + "\n\n".join(extra_parts) if extra_parts else "")
 
+                t_p_start = time.perf_counter()
                 raw_text = provider.generate_quiz_raw(
                     course_code=course_code,
                     course_name=course_name,
@@ -468,6 +477,9 @@ def generate_quiz(
                     timeout_seconds=provider_timeout,
                     custom_prompt=full_prompt
                 )
+                t_llm_primary_total += (time.perf_counter() - t_p_start)
+
+                t_v_start = time.perf_counter()
                 data = extract_json_from_text(raw_text)
                 validated_quiz = validate_quiz_data(
                     data,
@@ -480,6 +492,7 @@ def generate_quiz(
                     competing_topics=competing_topics,
                     expected_count=num_questions
                 )
+                t_json_val_total += (time.perf_counter() - t_v_start)
 
                 # ── Bounded Replenishment for missing unique questions ─────────
                 current_unique = validated_quiz["questions"]
@@ -537,6 +550,7 @@ REQUIREMENTS:
     }}
   ]
 }}"""
+                        t_rep_start = time.perf_counter()
                         raw_rep = provider.generate_quiz_raw(
                             course_code=course_code,
                             course_name=course_name,
@@ -563,6 +577,7 @@ REQUIREMENTS:
                                 break
                             if not any(is_question_near_duplicate(ex_q, cand_q)[0] for ex_q in current_unique):
                                 current_unique.append(cand_q)
+                        t_replenishment_total += (time.perf_counter() - t_rep_start)
                         validated_quiz["questions"] = current_unique
                         logger.info(
                             f"[REPLENISHMENT SUCCESS round {rep_attempts}] provider={provider.name} total unique questions: {len(current_unique)}/{num_questions}"
@@ -588,7 +603,13 @@ REQUIREMENTS:
                             validated_quiz["questions"].append(sq)
 
                 if len(validated_quiz["questions"]) < num_questions:
-                    raise ValueError(f"Provider {provider.name} generated only {len(validated_quiz['questions'])}/{num_questions} questions strictly isolating '{topic_name}'.")
+                    if allow_partial:
+                        logger.info(
+                            f"[QUIZ GEN TOPIC ISOLATION] Provider {provider.name} generated {len(validated_quiz['questions'])} "
+                            f"verified topic-isolated questions for '{topic_name}' (returning without off-topic padding)."
+                        )
+                    else:
+                        raise ValueError(f"Provider {provider.name} generated only {len(validated_quiz['questions'])}/{num_questions} questions strictly isolating '{topic_name}'.")
 
                 # Slice strictly to requested question count
                 validated_quiz["questions"] = validated_quiz["questions"][:num_questions]
@@ -605,7 +626,7 @@ REQUIREMENTS:
                 text_dup_indices = novelty_result.get("text_duplicate_indices", [])
                 novel_count = novelty_result["novel_count"]
 
-                if novel_count > best_novelty_score and len(validated_quiz["questions"]) == num_questions:
+                if novel_count > best_novelty_score and (len(validated_quiz["questions"]) == num_questions or allow_partial):
                     best_quiz = validated_quiz
                     best_novelty_score = novel_count
 
@@ -803,6 +824,21 @@ REQUIREMENTS:
                 validated_quiz["novel_count"] = novel_count
 
                 total_duration = time.perf_counter() - start_time
+                timing_metrics = {
+                    "db_context_sec": round(t_db_context, 3),
+                    "llm_primary_sec": round(t_llm_primary_total, 3),
+                    "json_validation_sec": round(t_json_val_total, 3),
+                    "replenishment_sec": round(t_replenishment_total, 3),
+                    "novelty_repair_sec": round(t_novelty_repair_total, 3),
+                    "total_service_sec": round(total_duration, 3),
+                }
+                validated_quiz["timing_metrics"] = timing_metrics
+                logger.info(
+                    f"[STAGE TIMING] quiz_gen attempt_id={attempt_id} "
+                    f"db_context={t_db_context:.3f}s llm_primary={t_llm_primary_total:.3f}s "
+                    f"json_validation={t_json_val_total:.3f}s replenishment={t_replenishment_total:.3f}s "
+                    f"novelty_repair={t_novelty_repair_total:.3f}s total_service={total_duration:.3f}s"
+                )
                 logger.info(
                     f"[QUIZ GEN SUCCESS] provider={provider.name} course={course_code} "
                     f"topic='{topic_name}' attempt=#{attempt_number} questions={len(validated_quiz['questions'])} "

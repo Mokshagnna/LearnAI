@@ -1,6 +1,8 @@
 import os
 import time
+import random
 import logging
+import threading
 from typing import Optional, List
 from services.providers.base import (
     BaseAIProvider,
@@ -18,6 +20,9 @@ logger = logging.getLogger("learnai.providers.nvidia")
 class NvidiaProvider(BaseAIProvider):
     """NVIDIA Build AI Provider via OpenAI-compatible API."""
 
+    _client_cache: dict = {}
+    _client_lock: threading.Lock = threading.Lock()
+
     def __init__(self):
         self._name = "nvidia"
 
@@ -31,18 +36,24 @@ class NvidiaProvider(BaseAIProvider):
     def _get_client(self, timeout_sec: float, api_key: str):
         if not api_key:
             raise ProviderConfigError("NVIDIA_API_KEY is missing from environment.", category="MISSING_CREDENTIALS")
-        try:
-            from openai import OpenAI
-            # Ensure client timeout respects caller timeout_sec without exceeding it
-            effective_timeout = max(float(timeout_sec), 0.5)
-            return OpenAI(
-                base_url="https://integrate.api.nvidia.com/v1",
-                api_key=api_key,
-                timeout=effective_timeout,
-                max_retries=0
-            )
-        except ImportError as e:
-            raise ProviderConfigError("openai python package is not installed.", category="DEPENDENCY_MISSING") from e
+        with self._client_lock:
+            client = self._client_cache.get(api_key)
+            if client is None:
+                try:
+                    from openai import OpenAI
+                    # Persistent client connection reuse; per-request timeout passed in create()
+                    client = OpenAI(
+                        base_url="https://integrate.api.nvidia.com/v1",
+                        api_key=api_key,
+                        timeout=max(float(timeout_sec), 0.5),
+                        max_retries=0
+                    )
+                    self._client_cache[api_key] = client
+                except ImportError as e:
+                    raise ProviderConfigError("openai python package is not installed.", category="DEPENDENCY_MISSING") from e
+            else:
+                client.timeout = max(float(timeout_sec), 0.5)
+            return client
 
     def _is_auth_error(self, exc: Exception) -> bool:
         msg = str(exc).lower()
@@ -99,24 +110,36 @@ class NvidiaProvider(BaseAIProvider):
         status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
         if status_code == 429:
             return "RATE_LIMIT_429"
-        elif status_code == 503:
+        if status_code == 503:
             return "SERVICE_UNAVAILABLE_503"
-        elif status_code == 404:
+        if status_code == 404:
             return "MODEL_NOT_FOUND_404"
-        elif status_code == 400:
+        if status_code == 400:
             return "MALFORMED_REQUEST_400"
-        elif status_code in {500, 502, 504}:
+        if status_code in (500, 502, 504):
             return f"SERVER_ERROR_{status_code}"
 
-        msg = str(exc).lower()
-        if "429" in msg or "rate limit" in msg:
+        exc_name = type(exc).__name__
+        if "RateLimitError" in exc_name:
             return "RATE_LIMIT_429"
-        if "404" in msg or "model not found" in msg or "does not exist" in msg:
-            return "MODEL_NOT_FOUND_404"
+        if "InternalServerError" in exc_name:
+            return "SERVER_ERROR_500"
+        if "APITimeoutError" in exc_name or "Timeout" in exc_name:
+            return "CLIENT_TIMEOUT"
+        if "APIConnectionError" in exc_name or "Connection" in exc_name:
+            return "NETWORK_ERROR"
+
+        msg = str(exc).lower()
         if "400" in msg or "bad request" in msg:
             return "MALFORMED_REQUEST_400"
-        if any(t in msg for t in ["503", "502", "504", "unavailable"]):
+        if "rate limit" in msg or "429" in msg or "quota" in msg or "too many requests" in msg:
+            return "RATE_LIMIT_429"
+        if "model not found" in msg or "does not exist" in msg or "404" in msg:
+            return "MODEL_NOT_FOUND_404"
+        if "503" in msg or "service unavailable" in msg:
             return "SERVICE_UNAVAILABLE_503"
+        if "500" in msg or "internal server error" in msg:
+            return "SERVER_ERROR_500"
         if "timeout" in msg or "timed out" in msg:
             return "CLIENT_TIMEOUT"
         if "connection" in msg:
@@ -156,7 +179,7 @@ class NvidiaProvider(BaseAIProvider):
             client = self._get_client(time_left_for_key, api_key=key_value)
             key_error = None
 
-            for current_model in candidate_models:
+            for m_idx, current_model in enumerate(candidate_models):
                 time_left = timeout_seconds - (time.perf_counter() - overall_start)
                 if time_left < 2.5:
                     logger.warning(f"[NVIDIA] Budget exhausted ({time_left:.1f}s left). Skipping model={current_model}.")
@@ -224,6 +247,15 @@ class NvidiaProvider(BaseAIProvider):
                         f"failed with retryable error (duration={duration:.2f}s, category={cat}): {sanitize_error_text(e)}. "
                         f"Attempting fallback model..."
                     )
+
+                    # Bounded backoff/jitter for 429 and 503 if time budget allows
+                    is_rate_limit_or_unavailable = any(term in cat for term in ["RATE_LIMIT", "SERVICE_UNAVAILABLE", "SERVER_ERROR"])
+                    time_left_now = timeout_seconds - (time.perf_counter() - overall_start)
+                    if is_rate_limit_or_unavailable and time_left_now > 3.0:
+                        backoff = min(1.0, 0.2 * (2 ** m_idx)) + random.uniform(0.05, 0.15)
+                        if time_left_now > backoff + 2.0:
+                            logger.info(f"[NVIDIA BACKOFF] Retrying after {backoff:.2f}s backoff due to transient status (429/503)...")
+                            time.sleep(backoff)
                     continue
 
             # Check if recoverable error allows backup key attempt

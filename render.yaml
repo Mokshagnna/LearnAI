@@ -26,6 +26,10 @@ services:
       - key: NVIDIA_BACKUP_API_KEY
         sync: false
 
+      # Database connection pool sizing
+      - key: DB_POOL_MAX_SIZE
+        value: "10"
+
       # Provider orchestration & deadline settings
       - key: PROVIDER_ORDER
         value: groq,nvidia,gemini

@@ -324,7 +324,7 @@ class DatabaseConfig:
 
     @property
     def pool_max_size(self) -> int:
-        return int(os.getenv("DB_POOL_MAX_SIZE", "5"))
+        return int(os.getenv("DB_POOL_MAX_SIZE", "10"))
 
     @property
     def connect_timeout(self) -> float:

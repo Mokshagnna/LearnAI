@@ -1,6 +1,8 @@
 import os
 import time
+import random
 import logging
+import threading
 from typing import Optional, List
 from services.providers.base import (
     BaseAIProvider,
@@ -18,6 +20,9 @@ logger = logging.getLogger("learnai.providers.groq")
 class GroqProvider(BaseAIProvider):
     """Groq AI Provider for ultra-fast fallback and primary inference."""
 
+    _client_cache: dict = {}
+    _client_lock: threading.Lock = threading.Lock()
+
     def __init__(self):
         self._name = "groq"
 
@@ -31,11 +36,19 @@ class GroqProvider(BaseAIProvider):
     def _get_client(self, timeout_sec: float, api_key: str):
         if not api_key:
             raise ProviderConfigError("GROQ_API_KEY is missing from environment.", category="MISSING_CREDENTIALS")
-        try:
-            from groq import Groq
-            return Groq(api_key=api_key, timeout=max(timeout_sec, 2.0), max_retries=0)
-        except ImportError as e:
-            raise ProviderConfigError("groq python package is not installed.", category="DEPENDENCY_MISSING") from e
+        with self._client_lock:
+            client = self._client_cache.get(api_key)
+            if client is None:
+                try:
+                    from groq import Groq
+                    # Client connection reuse across requests; per-request timeout passed in create()
+                    client = Groq(api_key=api_key, timeout=max(float(timeout_sec), 0.5), max_retries=0)
+                    self._client_cache[api_key] = client
+                except ImportError as e:
+                    raise ProviderConfigError("groq python package is not installed.", category="DEPENDENCY_MISSING") from e
+            else:
+                client.timeout = max(float(timeout_sec), 0.5)
+            return client
 
     def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 3000) -> str:
         primary_key = os.getenv("GROQ_API_KEY", "")
@@ -67,7 +80,7 @@ class GroqProvider(BaseAIProvider):
             client = self._get_client(time_left_for_key, api_key=key_value)
             key_error = None
 
-            for current_model in candidate_models:
+            for m_idx, current_model in enumerate(candidate_models):
                 time_left = timeout_seconds - (time.perf_counter() - overall_start)
                 if time_left < 2.5:
                     break
@@ -85,6 +98,7 @@ class GroqProvider(BaseAIProvider):
                         ],
                         temperature=0.3,
                         max_tokens=max_tokens,
+                        timeout=time_left,
                         **extra_kwargs
                     )
                     duration = time.perf_counter() - call_start
@@ -112,6 +126,15 @@ class GroqProvider(BaseAIProvider):
                         f"[GROQ MODEL FALLBACK] key={key_label} model={current_model} "
                         f"failed (duration={duration:.2f}s): {sanitize_error_text(e)}. Attempting fallback model..."
                     )
+
+                    # Bounded backoff/jitter for 429 and 503 if time budget allows
+                    is_rate_limit_or_unavailable = any(term in msg for term in ["rate limit", "429", "503", "too many requests", "unavailable", "overloaded"])
+                    time_left_now = timeout_seconds - (time.perf_counter() - overall_start)
+                    if is_rate_limit_or_unavailable and time_left_now > 3.0:
+                        backoff = min(1.0, 0.2 * (2 ** m_idx)) + random.uniform(0.05, 0.15)
+                        if time_left_now > backoff + 2.0:
+                            logger.info(f"[GROQ BACKOFF] Retrying after {backoff:.2f}s backoff due to transient status (429/503)...")
+                            time.sleep(backoff)
                     continue
 
             # All models on this key exhausted — decide whether to try backup key

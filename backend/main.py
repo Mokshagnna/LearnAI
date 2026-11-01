@@ -139,6 +139,8 @@ import logging
 
 import time
 
+import hashlib
+
 from pydantic import BaseModel, Field
 
 
@@ -459,21 +461,33 @@ def create_auth_session(request: Request):
 
     if token:
 
-        is_valid, existing_student_id, err = verify_student_identity(token)
+        try:
 
-        if (is_valid or err == "Token expired") and existing_student_id:
+            token_h = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
 
-            new_token = sign_student_identity(existing_student_id)
+            from services.database import is_session_revoked
 
-            return {
+            is_valid, existing_student_id, err = verify_student_identity(token)
 
-                "student_id": existing_student_id,
+            if existing_student_id and not is_session_revoked(token_h, existing_student_id):
 
-                "token": new_token,
+                if is_valid or err == "Token expired":
 
-                "expires_at": int(time.time()) + DEFAULT_TOKEN_TTL_SECONDS
+                    new_token = sign_student_identity(existing_student_id)
 
-            }
+                    return {
+
+                        "student_id": existing_student_id,
+
+                        "token": new_token,
+
+                        "expires_at": int(time.time()) + DEFAULT_TOKEN_TTL_SECONDS
+
+                    }
+
+        except Exception as e:
+
+            logger.debug(f"Auth session token evaluation error: {e}")
 
 
 
@@ -521,17 +535,7 @@ def refresh_auth_session(request: Request):
 
 
 
-    is_valid, student_id, err = verify_student_identity(token)
-
-    if not is_valid:
-
-        if err == "Token expired":
-
-            raise HTTPException(status_code=401, detail="Authentication token expired. Please establish a new session.")
-
-        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
-
-
+    student_id = get_authenticated_student_id(request)
 
     new_token = sign_student_identity(student_id)
 
@@ -1030,6 +1034,8 @@ async def extract_topics_from_notes(
 
 def create_quiz(req: QuizRequest, request: Request):
 
+    t_endpoint_start = time.perf_counter()
+
     client_ip = get_client_ip(request)
 
     allowed, retry_after, _ = quiz_gen_limiter.check_rate_limit(client_ip)
@@ -1099,6 +1105,10 @@ def create_quiz(req: QuizRequest, request: Request):
         student_id = get_or_create_student(student_id)
 
 
+
+    t_auth_rate_limit = time.perf_counter() - t_endpoint_start
+
+    t_curriculum_start = time.perf_counter()
 
     metrics.record_quiz_request()
 
@@ -1469,6 +1479,8 @@ def create_quiz(req: QuizRequest, request: Request):
 
     focused_syllabus = "\n".join(focused_syllabus_lines)
 
+    t_curriculum = time.perf_counter() - t_curriculum_start
+
 
 
     try:
@@ -1583,6 +1595,8 @@ def create_quiz(req: QuizRequest, request: Request):
 
     auth_token = sign_student_identity(student_id)
 
+    t_persistence_start = time.perf_counter()
+
 
 
     try:
@@ -1638,6 +1652,22 @@ def create_quiz(req: QuizRequest, request: Request):
         raise HTTPException(status_code=500, detail="Failed to persist quiz session. Please try again.")
 
 
+
+    t_persistence = time.perf_counter() - t_persistence_start
+
+    t_endpoint_total = time.perf_counter() - t_endpoint_start
+
+    logger.info(
+
+        f"[STAGE TIMING] endpoint=/api/quiz/generate quiz_id={quiz_id} "
+
+        f"auth_rate_limit={t_auth_rate_limit:.3f}s curriculum={t_curriculum:.3f}s "
+
+        f"quiz_service={duration:.3f}s persistence={t_persistence:.3f}s "
+
+        f"total_endpoint={t_endpoint_total:.3f}s"
+
+    )
 
     logger.info(
 
@@ -1745,15 +1775,7 @@ def get_session(session_id: str, request: Request, student_id: str | None = None
 
     if token:
 
-        is_valid, auth_student_id, err = verify_student_identity(token)
-
-        if not is_valid:
-
-            if err == "Token expired":
-
-                raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
-
-            raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
+        auth_student_id = get_authenticated_student_id(request)
 
         if raw_session["student_id"] != auth_student_id:
 
@@ -1889,64 +1911,24 @@ def submit_quiz(req: SubmitRequest, request: Request):
 
     metrics.record_submission()
 
-
-
     raw_session = get_quiz_session(req.quiz_id, auto_expire=False)
-
     if not raw_session:
-
         raise HTTPException(status_code=404, detail="Quiz not found or expired.")
 
-
-
     if not req.student_id or not req.student_id.strip():
-
         raise HTTPException(status_code=400, detail="student_id is required to submit a quiz session.")
-
-
 
     clean_student_id = req.student_id.strip()
 
-
-
-    # Enforce ownership mismatch first
-
+    # Enforce ownership mismatch
     if raw_session["student_id"] != clean_student_id:
-
         raise HTTPException(status_code=403, detail="Access denied: quiz session belongs to another student.")
 
-
-
     # Extract and verify authentication token
-
-    token = get_token_from_request(request) or req.auth_token
-
-    if not token:
-
-        raise HTTPException(
-
-            status_code=401,
-
-            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
-
-        )
-
-
-
-    is_valid, auth_student_id, err = verify_student_identity(token)
-
-    if not is_valid:
-
-        if err == "Token expired":
-
-            raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
-
-        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
-
-
+    body_auth = f"Bearer {req.auth_token}" if getattr(req, "auth_token", None) else None
+    auth_student_id = get_authenticated_student_id(request, authorization=body_auth)
 
     if auth_student_id != clean_student_id:
-
         raise HTTPException(status_code=403, detail="Access denied: student_id does not match authenticated token.")
 
 
@@ -2031,31 +2013,7 @@ def get_history(student_id: str, request: Request, limit: int = 20):
 
 
 
-    token = get_token_from_request(request)
-
-    if not token:
-
-        raise HTTPException(
-
-            status_code=401,
-
-            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
-
-        )
-
-
-
-    is_valid, auth_student_id, err = verify_student_identity(token)
-
-    if not is_valid:
-
-        if err == "Token expired":
-
-            raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
-
-        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
-
-
+    auth_student_id = get_authenticated_student_id(request)
 
     if auth_student_id != clean_id:
 
@@ -2089,31 +2047,7 @@ def get_performance(student_id: str, request: Request, course_code: str | None =
 
 
 
-    token = get_token_from_request(request)
-
-    if not token:
-
-        raise HTTPException(
-
-            status_code=401,
-
-            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
-
-        )
-
-
-
-    is_valid, auth_student_id, err = verify_student_identity(token)
-
-    if not is_valid:
-
-        if err == "Token expired":
-
-            raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
-
-        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
-
-
+    auth_student_id = get_authenticated_student_id(request)
 
     if auth_student_id != clean_id:
 
@@ -2159,31 +2093,7 @@ def get_dashboard(student_id: str, request: Request, course_code: str | None = N
 
 
 
-    token = get_token_from_request(request)
-
-    if not token:
-
-        raise HTTPException(
-
-            status_code=401,
-
-            detail="Authentication token required. Header 'Authorization: Bearer <token>' is missing."
-
-        )
-
-
-
-    is_valid, auth_student_id, err = verify_student_identity(token)
-
-    if not is_valid:
-
-        if err == "Token expired":
-
-            raise HTTPException(status_code=401, detail="Authentication token expired. Please refresh your session.")
-
-        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {err}")
-
-
+    auth_student_id = get_authenticated_student_id(request)
 
     if auth_student_id != clean_id:
 

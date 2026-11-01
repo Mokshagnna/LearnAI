@@ -365,6 +365,37 @@ def extract_normalized_options(raw_options: Any) -> Optional[Dict[str, str]]:
     return options
 
 
+def is_contradictory_explanation(letter: str, correct_ans: str, explanation_text: str) -> bool:
+    """
+    Detect whether an option explanation contradicts the known truth value of the option:
+    - If letter != correct_ans (distractor), detects claims asserting it is the correct answer.
+    - If letter == correct_ans, detects claims asserting it is incorrect.
+    """
+    text = explanation_text.lower()
+    if letter != correct_ans:
+        positive_cues = [
+            "is correct", "is the correct", "is right", "is the right",
+            "correct answer", "correct option", "correct choice", "correctly describes",
+            "is the proper", "is accurate"
+        ]
+        negation_cues = [
+            "not correct", "not the correct", "incorrect", "wrong", "not right",
+            "not the right", "not accurate", "not the proper", "fails", "does not"
+        ]
+        has_positive = any(cue in text for cue in positive_cues)
+        has_negation = any(cue in text for cue in negation_cues)
+        if has_positive and not has_negation:
+            return True
+    else:
+        negative_cues = [
+            "is incorrect", "is not correct", "is wrong", "is not right",
+            "incorrect choice", "incorrect option", "incorrect answer"
+        ]
+        if any(cue in text for cue in negative_cues):
+            return True
+    return False
+
+
 def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optional[Dict[str, Any]]:
     """
     Validates a single multiple-choice question strictly:
@@ -433,15 +464,51 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
     raw_diff = str(raw_q.get("difficulty") or "").strip().capitalize()
     difficulty = raw_diff if raw_diff in {"Easy", "Medium", "Hard"} else None
 
+    # Guarantee complete and pedagogically sound option explanations for all 4 choices: A, B, C, D
+    complete_opt_expl: Dict[str, str] = {}
+    for letter in ["A", "B", "C", "D"]:
+        existing = option_explanations.get(letter, "").strip()
+        opt_val = options.get(letter, f"Option {letter}")
+
+        # Detect and flag contradictory explanations
+        if existing and is_contradictory_explanation(letter, correct_ans, existing):
+            logger.warning(
+                f"[PEDAGOGICAL CORRECTION] Contradictory explanation detected for option {letter} "
+                f"(correct={correct_ans}): '{existing}'. Replacing with pedagogically sound explanation."
+            )
+            existing = ""
+
+        # Detect unhelpful tautologies (e.g. "Option B is incorrect.")
+        if existing:
+            is_tautological = existing.lower() in {
+                f"option {letter.lower()} is incorrect.",
+                f"option {letter.lower()} is incorrect",
+                f"option {letter.lower()} is wrong.",
+                f"option {letter.lower()} is wrong",
+                "incorrect.", "incorrect", "wrong.", "wrong"
+            }
+            if is_tautological:
+                existing = ""
+
+        if existing:
+            complete_opt_expl[letter] = existing
+        elif letter == correct_ans:
+            complete_opt_expl[letter] = explanation or f"Option {letter} is the correct answer: it accurately reflects the principles of {concept}."
+        else:
+            complete_opt_expl[letter] = (
+                f"Option {letter} ('{opt_val}') is incorrect. In the study of {concept}, "
+                f"this option represents an alternative or common misconception that does not satisfy "
+                f"the problem criteria. Refer to Option {correct_ans} for the valid approach."
+            )
+
     candidate = {
         "question": q_text,
         "options": options,
         "correct_answer": correct_ans,
         "concept": concept,
-        "explanation": explanation
+        "explanation": explanation,
+        "option_explanations": complete_opt_expl
     }
-    if option_explanations:
-        candidate["option_explanations"] = option_explanations
     if difficulty:
         candidate["difficulty"] = difficulty
 

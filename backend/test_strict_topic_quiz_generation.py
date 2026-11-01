@@ -590,7 +590,8 @@ def test_bounded_replenishment_on_off_topic_questions():
             topic_name="Normal Forms Based",
             syllabus_context="Normalization concepts and functional dependencies",
             concepts=["1NF", "2NF", "3NF", "BCNF", "Functional Dependency"],
-            competing_topics=["SQL Data Definition and Data Types"]
+            competing_topics=["SQL Data Definition and Data Types"],
+            allow_partial=True
         )
 
     # Provider called twice: initial attempt + 1 replenishment round
@@ -686,7 +687,8 @@ def test_bounded_replenishment_stops_after_two_rounds():
             topic_name="Normal Forms Based",
             syllabus_context="Normalization concepts and functional dependencies",
             concepts=["1NF", "2NF", "3NF", "BCNF", "Functional Dependency"],
-            competing_topics=["SQL Data Definition and Data Types"]
+            competing_topics=["SQL Data Definition and Data Types"],
+            allow_partial=True
         )
 
     # 1 initial call + exactly 2 replenishment calls = 3 total calls

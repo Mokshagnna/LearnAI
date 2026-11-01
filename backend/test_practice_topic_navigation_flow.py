@@ -249,6 +249,7 @@ async function execute() {{
 execute()
   .then(result => {{
     console.log("__RESULT_JSON__" + JSON.stringify(result));
+    process.exit(0);
   }})
   .catch(err => {{
     console.error("__ERROR__", err);
@@ -261,7 +262,8 @@ execute()
         input=runner_script,
         capture_output=True,
         text=True,
-        encoding="utf-8"
+        encoding="utf-8",
+        timeout=15
     )
     if res.returncode != 0:
         raise RuntimeError(f"Node execution failed (code {res.returncode}):\n{res.stderr}\nOutput:\n{res.stdout}")
@@ -562,12 +564,36 @@ class TestBackendCurriculumAndGenerationIntegration:
         assert course["code"] == "22MT103"
         assert topic["name"] == "Adjoint of a Matrix"
 
-    def test_api_quiz_generate_integration_with_resolved_topic(self, isolated_client):
+    def test_api_quiz_generate_integration_with_resolved_topic(self, isolated_client, monkeypatch):
         """POST /api/quiz/generate successfully processes resolved course, topic, and topic_id."""
         client, db_file = isolated_client
         conn = get_connection(db_file)
         student_id = get_or_create_student("stud_practice_nav", conn=conn)
         conn.close()
+
+        def fake_generate_quiz(**kwargs):
+            topic = kwargs.get("topic_name") or kwargs.get("topic") or "McCulloch-Pitts Neuron"
+            return {
+                "course_code": kwargs.get("course_code", "22AM301"),
+                "topic": topic,
+                "topic_id": kwargs.get("topic_id", "22AM301-Q002"),
+                "questions": [
+                    {
+                        "question": "What is a McCulloch-Pitts neuron?",
+                        "options": {"A": "A binary threshold device", "B": "A continuous function", "C": "A recurrent loop", "D": "A transformer"},
+                        "correct_answer": "A",
+                        "explanation": "It is an early model of an artificial neuron with threshold logic.",
+                        "difficulty": "medium",
+                        "concept": "McCulloch-Pitts Neuron",
+                        "distractor_explanations": {
+                            "B": "Incorrect.",
+                            "C": "Incorrect.",
+                            "D": "Incorrect."
+                        }
+                    }
+                ]
+            }
+        monkeypatch.setattr("main.generate_quiz", fake_generate_quiz)
 
         payload = {
             "course_code": "22AM301",
