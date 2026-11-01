@@ -342,6 +342,117 @@ const LearnAIMathRenderer = {
     }
   },
 
+
+  // ── Plain-text math auto-detection ─────────────────────────────────────────
+  // Detects math written as plain text (no LaTeX delimiters) and wraps them in
+  // \(...\) so the existing tokenizer/renderer picks them up.
+  // Conservative: prefers false-negatives over corrupting prose/URLs/code.
+  convertPlainTextMath(text) {
+    if (!text || typeof text !== "string") return text;
+    if (text.length < 3) return text;
+
+    // Skip URLs, emails
+    if (/https?:\/\/|ftp:\/\/|www\.|@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(text)) return text;
+    // Skip backtick code
+    if (/`[^`]+`/.test(text)) return text;
+    // Skip already-delimited LaTeX
+    if (text.includes("\\") || /\\\(|\\\[|\$\$|\\begin\{/.test(text)) return text;
+    // Skip strings starting like version numbers
+    if (/^\d+\.\d+\.\d+/.test(text.trim())) return text;
+
+    const normalizeMath = (expr) => {
+      let s = expr;
+      s = s.replace(/\bsqrt\s*\(([^)]+)\)/g, "\\sqrt{$1}");
+      s = s.replace(/\b(sin|cos|tan|sinh|cosh|tanh|arcsin|arccos|arctan|log|ln|exp|det|tr)\b(?=\s*\()/g, "\\$1");
+      s = s.replace(/\b(sigmoid|softmax|relu|max|min|gcd|lcm|rank)\b(?=\s*\()/g, "\\operatorname{$1}");
+      s = s.replace(/\babs\s*\(([^)]+)\)/g, "\\left|$1\\right|");
+      s = s.replace(/(\w|[)\}])\^([a-zA-Z0-9\-+])(?!\{)/g, "$1^{$2}");
+      s = s.replace(/([a-zA-Z])_([a-zA-Z0-9])(?!\{)/g, "$1_{$2}");
+      s = s.replace(/(?<![<>!])<=(?![=])/g, "\\leq");
+      s = s.replace(/(?<![<>])>=(?![=])/g, "\\geq");
+      s = s.replace(/!=(?![=])/g, "\\neq");
+      s = s.replace(/(\b\d+|\([^)]+\))\s*\/\s*(\b\d+|\([^)]+\)|[a-zA-Z]+)/g, "\\frac{$1}{$2}");
+      const greekMap = {
+        alpha:"\\alpha",beta:"\\beta",gamma:"\\gamma",delta:"\\delta",
+        epsilon:"\\epsilon",zeta:"\\zeta",eta:"\\eta",theta:"\\theta",
+        iota:"\\iota",kappa:"\\kappa",lambda:"\\lambda",mu:"\\mu",
+        nu:"\\nu",xi:"\\xi",rho:"\\rho",sigma:"\\sigma",tau:"\\tau",
+        upsilon:"\\upsilon",phi:"\\phi",chi:"\\chi",psi:"\\psi",
+        omega:"\\omega",Alpha:"\\Alpha",Beta:"\\Beta",Gamma:"\\Gamma",
+        Delta:"\\Delta",Epsilon:"\\Epsilon",Theta:"\\Theta",
+        Lambda:"\\Lambda",Mu:"\\Mu",Pi:"\\Pi",Sigma:"\\Sigma",
+        Phi:"\\Phi",Psi:"\\Psi",Omega:"\\Omega"
+      };
+      s = s.replace(/\b(alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Alpha|Beta|Gamma|Delta|Epsilon|Theta|Lambda|Mu|Pi|Sigma|Phi|Psi|Omega)\b/g,
+        (m) => greekMap[m] || m);
+      return s;
+    };
+
+    const displayPatterns = [
+      /^[a-zA-Z_][a-zA-Z_0-9]*\([a-zA-Z_0-9, ]*\)\s*=\s*.+$/,
+      /^P\([^)]+\)\s*=\s*.+$/,
+      /^[a-zA-Z]\s*=\s*[^a-zA-Z\s]{2,}.+$/
+    ];
+    const trimmed = text.trim();
+    const isFullDisplayExpr = displayPatterns.some(p => p.test(trimmed));
+    if (isFullDisplayExpr && !this._looksLikeProse(trimmed)) {
+      return "\\(" + normalizeMath(trimmed) + "\\)";
+    }
+
+    const inlinePatterns = [
+      /\b(?:sin|cos|tan|sinh|cosh|tanh|arcsin|arccos|arctan|log|ln|exp|sqrt|abs|sigmoid|softmax|relu|max|min|gcd|lcm|det|tr|rank)\s*\([^)]{1,60}\)/g,
+      /[a-zA-Z0-9)]\^[\{(]?[a-zA-Z0-9\-+][a-zA-Z0-9\-+{}() ]*[\})]?/g,
+      /[a-zA-Z][_][{]?[a-zA-Z0-9+\-][a-zA-Z0-9+\-{}]*[}]?/g,
+      /(?<![a-zA-Z]{3})(?:\d+|[a-zA-Z](?:\^\d+)?)\s*\/\s*(?:\d+|[a-zA-Z](?:\^\d+)?)(?![a-zA-Z]{2})/g,
+      /\b(?:alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Alpha|Beta|Gamma|Delta|Epsilon|Theta|Lambda|Mu|Pi|Sigma|Phi|Psi|Omega)\b/g,
+      /\bO\([^)]{1,30}\)/g
+    ];
+
+    const matched = [];
+    for (const pattern of inlinePatterns) {
+      const re = new RegExp(pattern.source, "g");
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const start = m.index;
+        const end = m.index + m[0].length;
+        if (matched.some(r => start < r.end && end > r.start)) continue;
+        if (start > 0 && text[start - 1] === "$") continue;
+        matched.push({ start, end, content: m[0] });
+      }
+    }
+
+    if (matched.length === 0) return text;
+    matched.sort((a, b) => a.start - b.start);
+
+    let out = "";
+    let cursor = 0;
+    for (const seg of matched) {
+      out += text.slice(cursor, seg.start);
+      out += "\\(" + normalizeMath(seg.content) + "\\)";
+      cursor = seg.end;
+    }
+    out += text.slice(cursor);
+    return out;
+  },
+
+  _looksLikeProse(text) {
+    const words = text.split(/\s+/).filter(w => /^[a-zA-Z]{3,}$/.test(w));
+    const mathChars = (text.match(/[+\-*/^_=<>|{}()\\]/g) || []).length;
+    return words.length > 4 && mathChars < 3;
+  },
+
+  _hasPlainTextMath(text) {
+    if (!text || text.length < 3) return false;
+    return (
+      /\bO\([^)]{1,30}\)/.test(text) ||
+      /\b(?:sin|cos|tan|log|ln|exp|sqrt|sigmoid|softmax|relu)\s*\(/.test(text) ||
+      /[a-zA-Z0-9)]\^[{(]?[a-zA-Z0-9\-+]/.test(text) ||
+      /[a-zA-Z]_[{]?[a-zA-Z0-9]/.test(text) ||
+      /\b(?:alpha|beta|gamma|delta|theta|lambda|sigma|omega|mu|pi)\b/.test(text) ||
+      /(?:\d+|\w)\s*\/\s*(?:\d+|\w)(?![a-zA-Z]{2})/.test(text)
+    );
+  },
+
   typeset(rootEl) {
     if (!rootEl) return;
     const k = (typeof katex !== "undefined" ? katex : (typeof window !== "undefined" && window.katex ? window.katex : null));
@@ -356,7 +467,8 @@ const LearnAIMathRenderer = {
     const walk = (node) => {
       if (!node) return;
       if (node.nodeType === 3) {
-        if (node.textContent && (node.textContent.includes("$") || node.textContent.includes("\\"))) {
+        const tc = node.textContent || "";
+        if (tc && (tc.includes("$") || tc.includes("\\") || this._hasPlainTextMath(tc))) {
           textNodes.push(node);
         }
         return;
@@ -376,7 +488,9 @@ const LearnAIMathRenderer = {
 
     for (const textNode of textNodes) {
       if (!textNode.parentNode) continue;
-      const text = textNode.textContent;
+      const rawText = textNode.textContent;
+      // Apply plain-text math conversion first, then tokenize
+      const text = this.convertPlainTextMath(rawText);
       const tokens = this.tokenize(text);
       const hasMathToken = tokens.some(t => t.type === "math");
       if (!hasMathToken) continue;
