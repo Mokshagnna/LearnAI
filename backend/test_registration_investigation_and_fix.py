@@ -328,3 +328,31 @@ class TestRegistrationInvestigationAndFix:
             assert acc_row[1] == email.lower()
         finally:
             conn.close()
+
+    def test_8_migration_004_mysql_tidb_compatibility(self):
+        """8. Verifies migration 004 has no BLOB/TEXT/JSON defaults and is TiDB/MySQL compliant."""
+        import re
+        mdir = get_migrations_dir()
+        m004_file = mdir / "004_topic_evidence_and_coverage.sql"
+        assert m004_file.is_file()
+        content = m004_file.read_text(encoding="utf-8")
+        stmts = split_sql_statements(content)
+        assert len(stmts) == 1
+        stmt = stmts[0].upper()
+
+        # Guard against MySQL Error 1101: BLOB/TEXT/JSON column can't have a default value
+        bad_defaults = re.findall(r"\b(TEXT|BLOB|JSON|MEDIUMTEXT|LONGTEXT)\b.*?\bDEFAULT\b", stmt)
+        assert len(bad_defaults) == 0, f"Found incompatible TEXT/BLOB/JSON default: {bad_defaults}"
+
+        assert "ADD COLUMN TOPIC_ALIASES TEXT" in stmt
+        assert "DEFAULT '[]'" not in stmt
+        assert "COVERAGE_STATUS VARCHAR(50) NOT NULL DEFAULT 'NEEDS_REVIEW'" in stmt
+        assert "ADD COLUMN EVIDENCE TEXT" in stmt
+
+        # Check rollback script syntax
+        rb_file = mdir / "004_topic_evidence_and_coverage.rollback.sql"
+        assert rb_file.is_file()
+        rb_content = rb_file.read_text(encoding="utf-8")
+        rb_stmts = split_sql_statements(rb_content)
+        assert len(rb_stmts) == 1
+        assert "DROP COLUMN TOPIC_ALIASES" in rb_stmts[0].upper()

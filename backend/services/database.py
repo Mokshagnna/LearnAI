@@ -482,7 +482,7 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
             topic_id TEXT NOT NULL,
             topic_name TEXT NOT NULL,
             original_topic_title TEXT,
-            topic_aliases TEXT DEFAULT '[]',
+            topic_aliases TEXT,
             coverage_status TEXT NOT NULL DEFAULT 'needs_review',
             evidence TEXT DEFAULT '[]',
             source_location TEXT,
@@ -501,7 +501,7 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     # Idempotent schema migration for existing SQLite databases.
     for _col, _ddl in (
         ("original_topic_title", "TEXT"),
-        ("topic_aliases", "TEXT DEFAULT '[]'"),
+        ("topic_aliases", "TEXT"),
         ("coverage_status", "TEXT NOT NULL DEFAULT 'needs_review'"),
         ("evidence", "TEXT DEFAULT '[]'"),
         ("source_location", "TEXT"),
