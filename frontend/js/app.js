@@ -433,6 +433,9 @@ const LearnAIMathRenderer = {
 
     // Pre-normalize unicode superscripts
     s = this.normalizeSuperscripts(s);
+    // Pre-normalize exponent parentheses: ^(expr) -> ^{expr} and ^-x -> ^{-x}
+    s = s.replace(/\^\(([^()]+)\)/g, '^{$1}');
+    s = s.replace(/\^-\s*([a-zA-Z0-9]+)/g, '^{-$1}');
 
     // Helper: Find matching closing parenthesis, bracket, or brace
     function findMatching(str, openIdx) {

@@ -1079,3 +1079,118 @@ class TestHuberLossAndMixedProseRegression:
         res = json.loads(run_node_eval(script))
         assert res["childCount"] > 1, f"DOM text node was not split/wrapped: {res['childCount']} children"
         assert res["hasKatexSpan"], "DOM did not receive rendered KaTeX spans"
+
+
+class TestFinalMathCasesAuditRegression:
+    r"""Final verification gate: Tests A through H from user specification."""
+
+    def test_case_a_sigmoid_equation(self):
+        r"""Test A: Sigmoid f(x) = 1 / (1 + e^(-x)) renders as \frac{1}{1+e^{-x}}."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "f(x) = 1 / (1 + e^(-x))";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert r"\frac{1}{1+e^{-x}}" in res["converted"], f"Sigmoid equation was not formatted with frac: {res['converted']}"
+
+    def test_case_b_hinge_loss_equation(self):
+        r"""Test B: Hinge loss L(y, s) = max(0, 1 - y * s) renders with max and product."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "L(y, s) = max(0, 1 - y * s)";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert r"\max" in res["converted"] and r"1-ys" in res["converted"], f"Hinge loss not formatted correctly: {res['converted']}"
+
+    def test_case_c_huber_loss_inline_preserves_prose(self):
+        r"""Test C: Huber loss option with prose and math expressions."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "It behaves as 0.5 * e² for small errors |e| <= delta, and transitions to delta * (|e| - 0.5 * delta) for large errors |e| > delta.";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted }));
+        """
+        res = json.loads(run_node_eval(script))
+        c = res["converted"]
+        assert "It behaves as " in c and "for small errors " in c and "for large errors " in c
+        assert r"\frac{1}{2}e^{2}" in c
+        assert r"\left|e\right| \leq \delta" in c
+        assert r"\left|e\right| > \delta" in c
+
+    def test_case_d_piecewise_huber_loss_cases(self):
+        r"""Test D: Piecewise Huber loss renders as LaTeX cases environment."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "L_delta(e) = 0.5 * e^2 if |e| <= delta; delta * (|e| - 0.5 * delta) if |e| > delta";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert r"\begin{cases}" in res["converted"] and r"\end{cases}" in res["converted"]
+
+    def test_case_e_logistic_loss_brackets_and_logs(self):
+        r"""Test E: Logistic loss L(y, p) = -[y * log(p) + (1-y) * log(1-p)]."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "L(y, p) = -[y * log(p) + (1-y) * log(1-p)]";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted }));
+        """
+        res = json.loads(run_node_eval(script))
+        c = res["converted"]
+        assert r"\log" in c
+        assert r"-[y\log(p)+(1-y)\log(1-p)]" in c
+
+    def test_case_f_mixed_prose_and_equations(self):
+        r"""Test F: Mixed prose and equations."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "When x > 0, the output is f(x) = x^2 + 2 * x + 1, while x <= 0 gives f(x) = 0.";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted }));
+        """
+        res = json.loads(run_node_eval(script))
+        c = res["converted"]
+        assert "When " in c and ", the output is " in c and ", while " in c and " gives " in c
+        assert r"x > 0" in c
+        assert r"f(x)=x^2+2x+1" in c
+        assert r"x \leq 0" in c
+        assert r"f(x)=0" in c
+
+    def test_case_g_fraction_parentheses(self):
+        r"""Test G: Fractions and nested expressions z = (a + b) / (c + d)."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const input = "z = (a + b) / (c + d)";
+        const converted = LearnAIMathRenderer.convertPlainTextMath(input);
+        console.log(JSON.stringify({ converted }));
+        """
+        res = json.loads(run_node_eval(script))
+        assert r"z=\frac{a+b}{c+d}" in res["converted"]
+
+    def test_case_h_prose_protection_suite(self):
+        r"""Test H: Prose protection across URLs, versions, currency, dates, paths, code, and sentences."""
+        script = """
+        const { LearnAIMathRenderer } = require('./frontend/js/app.js');
+        const samples = [
+            "The algorithm uses a and b as input values.",
+            "Visit https://example.com for documentation.",
+            "Version 3.14.1 is supported.",
+            "$50 is the registration fee.",
+            "The deadline is 12/25/2026.",
+            "/usr/local/bin/python",
+            "Evaluate `x * y` in the shell."
+        ];
+        const results = samples.map(s => {
+            const r = LearnAIMathRenderer.convertPlainTextMath(s);
+            return { s, r, unchanged: r === s };
+        });
+        console.log(JSON.stringify(results));
+        """
+        res = json.loads(run_node_eval(script))
+        for item in res:
+            assert item["unchanged"], f"Prose was corrupted: input={item['s']!r}, output={item['r']!r}"
