@@ -144,6 +144,109 @@ def clean_topic_display_name(raw_name: str) -> str:
     return cleaned
 
 
+GENERIC_PLACEHOLDER_NAMES = {
+    "Foundations and Applications",
+    "Core Data Structures",
+    "Model Training and Regularization",
+    "Overview and Architecture",
+    "Data Structures",
+    "Control Flow",
+    "Algorithm Design",
+    "Linear Algebra Concepts",
+    "Probability and Statistics",
+}
+
+
+def is_legitimate_course_topic(name: str, course_code: str, course_name: str) -> bool:
+    """
+    Checks if a topic name that happens to match a generic placeholder
+    is actually legitimate and meaningful for the specific course.
+    For example: 'Model Training and Regularization' is legitimate for Deep Learning (22AM301),
+    'Linear Algebra Concepts' is legitimate for 22MT103,
+    'Data Structures' is legitimate for Data Structures courses (22CS201),
+    'Probability and Statistics' is legitimate for probability/statistics courses.
+    """
+    c_lower = (course_name or "").lower()
+    code_upper = (course_code or "").upper()
+    if name == "Linear Algebra Concepts" and code_upper == "22MT103":
+        return True
+    if name == "Probability and Statistics" and ("probability" in c_lower or "statistics" in c_lower):
+        return True
+    if name == "Model Training and Regularization" and ("deep learning" in c_lower or "machine learning" in c_lower):
+        return True
+    if name in ("Data Structures", "Core Data Structures") and "data structures" in c_lower:
+        return True
+    if name == "Algorithm Design" and ("algorithm" in c_lower or "artificial intelligence" in c_lower):
+        return True
+    return False
+
+
+def clean_ocr_concept_text(text: str) -> str:
+    """Strips OCR noise, hours, and section markers from concept strings."""
+    if not text:
+        return ""
+    text = str(text).strip()
+    text = re.sub(r'[\ufffd\u2013\u2014]', '-', text)
+    text = re.sub(r'\b\d+L\+\d+T\+\d+P=\d+\s*Hours\b', '', text, flags=re.I)
+    text = re.sub(r'\b\d+\s*Hours\b', '', text, flags=re.I)
+    text = re.sub(r'^(?:Module|Unit|UNIT)\s*[-–—:]*\s*\d+\s*(?:[-–—:]*\s*(?:Unit|UNIT)\s*[-–—:]*\s*\d+)?\s*[-–—:.]*\s*', '', text, flags=re.I)
+    text = re.sub(r'^(?:Module|Unit|UNIT)\s+[IVXLCDM]+\s*[-–—:.]*\s*', '', text, flags=re.I)
+    text = re.sub(r'^\s*99\s+', '', text)
+    text = re.sub(r'^[•\s\-:;]+', '', text)
+    text = re.sub(r'[\s,;:.–—\-•\u2026?]+$', '', text)
+    return text.strip()
+
+
+def resolve_topic_display_name(
+    raw_name: str,
+    concepts: List[str],
+    parent_topic: str,
+    course_code: str,
+    course_name: str
+) -> str:
+    """
+    Resolves the authentic syllabus display name for a topic.
+    If the name is a generic placeholder (or empty) and illegitimate for the course,
+    it derives a precise, syllabus-aligned title from the topic's concepts or parent topic.
+    """
+    cleaned = clean_topic_display_name(raw_name)
+
+    # If the name is already specific and valid, return it
+    if cleaned and (cleaned not in GENERIC_PLACEHOLDER_NAMES or is_legitimate_course_topic(cleaned, course_code, course_name)):
+        return cleaned
+
+    # Otherwise synthesize from concepts
+    valid_concepts = [clean_ocr_concept_text(c) for c in (concepts or []) if clean_ocr_concept_text(c)]
+    if valid_concepts:
+        c1 = valid_concepts[0]
+        # If concept has a colon like "Bit-fields Files: Introduction to files", extract the specific topic part
+        if ":" in c1:
+            prefix, suffix = c1.split(":", 1)
+            c1 = suffix.strip() if len(suffix.strip()) > 3 else prefix.strip()
+
+        # Combine first two concepts if both are short and informative
+        if len(valid_concepts) > 1 and len(c1) < 28:
+            c2 = valid_concepts[1]
+            if ":" in c2:
+                _, suffix2 = c2.split(":", 1)
+                c2 = suffix2.strip() if len(suffix2.strip()) > 3 else c2.strip()
+            if len(c2) < 28 and c2.lower() != c1.lower():
+                combined = f"{c1} & {c2}"
+                if len(combined) <= 60:
+                    return to_title_case(combined)
+
+        if len(c1) <= 65:
+            return to_title_case(c1)
+
+    # Fallback to parent_topic if meaningful and not just the course name
+    if parent_topic:
+        clean_parent = clean_topic_display_name(parent_topic)
+        if clean_parent and clean_parent.lower() != course_name.lower():
+            return clean_parent
+
+    return cleaned or clean_topic_display_name(raw_name) or str(raw_name).strip()
+
+
 def _norm_topic_key(name: str) -> str:
     """Normalized comparison key for a topic/concept name."""
     if not name:
@@ -184,7 +287,6 @@ def normalize_topic_entry(
     """
     t_id = raw_topic.get("id") or f"{course_code}-t{index + 1}"
     raw_name = raw_topic.get("name") or f"Topic {index + 1}"
-    cleaned_name = clean_topic_display_name(raw_name) or str(raw_name).strip()
     module = raw_topic.get("module")
     unit = raw_topic.get("unit")
 
@@ -193,7 +295,7 @@ def normalize_topic_entry(
         raw_topic.get("parent_topic")
         or raw_topic.get("source_topic_name")
         or raw_topic.get("parent_section")
-        or (cleaned_name if not is_quiz_topic else "")
+        or (str(raw_name).strip() if not is_quiz_topic else "")
     )
     parent_section = parent_topic
 
@@ -213,9 +315,21 @@ def normalize_topic_entry(
         or syllabus_context
     )
 
+    resolved_name = raw_topic.get("name")
+    if not resolved_name or (resolved_name in GENERIC_PLACEHOLDER_NAMES and not is_legitimate_course_topic(resolved_name, course_code, course_name)):
+        resolved_name = resolve_topic_display_name(
+            raw_name=raw_name,
+            concepts=concepts,
+            parent_topic=parent_topic,
+            course_code=course_code,
+            course_name=course_name
+        )
+    else:
+        resolved_name = clean_topic_display_name(resolved_name) or str(resolved_name).strip()
+
     return {
         "id": str(t_id),
-        "name": cleaned_name,
+        "name": resolved_name,
         "raw_name": str(raw_name).strip(),
         "course_code": course_code,
         "course_name": course_name,
@@ -270,8 +384,30 @@ class CurriculumService:
 
             def add_selectable_topic(t_dict: Dict[str, Any]):
                 t_name = t_dict.get("name", "").strip()
-                if not t_name or t_name.lower() in seen_names:
+                if not t_name:
                     return
+                if t_name.lower() in seen_names:
+                    parent = t_dict.get("parent_topic") or t_dict.get("parent_section") or ""
+                    unit = t_dict.get("unit")
+                    clean_p = clean_topic_display_name(parent) if parent else ""
+                    candidate = ""
+                    if clean_p and clean_p.lower() not in t_name.lower() and clean_p.lower() != name.lower():
+                        candidate = f"{t_name} ({clean_p})"
+                    elif unit is not None:
+                        candidate = f"{t_name} (Unit {unit})"
+                    else:
+                        candidate = f"{t_name} (Part {len(selectable_topics) + 1})"
+
+                    if candidate and candidate.lower() not in seen_names:
+                        t_name = candidate
+                        t_dict["name"] = candidate
+                    else:
+                        disambiguated = f"{t_name} [{t_dict.get('id', '')}]"
+                        if disambiguated.lower() not in seen_names:
+                            t_name = disambiguated
+                            t_dict["name"] = disambiguated
+                        else:
+                            return
                 seen_names.add(t_name.lower())
                 selectable_topics.append(t_dict)
 
@@ -448,12 +584,27 @@ class CurriculumService:
                     if not isinstance(item, dict) or not item.get("name"):
                         continue
                     raw_name = str(item.get("name", "")).strip()
-                    cleaned_name = clean_topic_display_name(raw_name)
+                    parent_topic = item.get("parent_topic") or item.get("source_topic_name") or item.get("parent_section") or ""
+                    item_concepts = item.get("concepts", [])
+                    if isinstance(item_concepts, str):
+                        item_concepts = [item_concepts]
+                    elif not isinstance(item_concepts, list):
+                        item_concepts = []
+
+                    cleaned_name = resolve_topic_display_name(
+                        raw_name=raw_name,
+                        concepts=item_concepts,
+                        parent_topic=parent_topic,
+                        course_code=code,
+                        course_name=name
+                    )
                     if not cleaned_name:
                         continue
 
+                    is_generic = raw_name in GENERIC_PLACEHOLDER_NAMES and not is_legitimate_course_topic(raw_name, code, name)
+
                     # Check if compound topic like "First Order Differential Equations & Second Order Differential Equations"
-                    if " & " in cleaned_name and ("Differential Equations" in cleaned_name or len(cleaned_name) > 30):
+                    if not is_generic and " & " in cleaned_name and ("Differential Equations" in cleaned_name or len(cleaned_name) > 30):
                         parts = [clean_topic_display_name(p) for p in cleaned_name.split(" & ")]
                         # Give each part only the concepts that belong to it so sibling parts
                         # (e.g. LSTM / GRU / Text Classification) stay distinguishable.
@@ -461,7 +612,7 @@ class CurriculumService:
                             p: _concepts_for_part(item.get("concepts", []), p) for p in parts
                         }
                         for p_idx, part in enumerate(parts):
-                            if not part or part.lower() in seen_names:
+                            if not part:
                                 continue
                             t_norm = normalize_topic_entry(
                                 raw_topic={
@@ -550,7 +701,7 @@ class CurriculumService:
         # 1. Lookup by explicit topic_id
         if topic_id:
             for t in topics:
-                if t.get("id") == topic_id:
+                if t.get("id") == topic_id or (topic_id and t.get("id", "").startswith(f"{topic_id}-")):
                     return course, t
 
         clean_target = (topic_name or "").strip().lower()
@@ -573,13 +724,19 @@ class CurriculumService:
                 if raw_n == clean_target:
                     return course, t
 
-            # 5. Lookup by substring match
+            # 5. Lookup by concepts
+            for t in topics:
+                concepts = [c.lower() for c in t.get("concepts", []) if c]
+                if any(clean_target == c or clean_target in c or c in clean_target for c in concepts):
+                    return course, t
+
+            # 6. Lookup by substring match
             for t in topics:
                 name_lower = t["name"].strip().lower()
                 if clean_target in name_lower or name_lower in clean_target:
                     return course, t
 
-            # 6. Lookup by parent_topic match
+            # 7. Lookup by parent_topic match
             for t in topics:
                 parent = (t.get("parent_topic") or "").strip().lower()
                 if clean_target == parent or clean_target in parent:

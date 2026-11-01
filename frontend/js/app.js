@@ -912,6 +912,8 @@ function populateTopicDropdown(courseCode) {
     topicSelect.disabled = true;
     topicSelect.innerHTML = '<option value="">Select a course first</option>';
     topicSelect.value = "";
+    activeTopicName = "";
+    activeTopicId = "";
     return;
   }
 
@@ -998,46 +1000,87 @@ function populateTopicDropdown(courseCode) {
     }
   }
 
-  // 5. Helper to create and append optgroup only if it has options
-  const appendOptGroup = (label, topicList) => {
-    if (!topicList || topicList.length === 0) return;
-    const og = document.createElement("optgroup");
-    og.label = label;
-    for (const topic of topicList) {
-      const name = String(topic.name).trim();
-      const rawKey = name.toLowerCase();
-      const normKey = rawKey.replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim();
-      const idKey = topic.id ? String(topic.id).trim().toLowerCase() : "";
-      const coverage = (coverageMap.get(rawKey) || coverageMap.get(normKey) || (idKey ? coverageMap.get(idKey) : "") || "not_found").toLowerCase();
+  // 5. Helper to create standard <option> element
+  const createTopicOption = (topic) => {
+    const name = String(topic.name).trim();
+    const rawKey = name.toLowerCase();
+    const normKey = rawKey.replace(/[\-_\:\(\)\[\]\.,;]+/g, " ").replace(/\s+/g, " ").trim();
+    const idKey = topic.id ? String(topic.id).trim().toLowerCase() : "";
+    const coverage = (coverageMap.get(rawKey) || coverageMap.get(normKey) || (idKey ? coverageMap.get(idKey) : "") || "not_found").toLowerCase();
 
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      option.dataset.topicId = topic.id || "";
-      option.dataset.topicName = name;
-      option.dataset.parentTopic = topic.parent_topic || topic.parent_section || topic.source_topic_name || "";
-      option.dataset.module = (topic.module !== undefined && topic.module !== null) ? topic.module : "";
-      option.dataset.unit = (topic.unit !== undefined && topic.unit !== null) ? topic.unit : "";
-      option.dataset.coverage = coverage;
-      og.appendChild(option);
-    }
-    if (topicList.length > 0) {
-      topicSelect.appendChild(og);
-    }
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    option.dataset.topicId = topic.id || "";
+    option.dataset.topicName = name;
+    option.dataset.parentTopic = topic.parent_topic || topic.parent_section || topic.source_topic_name || "";
+    option.dataset.module = (topic.module !== undefined && topic.module !== null) ? topic.module : "";
+    option.dataset.unit = (topic.unit !== undefined && topic.unit !== null) ? topic.unit : "";
+    option.dataset.coverage = coverage;
+    return option;
   };
 
-  // 6. Append optgroups in priority order (only non-empty optgroups get added!)
-  appendOptGroup("Topics found in your notes", covered);
-  appendOptGroup("Partially covered topics", partial);
-  appendOptGroup("Other syllabus topics (general practice)", other);
+  // 6. Only render optgroup category headings when notes are uploaded with covered/partial matches!
+  const hasNotesGrouping = (covered.length > 0 || partial.length > 0);
+
+  if (hasNotesGrouping) {
+    const appendOptGroup = (label, topicList) => {
+      if (!topicList || topicList.length === 0) return;
+      const og = document.createElement("optgroup");
+      og.label = label;
+      for (const topic of topicList) {
+        og.appendChild(createTopicOption(topic));
+      }
+      topicSelect.appendChild(og);
+    };
+
+    appendOptGroup("Topics found in your notes", covered);
+    appendOptGroup("Partially covered topics", partial);
+    appendOptGroup("Other syllabus topics (general practice)", other);
+  } else {
+    // When no notes are uploaded for the selected course, remove the heading and display topics cleanly under <select>
+    for (const topic of other) {
+      topicSelect.appendChild(createTopicOption(topic));
+    }
+  }
 
   topicSelect.disabled = false;
   topicSelect.value = "";
 }
 
 $("course").addEventListener("change", () => {
-  populateTopicDropdown($("course").value);
+  const selectedCourseCode = $("course").value;
+  if (selectedCourseCode !== activeCourseCode) {
+    activeCourseCode = selectedCourseCode;
+    activeTopicName = "";
+    activeTopicId = "";
+    if (currentQuiz && currentQuiz.course_code !== selectedCourseCode) {
+      currentQuiz = null;
+      currentIndex = 0;
+      answers = [];
+    }
+    const topicSelect = $("topic");
+    if (topicSelect) {
+      topicSelect.value = "";
+    }
+  }
+  if ($("setupMsg")) {
+    $("setupMsg").innerHTML = "";
+  }
+  populateTopicDropdown(selectedCourseCode);
 });
+
+if ($("topic")) {
+  $("topic").addEventListener("change", () => {
+    const topicSelect = $("topic");
+    const selectedOption = topicSelect.selectedOptions ? topicSelect.selectedOptions[0] : null;
+    activeTopicName = topicSelect.value || "";
+    activeTopicId = selectedOption?.dataset?.topicId || "";
+    if ($("setupMsg")) {
+      $("setupMsg").innerHTML = "";
+    }
+  });
+}
 
 // ── Navigation Buttons ───────────────────────────────────────────────────────
 $("generateBtn").addEventListener("click", () => {
@@ -1048,7 +1091,16 @@ $("generateBtn").addEventListener("click", () => {
   const topicId = selectedOption?.dataset?.topicId || "";
   const coverage = (selectedOption?.dataset?.coverage || "").toLowerCase();
 
-  if (!courseCode || !topic) {
+  const invalidTopicLabels = new Set([
+    "",
+    "Select a topic",
+    "Select a course first",
+    "Topics found in your notes",
+    "Partially covered topics",
+    "Other syllabus topics (general practice)"
+  ]);
+
+  if (!courseCode || !topic || invalidTopicLabels.has(topic.trim()) || (selectedOption && selectedOption.disabled)) {
     $("setupMsg").innerHTML = '<span class="error-msg">Please select both course and topic.</span>';
     return;
   }
