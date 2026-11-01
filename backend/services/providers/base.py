@@ -35,15 +35,22 @@ def get_quiz_prompt(
     syllabus_context: str,
     difficulty_dist: Optional[Dict[str, int]] = None,
     concepts: Optional[List[str]] = None,
-    disallowed_topics: Optional[List[str]] = None
+    disallowed_topics: Optional[List[str]] = None,
+    num_questions: Optional[int] = None
 ) -> str:
     """Common standardized prompt for all AI providers with strict topic grounding and anti-duplication directives."""
     if not difficulty_dist:
-        difficulty_dist = {"Easy": 4, "Medium": 4, "Hard": 2}
+        total = num_questions if (num_questions and num_questions > 0) else 10
+        from services.adaptive import get_difficulty_distribution
+        difficulty_dist = get_difficulty_distribution("mixed", total_questions=total)
+    else:
+        total = sum(difficulty_dist.values())
+        if total <= 0:
+            total = num_questions if (num_questions and num_questions > 0) else 10
 
-    e_cnt = difficulty_dist.get("Easy", 4)
-    m_cnt = difficulty_dist.get("Medium", 4)
-    h_cnt = difficulty_dist.get("Hard", 2)
+    e_cnt = difficulty_dist.get("Easy", 0)
+    m_cnt = difficulty_dist.get("Medium", 0)
+    h_cnt = difficulty_dist.get("Hard", 0)
 
     diff_lines = []
     if e_cnt > 0:
@@ -51,7 +58,7 @@ def get_quiz_prompt(
     if m_cnt > 0:
         diff_lines.append(f"- Questions {e_cnt + 1} to {e_cnt + m_cnt} must be Medium")
     if h_cnt > 0:
-        diff_lines.append(f"- Questions {10 - h_cnt + 1} to 10 must be Hard")
+        diff_lines.append(f"- Questions {total - h_cnt + 1} to {total} must be Hard")
     diff_req = "\n".join(diff_lines)
 
     concept_instructions = ""
@@ -63,7 +70,7 @@ def get_quiz_prompt(
 Syllabus Concepts to Cover for '{topic_name}':
 {formatted_concepts}
 
-- You MUST distribute the 10 questions across these syllabus concepts for balanced syllabus coverage.
+- You MUST distribute the {total} questions across these syllabus concepts for balanced syllabus coverage.
 - Do NOT test only one single concept repeatedly while neglecting the others.
 - Ensure each question explicitly sets its "concept" field to the relevant syllabus concept name from this list.
 """
@@ -89,9 +96,9 @@ Syllabus Reference Context:
 
 CRITICAL RULES FOR RELEVANCE AND TOPIC ISOLATION:
 1. STRICT TOPIC ISOLATION (MANDATORY & ABSOLUTE):
-   - ALL 10 questions MUST strictly and directly assess the Selected Topic: "{topic_name}".
+   - ALL {total} questions MUST strictly and directly assess the Selected Topic: "{topic_name}".
    - Under NO circumstances should you include questions from other topics, modules, or units of {course_name}.
-   {negative_constraint_block}   - Do NOT bring in unrelated concepts from other parts of the course syllabus just to fill 10 questions.
+   {negative_constraint_block}   - Do NOT bring in unrelated concepts from other parts of the course syllabus just to fill {total} questions.
    - If study notes are provided in the reference context, use them ONLY for '{topic_name}'. You MUST completely IGNORE any passages in the notes discussing other topics.
    - Ground all questions solely in the selected topic and its syllabus concepts.
 
@@ -103,7 +110,7 @@ CRITICAL RULES FOR RELEVANCE AND TOPIC ISOLATION:
    - Ensure high question diversity across the topic's learning objectives.
 
 3. STRUCTURE & FORMAT REQUIREMENTS:
-   - Return EXACTLY 10 multiple-choice questions in the "questions" array.
+   - Return EXACTLY {total} multiple-choice questions in the "questions" array.
    {diff_req}
    - Every question MUST contain exactly 4 distinct, non-empty options with keys "A", "B", "C", and "D".
    - ZERO DUPLICATE OPTIONS: All 4 options must be mutually exclusive and semantically distinct. Never generate identical or duplicate options.
@@ -453,10 +460,11 @@ def validate_quiz_data(
     topic_name: str,
     concepts: Optional[List[str]] = None,
     syllabus_context: Optional[str] = None,
-    min_questions: int = 5,
+    min_questions: int = 1,
     difficulty_dist: Optional[Dict[str, int]] = None,
     course_code: str = "",
-    competing_topics: Optional[List[Any]] = None
+    competing_topics: Optional[List[Any]] = None,
+    expected_count: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Validates that the generated data strictly fulfills quiz requirements:
@@ -552,11 +560,12 @@ def validate_quiz_data(
         for index, q in enumerate(unique_questions):
             q["difficulty"] = expected_difficulties[index]
 
+    max_slice = expected_count if (expected_count and expected_count > 0) else (sum(difficulty_dist.values()) if difficulty_dist else 10)
     return {
         "subject": course_name,
         "topic": topic_name,
-        "questions": unique_questions[:10] if len(unique_questions) >= 10 else unique_questions,
-        "unique_count": min(len(unique_questions), 10),
+        "questions": unique_questions[:max_slice],
+        "unique_count": min(len(unique_questions), max_slice),
         "has_duplicates": dedup_res["has_duplicates"]
     }
 

@@ -471,7 +471,7 @@ class TestResponsiveCSSValidation:
         assert ".distractor-explanation" in css_text
         assert ".distractor-explanation-label" in css_text
         assert ".distractor-explanation-text" in css_text
-        assert "border-left: 4px solid #DC2626;" in css_text or "border-left: 4px solid" in css_text
+        assert "border: 1px solid" in css_text and ".review-distractor-entry" in css_text
 
     def test_css_prose_is_full_width(self):
         """Verify that .review-prose is full card width without restrictive max-width: 720px."""

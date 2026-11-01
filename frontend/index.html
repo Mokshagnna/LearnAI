@@ -12,6 +12,14 @@
 
 <link rel="stylesheet" href="vendor/katex/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css'">
 <link rel="stylesheet" href="css/style.css">
+<script>
+  try {
+    var _tok = localStorage.getItem('learnai_auth_token');
+    if (!_tok) {
+      document.documentElement.classList.add('unauthenticated');
+    }
+  } catch(e) {}
+</script>
 
 <script defer src="vendor/katex/katex.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js'"></script>
 <script defer src="vendor/katex/contrib/auto-render.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js'"></script>
@@ -90,7 +98,28 @@
 
   <!-- Student Login Screen -->
 
-  <section id="loginSection" class="card auth-card" aria-labelledby="loginTitle">
+  <!-- Auth Checking Initialization Screen -->
+  <section id="authCheckingSection" class="card auth-card" role="status" aria-live="polite">
+    <div class="auth-header">
+      <div class="auth-brand">LearnAI</div>
+      <h1 id="authCheckingTitle" class="auth-title">Welcome to LearnAI</h1>
+      <p id="authCheckingSubtitle" class="auth-subtitle">Initializing session...</p>
+    </div>
+    <div id="authCheckingSpinner" class="auth-loading-state">
+      <div class="spinner auth-spinner" aria-hidden="true"></div>
+      <p class="auth-loading-text">Verifying session...</p>
+    </div>
+    <div id="authCheckingErrorBox" class="auth-error-state hidden">
+      <p id="authCheckingErrorMsg" class="auth-error-message">Unable to verify session due to a network connection issue.</p>
+      <div class="auth-action-buttons">
+        <button id="authCheckingRetryBtn" type="button" class="btn btn-primary">Retry Connection</button>
+        <button id="authCheckingLoginBtn" type="button" class="btn btn-secondary">Go to Login</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Student Login Screen -->
+  <section id="loginSection" class="card auth-card hidden" aria-labelledby="loginTitle">
 
     <div class="auth-header">
 

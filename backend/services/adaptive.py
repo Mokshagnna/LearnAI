@@ -410,15 +410,49 @@ def get_recommended_difficulty(
     return ADAPTIVE_LEVEL_MIXED
 
 
-def get_difficulty_distribution(recommended: str) -> Dict[str, int]:
-    """Convert recommendation to exact question counts per difficulty."""
+def get_difficulty_distribution(recommended: str, total_questions: int = 10) -> Dict[str, int]:
+    """Convert recommendation to exact question counts per difficulty for any question count."""
     lvl = recommended.lower() if recommended else "mixed"
-    distributions = {
-        ADAPTIVE_LEVEL_FOUNDATIONAL: {"Easy": 6, "Medium": 3, "Hard": 1},
-        ADAPTIVE_LEVEL_MIXED: {"Easy": 4, "Medium": 4, "Hard": 2},
-        ADAPTIVE_LEVEL_ADVANCED: {"Easy": 2, "Medium": 4, "Hard": 4}
+    if total_questions <= 0:
+        total_questions = 10
+
+    if total_questions == 10:
+        distributions = {
+            ADAPTIVE_LEVEL_FOUNDATIONAL: {"Easy": 6, "Medium": 3, "Hard": 1},
+            ADAPTIVE_LEVEL_MIXED: {"Easy": 4, "Medium": 4, "Hard": 2},
+            ADAPTIVE_LEVEL_ADVANCED: {"Easy": 2, "Medium": 4, "Hard": 4}
+        }
+        return distributions.get(lvl, distributions[ADAPTIVE_LEVEL_MIXED]).copy()
+
+    # Ratios for custom question counts (e.g. 5, 20)
+    ratios = {
+        ADAPTIVE_LEVEL_FOUNDATIONAL: (0.6, 0.3, 0.1),
+        ADAPTIVE_LEVEL_MIXED: (0.4, 0.4, 0.2),
+        ADAPTIVE_LEVEL_ADVANCED: (0.2, 0.4, 0.4)
     }
-    return distributions.get(lvl, distributions[ADAPTIVE_LEVEL_MIXED])
+    e_ratio, m_ratio, h_ratio = ratios.get(lvl, ratios[ADAPTIVE_LEVEL_MIXED])
+
+    e_cnt = max(1 if total_questions >= 3 else 0, round(total_questions * e_ratio))
+    m_cnt = max(1 if total_questions >= 3 else 0, round(total_questions * m_ratio))
+    h_cnt = total_questions - e_cnt - m_cnt
+
+    if h_cnt < 0:
+        if e_cnt > m_cnt and e_cnt > 1:
+            e_cnt += h_cnt
+        else:
+            m_cnt += h_cnt
+        h_cnt = 0
+    elif h_cnt == 0 and total_questions >= 5:
+        h_cnt = 1
+        if e_cnt >= m_cnt and e_cnt > 1:
+            e_cnt -= 1
+        elif m_cnt > 1:
+            m_cnt -= 1
+
+    rem = total_questions - (e_cnt + m_cnt + h_cnt)
+    m_cnt += rem
+
+    return {"Easy": e_cnt, "Medium": m_cnt, "Hard": h_cnt}
 
 
 def get_adaptive_prompt_additions(

@@ -287,6 +287,8 @@ class QuizRequest(BaseModel):
 
     difficulty: str | None = Field(default=None, max_length=50)
 
+    num_questions: int = Field(default=10, ge=1, le=50)
+
     # retake=True signals frontend is requesting a fresh quiz for the same topic.
 
     # Backend always generates fresh — this flag is used only for logging.
@@ -1489,7 +1491,9 @@ def create_quiz(req: QuizRequest, request: Request):
 
             competing_topics=competing_topics,
 
-            disallowed_topics=disallowed_topics
+            disallowed_topics=disallowed_topics,
+
+            num_questions=req.num_questions
 
         )
 

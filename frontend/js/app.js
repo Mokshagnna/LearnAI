@@ -974,7 +974,7 @@ renderProse(rawText) {
 
 // ── Mutually Exclusive Screen Management ────────────────────────────────────
 // Ensures EXACTLY ONE screen is visible at any time.
-const AUTH_SCREENS = ["loginSection", "registerSection", "forgotPasswordSection", "resetPasswordSection"];
+const AUTH_SCREENS = ["loginSection", "registerSection", "forgotPasswordSection", "resetPasswordSection", "authCheckingSection"];
 const ALL_SCREENS = ["setup", "loadingSection", "quizSection", "resultSection", "dashboardSection", "notesUploadSection", ...AUTH_SCREENS];
 
 let lastActiveScreen = "setup";
@@ -983,6 +983,14 @@ let currentUser = null;
 function showScreen(screenId, pushHistory = true) {
   if (screenId === "materialsSection") {
     screenId = "notesUploadSection";
+  }
+
+  if (typeof document !== "undefined" && document.documentElement) {
+    if (screenId === "loginSection") {
+      document.documentElement.classList.add("unauthenticated");
+    } else {
+      document.documentElement.classList.remove("unauthenticated");
+    }
   }
 
   ALL_SCREENS.forEach(id => {
@@ -4830,7 +4838,7 @@ function updateUserDisplay(name) {
   }
 }
 
-async function verifyCurrentUser() {
+async function checkSessionStatus() {
   if (!authToken && typeof localStorage !== "undefined" && localStorage.getItem) {
     authToken = localStorage.getItem("learnai_auth_token") || null;
   }
@@ -4840,7 +4848,7 @@ async function verifyCurrentUser() {
 
   if (!authToken || isTokenExpired(authToken)) {
     currentUser = null;
-    return false;
+    return { status: "unauthenticated" };
   }
 
   try {
@@ -4853,15 +4861,30 @@ async function verifyCurrentUser() {
         currentUser = data;
         studentId = data.student_id;
         updateUserDisplay(data.full_name || "Student");
-        return true;
+        return { status: "authenticated", user: data };
       }
+    } else if (res.status === 401 || res.status === 403) {
+      currentUser = null;
+      if (typeof localStorage !== "undefined") {
+        localStorage.removeItem("learnai_auth_token");
+        localStorage.removeItem("learnai_student_id");
+      }
+      authToken = null;
+      studentId = null;
+      return { status: "unauthenticated" };
     }
   } catch (err) {
-    console.warn("[AUTH] Failed to verify user profile:", err);
+    console.warn("[AUTH] Failed to verify user profile (network error):", err);
+    return { status: "network_error", error: err };
   }
 
   currentUser = null;
-  return false;
+  return { status: "unauthenticated" };
+}
+
+async function verifyCurrentUser() {
+  const result = await checkSessionStatus();
+  return result.status === "authenticated";
 }
 
 async function handleLoginSubmit(e) {
@@ -5234,58 +5257,101 @@ async function initApp() {
   initNotesUploaderListeners();
   initStudyMaterialsListeners();
 
-  const isAuthenticated = await verifyCurrentUser();
-  if (!isAuthenticated) {
+  const retryBtn = $("authCheckingRetryBtn");
+  const loginBtn = $("authCheckingLoginBtn");
+  if (retryBtn && !retryBtn._bound) {
+    retryBtn._bound = true;
+    retryBtn.addEventListener("click", () => {
+      initApp();
+    });
+  }
+  if (loginBtn && !loginBtn._bound) {
+    loginBtn._bound = true;
+    loginBtn.addEventListener("click", () => {
+      if (typeof localStorage !== "undefined") {
+        localStorage.removeItem("learnai_auth_token");
+        localStorage.removeItem("learnai_student_id");
+      }
+      authToken = null;
+      studentId = null;
+      showScreen("loginSection");
+    });
+  }
+
+  // Pre-check: if no stored auth token or token expired, immediately show login screen without verification delay
+  const storedToken = typeof localStorage !== "undefined" ? localStorage.getItem("learnai_auth_token") : null;
+  if (!storedToken || isTokenExpired(storedToken)) {
     showScreen("loginSection");
     loadCourses().catch(() => {});
     return;
   }
 
-  await loadCourses();
-  const restored = restoreSessionState();
+  // Token is present: display session verification state
+  showScreen("authCheckingSection");
+  $("authCheckingSpinner")?.classList.remove("hidden");
+  $("authCheckingErrorBox")?.classList.add("hidden");
 
-  // Initialize base history state if not already present
-  if (typeof window !== "undefined" && window.history && !window.history.state) {
-    try {
-      window.history.replaceState({ screen: restored ? "quizSection" : "setup" }, "");
-    } catch (e) {
-      // Ignore if sandbox restricts replaceState
+  const sessionResult = await checkSessionStatus();
+
+  if (sessionResult.status === "authenticated") {
+    await loadCourses();
+    const restored = restoreSessionState();
+
+    // Initialize base history state if not already present
+    if (typeof window !== "undefined" && window.history && !window.history.state) {
+      try {
+        window.history.replaceState({ screen: restored ? "quizSection" : "setup" }, "");
+      } catch (e) {
+        // Ignore if sandbox restricts replaceState
+      }
     }
-  }
 
-  if (!restored) {
-    showScreen("setup");
-  }
+    if (!restored) {
+      showScreen("setup");
+    }
 
-  // If no active quiz was restored, check URL parameters
-  if (!restored && typeof window !== "undefined" && window.location && window.location.search) {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const urlCourse = params.get("course");
-      const urlTopic = params.get("topic");
-      const urlAction = params.get("action");
+    // If no active quiz was restored, check URL parameters
+    if (!restored && typeof window !== "undefined" && window.location && window.location.search) {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const urlCourse = params.get("course");
+        const urlTopic = params.get("topic");
+        const urlAction = params.get("action");
 
-      if (urlCourse && urlTopic) {
-        if (urlAction === "practice") {
-          selectAndPracticeTopic(urlCourse, urlTopic);
-        } else {
-          const courseSelect = $("course");
-          const topicSelect = $("topic");
-          if (courseSelect && (curriculum || []).some(c => (c.code || "").toLowerCase() === urlCourse.trim().toLowerCase())) {
-            courseSelect.value = urlCourse;
-            if (typeof Event !== "undefined") {
-              courseSelect.dispatchEvent(new Event("change"));
-            }
-            if (topicSelect) {
-              topicSelect.value = urlTopic;
+        if (urlCourse && urlTopic) {
+          if (urlAction === "practice") {
+            selectAndPracticeTopic(urlCourse, urlTopic);
+          } else {
+            const courseSelect = $("course");
+            const topicSelect = $("topic");
+            if (courseSelect && (curriculum || []).some(c => (c.code || "").toLowerCase() === urlCourse.trim().toLowerCase())) {
+              courseSelect.value = urlCourse;
+              if (typeof Event !== "undefined") {
+                courseSelect.dispatchEvent(new Event("change"));
+              }
+              if (topicSelect) {
+                topicSelect.value = urlTopic;
+              }
             }
           }
         }
+      } catch (e) {
+        console.warn("Failed to parse navigation parameters:", e);
       }
-    } catch (e) {
-      console.warn("Failed to parse navigation parameters:", e);
     }
+    return;
   }
+
+  if (sessionResult.status === "network_error") {
+    // Show network error box with retry and login buttons; do NOT erase token
+    $("authCheckingSpinner")?.classList.add("hidden");
+    $("authCheckingErrorBox")?.classList.remove("hidden");
+    return;
+  }
+
+  // Unauthenticated (token invalid or revoked)
+  showScreen("loginSection");
+  loadCourses().catch(() => {});
 }
 
 // ── Browser Popstate Navigation ─────────────────────────────────────────────
@@ -5322,6 +5388,8 @@ if (typeof module !== "undefined" && module.exports) {
     setCurriculum: (c) => { curriculum = c; },
     getCurriculum: () => curriculum,
     setLastExtractionResult: (r) => { lastExtractionResult = r; },
-    getLastExtractionResult: () => lastExtractionResult
+    getLastExtractionResult: () => lastExtractionResult,
+    checkSessionStatus,
+    initApp
   };
 }
