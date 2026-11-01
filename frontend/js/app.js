@@ -215,6 +215,194 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+// ── Mathematical Typesetting & KaTeX Integration ──────────────────────────────
+const LearnAIMathRenderer = {
+  currencyRegex: /(?<!\\)\$(?=\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion|[kKmMbB]|USD|usd|cents?|dollars?))?(?!\s*[+\-*/=^<>_\\~])(?:[.,;!?)\s]|$))/g,
+
+  mathRegex: /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\begin\{([a-zA-Z*]+)\}[\s\S]+?\\end\{\2\}|\\\([\s\S]+?\\\)|\$(?!\s)[^$\n]+?(?<!\s)\$)/g,
+
+  ignoredTags: ["SCRIPT", "STYLE", "TEXTAREA", "PRE", "CODE", "BUTTON", "INPUT", "SELECT", "OPTION"],
+  ignoredClasses: [
+    "inline-code",
+    "code-pre",
+    "code-content",
+    "option-code",
+    "code-block-container",
+    "code-lang-badge",
+    "code-copy-btn",
+    "token-keyword",
+    "token-string",
+    "token-comment"
+  ],
+
+  hasMath(text) {
+    if (!text || typeof text !== "string") return false;
+    if (/\\(?:frac|sum|int|sqrt|alpha|beta|gamma|delta|lambda|theta|sigma|omega|pi|mu|partial|nabla|infty|times|div|pm|le|ge|neq|approx|equiv|forall|exists|in|subset|cap|cup|vec|mathbf|mathcal|text|det|lim|log|ln|sin|cos|tan)\b/.test(text)) {
+      return true;
+    }
+    if (/\\\(|\\\[|\$\$|\\begin\{[a-zA-Z*]+\}/.test(text)) {
+      return true;
+    }
+    const tokens = this.tokenize(text);
+    return tokens.some(t => t.type === "math");
+  },
+
+  escapeCurrency(text) {
+    if (!text || typeof text !== "string") return "";
+    return text.replace(this.currencyRegex, "\\$");
+  },
+
+  tokenize(text) {
+    if (!text || typeof text !== "string") return [];
+
+    const currencies = [];
+    const safeText = text.replace(this.currencyRegex, (m) => {
+      const ph = `___CURR_${currencies.length}___`;
+      currencies.push(m);
+      return ph;
+    });
+
+    const tokens = [];
+    let lastIndex = 0;
+    let match;
+
+    const regex = new RegExp(this.mathRegex.source, "g");
+    while ((match = regex.exec(safeText)) !== null) {
+      if (match.index > lastIndex) {
+        tokens.push({
+          type: "text",
+          raw: safeText.slice(lastIndex, match.index)
+        });
+      }
+
+      const rawMatch = match[0];
+      let mathContent = "";
+      let display = false;
+
+      if (rawMatch.startsWith("$$") && rawMatch.endsWith("$$")) {
+        mathContent = rawMatch.slice(2, -2).trim();
+        display = true;
+      } else if (rawMatch.startsWith("\\[") && rawMatch.endsWith("\\]")) {
+        mathContent = rawMatch.slice(2, -2).trim();
+        display = true;
+      } else if (rawMatch.startsWith("\\begin{")) {
+        mathContent = rawMatch.trim();
+        display = true;
+      } else if (rawMatch.startsWith("\\(") && rawMatch.endsWith("\\)")) {
+        mathContent = rawMatch.slice(2, -2).trim();
+        display = false;
+      } else if (rawMatch.startsWith("$") && rawMatch.endsWith("$")) {
+        mathContent = rawMatch.slice(1, -1).trim();
+        display = false;
+      }
+
+      tokens.push({
+        type: "math",
+        display,
+        content: mathContent,
+        raw: rawMatch
+      });
+
+      lastIndex = match.index + rawMatch.length;
+    }
+
+    if (lastIndex < safeText.length) {
+      tokens.push({
+        type: "text",
+        raw: safeText.slice(lastIndex)
+      });
+    }
+
+    tokens.forEach(tok => {
+      if (tok.type === "text") {
+        currencies.forEach((c, i) => {
+          tok.raw = tok.raw.replace(new RegExp(`___CURR_${i}___`, "g"), c);
+        });
+      }
+    });
+
+    return tokens;
+  },
+
+  renderToString(mathStr, displayMode = false) {
+    const k = (typeof katex !== "undefined" ? katex : (typeof window !== "undefined" && window.katex ? window.katex : null));
+    if (!k || typeof k.renderToString !== "function") {
+      return escapeHtml(displayMode ? `\\[ ${mathStr} \\]` : `\\( ${mathStr} \\)`);
+    }
+
+    try {
+      return k.renderToString(mathStr, {
+        displayMode: Boolean(displayMode),
+        throwOnError: false,
+        errorColor: "#DC2626",
+        strict: false
+      });
+    } catch (err) {
+      return `<span class="katex-error" title="${escapeHtml(err.message)}">${escapeHtml(mathStr)}</span>`;
+    }
+  },
+
+  typeset(rootEl) {
+    if (!rootEl) return;
+    const k = (typeof katex !== "undefined" ? katex : (typeof window !== "undefined" && window.katex ? window.katex : null));
+    if (!k) {
+      if (typeof window !== "undefined") {
+        setTimeout(() => this.typeset(rootEl), 100);
+      }
+      return;
+    }
+
+    const textNodes = [];
+    const walk = (node) => {
+      if (!node) return;
+      if (node.nodeType === 3) {
+        if (node.textContent && (node.textContent.includes("$") || node.textContent.includes("\\"))) {
+          textNodes.push(node);
+        }
+        return;
+      }
+      if (node.nodeType === 1) {
+        const tag = node.tagName.toUpperCase();
+        if (this.ignoredTags.includes(tag)) return;
+        const cls = " " + (node.className || "") + " ";
+        if (this.ignoredClasses.some(c => cls.includes(" " + c + " "))) return;
+        for (let child = node.firstChild; child; child = child.nextSibling) {
+          walk(child);
+        }
+      }
+    };
+
+    walk(rootEl);
+
+    for (const textNode of textNodes) {
+      if (!textNode.parentNode) continue;
+      const text = textNode.textContent;
+      const tokens = this.tokenize(text);
+      const hasMathToken = tokens.some(t => t.type === "math");
+      if (!hasMathToken) continue;
+
+      const fragment = document.createDocumentFragment();
+      for (const tok of tokens) {
+        if (tok.type === "text") {
+          fragment.appendChild(document.createTextNode(tok.raw));
+        } else if (tok.type === "math") {
+          const renderedHtml = this.renderToString(tok.content, tok.display);
+          const wrapper = document.createElement(tok.display ? "div" : "span");
+          wrapper.className = tok.display ? "katex-display-container" : "katex-inline-wrapper";
+          if (tok.display) {
+            wrapper.setAttribute("tabindex", "0");
+            wrapper.setAttribute("role", "region");
+            wrapper.setAttribute("aria-label", "Mathematical equation, scrollable horizontally");
+          }
+          wrapper.innerHTML = renderedHtml;
+          fragment.appendChild(wrapper);
+        }
+      }
+      textNode.parentNode.replaceChild(fragment, textNode);
+    }
+  }
+};
+
 // ── Code-Aware Quiz Rendering Engine ─────────────────────────────────────────
 const LearnAICodeRenderer = {
   TOKEN_PATTERNS: {
@@ -373,6 +561,55 @@ const LearnAICodeRenderer = {
       out += escapeHtml(code.slice(cursor));
     }
     return out;
+  },
+
+renderProse(rawText) {
+    if (!rawText) return "";
+    const paragraphs = String(rawText).trim().split(/\n{2,}/);
+
+    return paragraphs.map(para => {
+      const lines = para.split("\n");
+      const result = [];
+      let currentList = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const bulletMatch = line.match(/^\s*[-*•]\s+(.*)$/);
+        const numMatch = line.match(/^\s*(\d+)\.\s+(.*)$/);
+
+        if (bulletMatch) {
+          if (!currentList || currentList.type !== "ul") {
+            if (currentList) result.push(this._flushList(currentList));
+            currentList = { type: "ul", items: [] };
+          }
+          currentList.items.push(bulletMatch[1]);
+        } else if (numMatch) {
+          if (!currentList || currentList.type !== "ol") {
+            if (currentList) result.push(this._flushList(currentList));
+            currentList = { type: "ol", items: [] };
+          }
+          currentList.items.push(numMatch[2]);
+        } else {
+          if (currentList) {
+            result.push(this._flushList(currentList));
+            currentList = null;
+          }
+          if (line.trim()) {
+            result.push(`<div class="question-prose">${this.renderInline(line)}</div>`);
+          }
+        }
+      }
+      if (currentList) {
+        result.push(this._flushList(currentList));
+      }
+      return result.join("");
+    }).join("");
+  },
+
+  _flushList(list) {
+    const tag = list.type;
+    const items = list.items.map(it => `<li>${this.renderInline(it)}</li>`).join("");
+    return `<${tag} class="prose-list">${items}</${tag}>`;
   },
 
   renderInline(text) {
@@ -550,8 +787,7 @@ const LearnAICodeRenderer = {
           `</div>`
         );
       } else {
-        const prose = this.renderInline(seg.content || "");
-        return `<div class="question-prose">${prose}</div>`;
+        return this.renderProse(seg.content || "");
       }
     }).join("");
   },
@@ -659,6 +895,11 @@ const LearnAICodeRenderer = {
     if (optionValue === null || optionValue === undefined) return "";
     const s = String(optionValue);
     if (!s) return "";
+
+    // Math check: If option contains math delimiters and/or LaTeX syntax, preserve for typesetting
+    if (typeof LearnAIMathRenderer !== "undefined" && LearnAIMathRenderer.hasMath(s)) {
+      return this.renderInline(s);
+    }
 
     // 1. Multiline code in option: use light grey code block <pre class="option-pre">
     if (s.indexOf("\n") !== -1 && (this.isWhitespaceSensitiveOrCode(s) || this._entireCodeRegex.test(s) || s.indexOf("```") !== -1)) {
@@ -1530,6 +1771,13 @@ function renderQuestion() {
     options.appendChild(div);
   });
 
+  if ($("question") && typeof LearnAIMathRenderer !== "undefined") {
+    LearnAIMathRenderer.typeset($("question"));
+  }
+  if ($("options") && typeof LearnAIMathRenderer !== "undefined") {
+    LearnAIMathRenderer.typeset($("options"));
+  }
+
   if ($("prevBtn")) $("prevBtn").style.visibility = currentIndex === 0 ? "hidden" : "visible";
   if ($("nextBtn")) {
     const isLast = currentIndex === totalQuestions - 1;
@@ -1824,9 +2072,18 @@ function showResult(data) {
           }
           return `
             <li class="review-distractor-entry">
-              <span class="distractor-option-label">Option ${escapeHtml(k)}${optVal ? ` (${LearnAICodeRenderer.renderOptionToHtml(optVal, { isCodeOrOutput })})` : ""}:</span>
+              <div class="distractor-header">
+                <div class="distractor-badge-row">
+                  <span class="choice-badge badge-choice-incorrect">Option ${escapeHtml(k)}</span>
+                  <span class="distractor-status-tag">Incorrect</span>
+                </div>
+                ${optVal ? `<div class="distractor-option-content">${LearnAICodeRenderer.renderOptionToHtml(optVal, { isCodeOrOutput })}</div>` : ""}
+              </div>
               <div class="distractor-explanation">
-                ${LearnAICodeRenderer.renderToHtml(reason)}
+                <div class="distractor-explanation-label">Why it's incorrect:</div>
+                <div class="distractor-explanation-text">
+                  ${LearnAICodeRenderer.renderToHtml(reason)}
+                </div>
               </div>
             </li>
           `;
@@ -1861,23 +2118,33 @@ function showResult(data) {
 
         <div class="review-answer-summary">
           <div class="review-answer-line student-answer-line">
-            <span class="review-line-label">Your answer:</span>
-            <div class="review-line-content">
+            <div class="review-line-header">
+              <span class="review-line-label">Your answer:</span>
               ${hasSelected ? `
                 <span class="choice-badge ${isCorrect ? 'badge-choice-correct' : 'badge-choice-incorrect'}">Option ${escapeHtml(selectedKey)}</span>
-                ${selectedText ? `<span class="choice-text">(${LearnAICodeRenderer.renderOptionToHtml(selectedText, { isCodeOrOutput })})</span>` : ""}
+                ${isCorrect ? `<span class="review-status-tag tag-correct">Correct</span>` : `<span class="review-status-tag tag-incorrect">Incorrect</span>`}
               ` : `
                 <span class="choice-unanswered">Not answered</span>
               `}
             </div>
+            ${hasSelected && selectedText ? `
+              <div class="review-line-content">
+                <span class="choice-text">${LearnAICodeRenderer.renderOptionToHtml(selectedText, { isCodeOrOutput })}</span>
+              </div>
+            ` : ""}
           </div>
 
           <div class="review-answer-line correct-answer-line">
-            <span class="review-line-label">Correct answer:</span>
-            <div class="review-line-content">
+            <div class="review-line-header">
+              <span class="review-line-label">Correct answer:</span>
               <span class="choice-badge badge-choice-correct">Option ${escapeHtml(correctKey)}</span>
-              ${correctText ? `<span class="choice-text">(${LearnAICodeRenderer.renderOptionToHtml(correctText, { isCodeOrOutput })})</span>` : ""}
+              <span class="review-status-tag tag-correct">Correct</span>
             </div>
+            ${correctText ? `
+              <div class="review-line-content">
+                <span class="choice-text">${LearnAICodeRenderer.renderOptionToHtml(correctText, { isCodeOrOutput })}</span>
+              </div>
+            ` : ""}
           </div>
         </div>
 
@@ -1904,6 +2171,11 @@ function showResult(data) {
       ${reviewHtml}
     </div>
   `;
+
+  // Typeset all mathematical expressions across question statements, answers, explanations, and distractors
+  if (typeof LearnAIMathRenderer !== "undefined") {
+    LearnAIMathRenderer.typeset($("review"));
+  }
 
   // Load and display attempt history for this topic
   loadAttemptHistory();
@@ -5045,6 +5317,7 @@ if (typeof module !== "undefined" && module.exports) {
     isTokenExpired,
     escapeHtml,
     LearnAICodeRenderer,
+    LearnAIMathRenderer,
     populateTopicDropdown,
     setCurriculum: (c) => { curriculum = c; },
     getCurriculum: () => curriculum,
