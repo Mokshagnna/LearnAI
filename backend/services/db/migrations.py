@@ -168,7 +168,13 @@ def apply_migrations(
     newly_applied = []
 
     if eff_dialect == "mysql":
-        sql_files = sorted([f for f in mdir.glob("*.sql") if not f.name.endswith(".rollback.sql") and "mysql" in f.name.lower()])
+        sql_files = sorted([
+            f for f in mdir.glob("*.sql")
+            if not f.name.endswith(".rollback.sql")
+            and "postgres" not in f.name.lower()
+            and "supabase" not in f.name.lower()
+            and "sqlite" not in f.name.lower()
+        ])
     elif eff_dialect == "postgres":
         sql_files = sorted([f for f in mdir.glob("*.sql") if not f.name.endswith(".rollback.sql") and "mysql" not in f.name.lower()])
     else:

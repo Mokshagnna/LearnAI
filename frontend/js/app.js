@@ -4663,9 +4663,24 @@ async function handleRegisterSubmit(e) {
       })
     });
 
-    const data = await res.json();
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = null;
+    }
+
     if (!res.ok) {
-      const errorMsg = data.detail || "Registration failed. Please check your information.";
+      let errorMsg = "Registration failed. Please check your information.";
+      if (data && typeof data.detail === "string") {
+        errorMsg = data.detail;
+      } else if (data && Array.isArray(data.detail) && data.detail.length > 0) {
+        errorMsg = data.detail.map(d => (typeof d === "string" ? d : d.msg || "")).filter(Boolean).join(". ") || errorMsg;
+      } else if (res.status === 429) {
+        errorMsg = "Too many registration attempts. Please wait a moment before trying again.";
+      } else if (res.status >= 500) {
+        errorMsg = "Server error while creating your account. Please try again shortly.";
+      }
       showAuthMessage("registerMsg", errorMsg, "error");
       setAuthBtnLoading("registerSubmitBtn", false, "Create account");
       return;

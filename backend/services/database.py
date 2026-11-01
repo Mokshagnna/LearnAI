@@ -2966,51 +2966,66 @@ def create_student_account(
         conn = get_connection()
         close_conn = True
 
-    cursor = conn.cursor()
-    now = get_utc_now_iso()
-    account_id = str(uuid.uuid4())
-    norm_email = email.strip().lower()
-    clean_name = full_name.strip()
+    try:
+        cursor = conn.cursor()
+        now = get_utc_now_iso()
+        account_id = str(uuid.uuid4())
+        norm_email = email.strip().lower()
+        clean_name = full_name.strip()
 
-    # Ensure parent students record exists
-    cursor.execute("SELECT id FROM students WHERE id = ?", (student_id,))
-    if not cursor.fetchone():
-        cursor.execute(
-            "INSERT INTO students (id, created_at, last_active) VALUES (?, ?, ?)",
-            (student_id, now, now)
-        )
+        # Ensure parent students record exists
+        cursor.execute("SELECT id FROM students WHERE id = ?", (student_id,))
+        if not cursor.fetchone():
+            cursor.execute(
+                "INSERT INTO students (id, created_at, last_active) VALUES (?, ?, ?)",
+                (student_id, now, now)
+            )
 
-    cursor.execute("""
-        INSERT INTO student_accounts (
-            id, student_id, email, full_name, password_hash,
-            email_verified, created_at, updated_at, last_login_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        account_id,
-        student_id,
-        norm_email,
-        clean_name,
-        password_hash,
-        0,  # email_verified: false in initial version
-        now,
-        now,
-        now
-    ))
+        cursor.execute("""
+            INSERT INTO student_accounts (
+                id, student_id, email, full_name, password_hash,
+                email_verified, created_at, updated_at, last_login_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            account_id,
+            student_id,
+            norm_email,
+            clean_name,
+            password_hash,
+            0,  # email_verified: false in initial version
+            now,
+            now,
+            now
+        ))
 
-    conn.commit()
-    if close_conn:
-        conn.close()
-
-    return {
-        "id": account_id,
-        "student_id": student_id,
-        "email": norm_email,
-        "full_name": clean_name,
-        "email_verified": False,
-        "created_at": now,
-        "updated_at": now,
-        "last_login_at": now
-    }
+        conn.commit()
+        return {
+            "id": account_id,
+            "student_id": student_id,
+            "email": norm_email,
+            "full_name": clean_name,
+            "email_verified": False,
+            "created_at": now,
+            "updated_at": now,
+            "last_login_at": now
+        }
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        err_str = str(e).lower()
+        if "unique" in err_str or "duplicate" in err_str:
+            logger.warning("Duplicate student account creation rejected for %s: %s", norm_email, e)
+            raise ValueError("An account with this email address already exists. Please log in instead.") from e
+        logger.error("Failed to insert student account for %s: %s", norm_email, e, exc_info=True)
+        raise
+    finally:
+        if close_conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def get_student_account_by_email(
@@ -3023,19 +3038,26 @@ def get_student_account_by_email(
         conn = get_connection()
         close_conn = True
 
-    cursor = conn.cursor()
-    norm_email = email.strip().lower()
-    cursor.execute(
-        "SELECT * FROM student_accounts WHERE email = ?",
-        (norm_email,)
-    )
-    row = cursor.fetchone()
-    if close_conn:
-        conn.close()
-
-    if not row:
-        return None
-    return dict(row)
+    try:
+        cursor = conn.cursor()
+        norm_email = email.strip().lower()
+        cursor.execute(
+            "SELECT * FROM student_accounts WHERE email = ?",
+            (norm_email,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(row)
+    except Exception as e:
+        logger.error("Failed to query student account by email: %s", e, exc_info=True)
+        raise
+    finally:
+        if close_conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def get_student_account_by_id(
@@ -3048,18 +3070,25 @@ def get_student_account_by_id(
         conn = get_connection()
         close_conn = True
 
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM student_accounts WHERE student_id = ?",
-        (student_id,)
-    )
-    row = cursor.fetchone()
-    if close_conn:
-        conn.close()
-
-    if not row:
-        return None
-    return dict(row)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM student_accounts WHERE student_id = ?",
+            (student_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(row)
+    except Exception as e:
+        logger.error("Failed to query student account by student_id: %s", e, exc_info=True)
+        raise
+    finally:
+        if close_conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def update_student_password(
@@ -3124,44 +3153,55 @@ def create_student_session(
         conn = get_connection()
         close_conn = True
 
-    cursor = conn.cursor()
-    now = get_utc_now_iso()
-    session_id = str(uuid.uuid4())
+    try:
+        cursor = conn.cursor()
+        now = get_utc_now_iso()
+        session_id = str(uuid.uuid4())
 
-    cursor.execute("SELECT id FROM student_sessions WHERE token_hash = ?", (token_hash,))
-    existing_row = cursor.fetchone()
-    if existing_row:
-        cursor.execute(
-            "UPDATE student_sessions SET expires_at = ?, is_revoked = 0, device_info = ? WHERE token_hash = ?",
-            (expires_at, device_info[:255] if device_info else "", token_hash)
-        )
-        session_id = existing_row[0] if isinstance(existing_row, (list, tuple)) else existing_row["id"]
-    else:
-        cursor.execute("""
-            INSERT INTO student_sessions (
-                id, student_id, token_hash, created_at, expires_at, is_revoked, device_info
-            ) VALUES (?, ?, ?, ?, ?, 0, ?)
-        """, (
-            session_id,
-            student_id,
-            token_hash,
-            now,
-            expires_at,
-            device_info[:255] if device_info else ""
-        ))
+        cursor.execute("SELECT id FROM student_sessions WHERE token_hash = ?", (token_hash,))
+        existing_row = cursor.fetchone()
+        if existing_row:
+            cursor.execute(
+                "UPDATE student_sessions SET expires_at = ?, is_revoked = 0, device_info = ? WHERE token_hash = ?",
+                (expires_at, device_info[:255] if device_info else "", token_hash)
+            )
+            session_id = existing_row[0] if isinstance(existing_row, (list, tuple)) else existing_row["id"]
+        else:
+            cursor.execute("""
+                INSERT INTO student_sessions (
+                    id, student_id, token_hash, created_at, expires_at, is_revoked, device_info
+                ) VALUES (?, ?, ?, ?, ?, 0, ?)
+            """, (
+                session_id,
+                student_id,
+                token_hash,
+                now,
+                expires_at,
+                device_info[:255] if device_info else ""
+            ))
 
-    conn.commit()
-    if close_conn:
-        conn.close()
-
-    return {
-        "id": session_id,
-        "student_id": student_id,
-        "token_hash": token_hash,
-        "created_at": now,
-        "expires_at": expires_at,
-        "is_revoked": 0
-    }
+        conn.commit()
+        return {
+            "id": session_id,
+            "student_id": student_id,
+            "token_hash": token_hash,
+            "created_at": now,
+            "expires_at": expires_at,
+            "is_revoked": 0
+        }
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("Failed to create student session: %s", e, exc_info=True)
+        raise
+    finally:
+        if close_conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def revoke_student_session(
