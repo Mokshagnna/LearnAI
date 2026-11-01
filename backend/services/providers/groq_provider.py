@@ -42,12 +42,10 @@ class GroqProvider(BaseAIProvider):
                 try:
                     from groq import Groq
                     # Client connection reuse across requests; per-request timeout passed in create()
-                    client = Groq(api_key=api_key, timeout=max(float(timeout_sec), 0.5), max_retries=0)
+                    client = Groq(api_key=api_key, timeout=max(float(timeout_sec), 30.0), max_retries=0)
                     self._client_cache[api_key] = client
                 except ImportError as e:
                     raise ProviderConfigError("groq python package is not installed.", category="DEPENDENCY_MISSING") from e
-            else:
-                client.timeout = max(float(timeout_sec), 0.5)
             return client
 
     def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 3000) -> str:
@@ -63,10 +61,12 @@ class GroqProvider(BaseAIProvider):
         if not keys_to_try:
             raise ProviderConfigError("GROQ_API_KEY is not configured.", category="MISSING_CREDENTIALS")
 
-        primary_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+        # Official verified Groq models: llama-3.3-70b-versatile, llama-3.1-8b-instant, mixtral-8x7b-32768
+        primary_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
         candidate_models = [primary_model]
-        for alt in ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]:
-            if alt not in candidate_models:
+        for alt in [fallback_model, "llama-3.1-70b-versatile", "mixtral-8x7b-32768"]:
+            if alt and alt not in candidate_models:
                 candidate_models.append(alt)
 
         last_error = None
@@ -87,10 +87,6 @@ class GroqProvider(BaseAIProvider):
                 call_start = time.perf_counter()
                 try:
                     logger.info(f"[GROQ START] key={key_label} model={current_model} timeout={time_left:.1f}s")
-                    extra_kwargs = {}
-                    if "gpt-oss" in current_model:
-                        extra_kwargs["extra_body"] = {"reasoning_effort": "low"}
-
                     chat_completion = client.chat.completions.create(
                         model=current_model,
                         messages=[
@@ -98,8 +94,7 @@ class GroqProvider(BaseAIProvider):
                         ],
                         temperature=0.3,
                         max_tokens=max_tokens,
-                        timeout=time_left,
-                        **extra_kwargs
+                        timeout=time_left
                     )
                     duration = time.perf_counter() - call_start
                     if not chat_completion.choices or not chat_completion.choices[0].message.content:
@@ -121,6 +116,13 @@ class GroqProvider(BaseAIProvider):
                         raise ProviderConfigError(
                             "Groq API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR"
                         ) from e
+
+                    if any(term in msg for term in ["model_not_found", "model not found", "does not exist", "404"]):
+                        logger.error(
+                            f"[GROQ MODEL NOT FOUND] key={key_label} model={current_model} "
+                            f"duration={duration:.2f}s: {sanitize_error_text(e)}. Attempting fallback model..."
+                        )
+                        continue
 
                     logger.warning(
                         f"[GROQ MODEL FALLBACK] key={key_label} model={current_model} "
@@ -152,16 +154,24 @@ class GroqProvider(BaseAIProvider):
 
         if last_error:
             msg = str(last_error).lower()
+            clean_err = sanitize_error_text(last_error)
+            if any(term in msg for term in ["model_not_found", "model not found", "does not exist", "404"]):
+                raise ProviderConfigError(
+                    f"Groq model not found or invalid model identifier: {clean_err}", category="MODEL_NOT_FOUND_404"
+                ) from last_error
             if any(term in msg for term in ["rate limit", "429", "too many requests"]):
                 raise ProviderUnavailableError(
                     "Groq rate limit reached across all models and keys.", category="RATE_LIMIT_429"
                 ) from last_error
-            clean_err = sanitize_error_text(last_error)
+            if any(term in msg for term in ["timeout", "timed out", "deadline"]) or "timeouterror" in type(last_error).__name__.lower():
+                raise ProviderUnavailableError(
+                    f"Groq request timed out: {clean_err}", category="TIMEOUT"
+                ) from last_error
             raise ProviderUnavailableError(
                 f"Groq service unavailable: {clean_err}", category="SERVICE_UNAVAILABLE"
             ) from last_error
 
-        raise ProviderUnavailableError("Groq timeout or all models exhausted.", category="SERVICE_UNAVAILABLE")
+        raise ProviderUnavailableError("Groq timeout or all models exhausted.", category="TIMEOUT")
 
     def generate_quiz_raw(
         self,

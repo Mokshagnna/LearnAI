@@ -102,17 +102,17 @@
         "question": "In digital image representation, how is a standard 8-bit RGB image stored in memory?",
         "options": {
           "A": "As a single continuous 1D Fourier spectrum",
-          "B": "As a 3D tensor of height × width × 3 color channels with values from 0 to 255",
+          "B": "As a 3D tensor of height \u00d7 width \u00d7 3 color channels with values from 0 to 255",
           "C": "As an array of complex floating-point numbers between -1.0 and 1.0",
           "D": "As a set of SVG mathematical vectors"
         },
         "correct_answer": "B",
         "difficulty": "Medium",
         "concept": "Digital Image Representation",
-        "explanation": "A standard digital color image is stored in memory as a 3D tensor of shape (Height × Width × Channels), where the 3 channels correspond to Red, Green, and Blue. For an 8-bit depth representation, each discrete channel value is an unsigned byte ranging from 0 to 255 (2^8 - 1).",
+        "explanation": "A standard digital color image is stored in memory as a 3D tensor of shape (Height \u00d7 Width \u00d7 Channels), where the 3 channels correspond to Red, Green, and Blue. For an 8-bit depth representation, each discrete channel value is an unsigned byte ranging from 0 to 255 (2^8 - 1).",
         "option_explanations": {
           "A": "Incorrect: 1D Fourier spectra represent frequency decompositions, not spatial raster bitmap storage.",
-          "B": "Correct: Standard 8-bit color images use a 3D tensor (H × W × 3) with integer intensities between 0 and 255.",
+          "B": "Correct: Standard 8-bit color images use a 3D tensor (H \u00d7 W \u00d7 3) with integer intensities between 0 and 255.",
           "C": "Incorrect: Unsigned 8-bit integers (0 to 255) are standard for bitmap storage; floating-point complexes are used in frequency domain analysis.",
           "D": "Incorrect: SVG vectors represent scalable path commands, whereas digital raster photographs are stored as pixel arrays."
         }
@@ -156,20 +156,20 @@
         }
       },
       {
-        "question": "Consider a camera observing a Lambertian surface. If the surface orientation tilts such that the angle between surface normal and illuminant doubles from 30° to 60°, how does the reflected radiance change according to Lambert's Cosine Law?",
+        "question": "Consider a camera observing a Lambertian surface. If the surface orientation tilts such that the angle between surface normal and illuminant doubles from 30\u00b0 to 60\u00b0, how does the reflected radiance change according to Lambert's Cosine Law?",
         "options": {
           "A": "It remains exactly identical because Lambertian surfaces reflect uniformly regardless of incident angle",
-          "B": "It drops from cos(30°) ≈ 0.866 to cos(60°) = 0.5 of maximum irradiance",
+          "B": "It drops from cos(30\u00b0) \u2248 0.866 to cos(60\u00b0) = 0.5 of maximum irradiance",
           "C": "It doubles because illuminance is inversely proportional to distance squared",
           "D": "It drops to zero due to total internal reflection"
         },
         "correct_answer": "B",
         "difficulty": "Hard",
         "concept": "Radiometry and Surface Reflectance",
-        "explanation": "According to Lambert's Cosine Law, the radiant intensity observed from an ideal diffuse (Lambertian) surface is directly proportional to the cosine of the angle theta between the surface normal and the incident illuminant vector: E = E_0 * cos(theta).\n1. For theta = 30°: cos(30°) = sqrt(3)/2 ≈ 0.866 of maximum.\n2. For theta = 60°: cos(60°) = 0.5 of maximum.\n3. Ratio of change: 0.5 / 0.866 ≈ 57.7% of the 30° radiance (dropping from 0.866 to 0.5).",
+        "explanation": "According to Lambert's Cosine Law, the radiant intensity observed from an ideal diffuse (Lambertian) surface is directly proportional to the cosine of the angle theta between the surface normal and the incident illuminant vector: E = E_0 * cos(theta).\n1. For theta = 30\u00b0: cos(30\u00b0) = sqrt(3)/2 \u2248 0.866 of maximum.\n2. For theta = 60\u00b0: cos(60\u00b0) = 0.5 of maximum.\n3. Ratio of change: 0.5 / 0.866 \u2248 57.7% of the 30\u00b0 radiance (dropping from 0.866 to 0.5).",
         "option_explanations": {
           "A": "Incorrect: While a Lambertian surface reflects radiance equally in all viewing directions, the incident irradiance received still depends strictly on the cosine of the illuminant incident angle.",
-          "B": "Correct: Incident irradiance follows cos(theta); as angle increases from 30° to 60°, the factor drops from cos(30°) ≈ 0.866 to cos(60°) = 0.5.",
+          "B": "Correct: Incident irradiance follows cos(theta); as angle increases from 30\u00b0 to 60\u00b0, the factor drops from cos(30\u00b0) \u2248 0.866 to cos(60\u00b0) = 0.5.",
           "C": "Incorrect: Irradiance decreases as the incident angle becomes more oblique; doubling the angle does not double irradiance.",
           "D": "Incorrect: Total internal reflection occurs when light travels from a denser to a rarer optical medium beyond the critical angle, not on exterior diffuse reflection."
         }
@@ -191,6 +191,398 @@
           "B": "Incorrect: The cross-ratio of four collinear points is the fundamental invariant of projective transformations.",
           "C": "Correct: Parallel lines in 3D that are not parallel to the camera image plane converge at vanishing points, so parallelism is NOT preserved.",
           "D": "Incorrect: Incidence (whether a point lies on a line) is strictly preserved under perspective projection."
+        }
+      }
+    ]
+  },
+  "22AM301::Losss Function": {
+    "subject": "Deep Learning",
+    "topic": "Loss Function",
+    "questions": [
+      {
+        "question": "What is the primary purpose of a loss function (cost function) in training a deep neural network?",
+        "options": {
+          "A": "To quantify the discrepancy between the network's predicted output and the true ground-truth targets to guide parameter updates",
+          "B": "To increase the total number of layers and hidden units automatically",
+          "C": "To store the input training dataset in GPU memory without compression",
+          "D": "To speed up the network clock speed during forward inference"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Loss Function Core Principles",
+        "explanation": "A loss function computes a scalar error value representing the difference between model predictions and ground-truth labels. The gradients of this loss with respect to model parameters dictate backpropagation weight updates.",
+        "option_explanations": {
+          "A": "Correct: The loss function measures prediction error, providing the scalar objective minimized via gradient descent.",
+          "B": "Incorrect: Architecture sizing and layer additions are determined by model design or hyperparameter search, not the loss formula.",
+          "C": "Incorrect: Data loading and GPU memory caching are handled by the data loader and tensor frameworks, not the loss function.",
+          "D": "Incorrect: Clock frequency and execution hardware speed are system properties unrelated to loss calculation."
+        }
+      },
+      {
+        "question": "For a multi-class classification problem with C mutually exclusive classes using a Softmax output layer, which loss function is standard?",
+        "options": {
+          "A": "Categorical Cross-Entropy Loss",
+          "B": "Mean Absolute Error (L1 Loss)",
+          "C": "Hinge Loss",
+          "D": "Triplet Margin Loss"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Cross-Entropy Loss",
+        "explanation": "Categorical Cross-Entropy Loss measures the performance of a classification model whose output is a probability distribution over C mutually exclusive classes generated by the softmax function: L = -sum(y_i * log(p_i)).",
+        "option_explanations": {
+          "A": "Correct: Categorical cross-entropy aligns with the probabilistic interpretation of softmax outputs in multi-class classification.",
+          "B": "Incorrect: Mean Absolute Error is suited for regression tasks, not multi-class discrete probability outputs.",
+          "C": "Incorrect: Hinge loss is primarily used in maximum-margin classifiers such as Support Vector Machines (SVMs).",
+          "D": "Incorrect: Triplet margin loss is used in metric learning and face verification, not standard multi-class classification."
+        }
+      },
+      {
+        "question": "In continuous regression problems, what is a key distinction between Mean Squared Error (MSE / L2) and Mean Absolute Error (MAE / L1)?",
+        "options": {
+          "A": "MSE penalizes large outlier errors quadratically, whereas MAE penalizes errors linearly and is more robust to outliers",
+          "B": "MSE can only take negative scalar values while MAE is strictly positive",
+          "C": "MAE is differentiable everywhere whereas MSE has a non-differentiable cusp at zero",
+          "D": "MSE requires binary target labels whereas MAE requires one-hot encoded vectors"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Mean Squared Error",
+        "explanation": "Because MSE squares the residual differences (y - y_hat)^2, large deviations receive quadratically amplified penalties. In contrast, MAE uses absolute deviations |y - y_hat|, resulting in constant gradient magnitude and superior robustness against isolated outliers.",
+        "option_explanations": {
+          "A": "Correct: Squaring the error makes MSE heavily sensitive to outliers, while L1 linear penalty is outlier-robust.",
+          "B": "Incorrect: Both MSE and MAE produce non-negative real scalar loss values.",
+          "C": "Incorrect: MSE is smooth and differentiable everywhere; MAE has a non-differentiable subgradient at error zero.",
+          "D": "Incorrect: Both MSE and MAE operate on continuous real-valued regression outputs, not discrete labels."
+        }
+      },
+      {
+        "question": "Which loss function is specifically designed for binary classification with a single sigmoid output unit p in (0, 1)?",
+        "options": {
+          "A": "Binary Cross-Entropy Loss (Log Loss)",
+          "B": "Poisson Negative Log-Likelihood Loss",
+          "C": "Connectionist Temporal Classification Loss",
+          "D": "Huber Loss with delta = 0"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Binary Classification Loss",
+        "explanation": "Binary Cross-Entropy (BCE) calculates L = -[y * log(p) + (1 - y) * log(1 - p)], deriving directly from the Bernoulli negative log-likelihood for binary target y in {0, 1}.",
+        "option_explanations": {
+          "A": "Correct: Binary cross-entropy is the standard maximum likelihood loss for Bernoulli-distributed binary classification.",
+          "B": "Incorrect: Poisson loss is tailored for count data and Poisson-distributed target variables.",
+          "C": "Incorrect: CTC loss is designed for sequence-to-sequence alignment tasks like speech recognition where input and output lengths differ.",
+          "D": "Incorrect: Huber loss is a robust regression loss combining L1 and L2 penalties."
+        }
+      },
+      {
+        "question": "Why does pairing Mean Squared Error (MSE) with a Sigmoid activation in the final layer of a classification network lead to slow initial learning (gradient saturation)?",
+        "options": {
+          "A": "The gradient of the loss with respect to the pre-activation input contains the term sigma'(z) = sigma(z)(1 - sigma(z)), which approaches zero when predictions are confidently wrong",
+          "B": "MSE cannot be differentiated when paired with transcendental functions like sigmoid",
+          "C": "The output of sigmoid exceeds the mathematical range expected by MSE",
+          "D": "Backpropagation fails because the Hessian matrix becomes strictly singular"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Optimization Implications",
+        "explanation": "For MSE with sigmoid output sigma(z), dL/dz = (sigma(z) - y) * sigma'(z). When the model is confidently wrong (e.g., y=1 but z << 0, sigma(z) approx 0), sigma'(z) becomes vanishingly small, causing the gradient to vanish and learning to stall.",
+        "option_explanations": {
+          "A": "Correct: The derivative of the sigmoid saturates near 0 for extreme values, causing vanishing gradients when combined with MSE.",
+          "B": "Incorrect: The composition of MSE and sigmoid is smooth and analytically differentiable everywhere.",
+          "C": "Incorrect: Sigmoid outputs are bounded in (0, 1), which fits safely within MSE's expected real domain.",
+          "D": "Incorrect: The loss surface is non-convex, but the failure is caused by gradient vanishing, not universal Hessian singularity."
+        }
+      },
+      {
+        "question": "How does Cross-Entropy loss paired with a Softmax or Sigmoid activation circumvent the gradient vanishing issue experienced by MSE?",
+        "options": {
+          "A": "The derivative of the log in cross-entropy cancels out the saturating exponential terms in sigmoid/softmax, producing a linear error gradient (p - y)",
+          "B": "Cross-entropy enforces zero gradient when the prediction error is large",
+          "C": "Cross-entropy computes second-order Newton-Raphson gradients directly",
+          "D": "Cross-entropy converts all non-linear activations into linear piecewise functions"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Gradient Behavior",
+        "explanation": "Because d/dz [-log(sigma(z))] = - (1 / sigma(z)) * sigma(z)(1 - sigma(z)) = sigma(z) - 1, the denominator cancels the derivative of the activation. The resulting gradient dL/dz is simply (p - y), which is directly proportional to the prediction error and never saturates when wrong.",
+        "option_explanations": {
+          "A": "Correct: The logarithm in cross-entropy mathematically cancels the sigmoid/softmax derivative, leaving a clean (prediction - target) gradient.",
+          "B": "Incorrect: A large prediction error produces a strong, non-zero gradient to quickly correct the model weights.",
+          "C": "Incorrect: Cross-entropy is evaluated using standard first-order backpropagation, not second-order Newton methods.",
+          "D": "Incorrect: Cross-entropy is a loss function and does not alter the underlying network activation functions."
+        }
+      },
+      {
+        "question": "In maximum margin classification and Support Vector Machines, what is the mathematical formulation of the standard Hinge Loss for true label y in {-1, +1} and model score s?",
+        "options": {
+          "A": "L(y, s) = max(0, 1 - y * s)",
+          "B": "L(y, s) = (1 - y * s)^2",
+          "C": "L(y, s) = log(1 + exp(-y * s))",
+          "D": "L(y, s) = -y * log(s)"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Hinge Loss",
+        "explanation": "Hinge loss is defined as L(y, s) = max(0, 1 - y * s). When the prediction is correct with margin at least 1 (y * s >= 1), the loss is exactly 0. Any sample violating the margin (y * s < 1) incurs a linear penalty.",
+        "option_explanations": {
+          "A": "Correct: Hinge loss yields zero penalty when the score satisfies the margin criterion y * s >= 1, and linear penalty otherwise.",
+          "B": "Incorrect: (1 - y * s)^2 represents Squared Hinge loss.",
+          "C": "Incorrect: log(1 + exp(-y * s)) represents the softplus / logistic loss used in logistic regression.",
+          "D": "Incorrect: -y * log(s) represents cross-entropy loss."
+        }
+      },
+      {
+        "question": "What does the Kullback-Leibler (KL) Divergence D_KL(P || Q) measure between probability distribution P and approximating distribution Q?",
+        "options": {
+          "A": "The relative entropy or information loss incurred when approximating the true distribution P with distribution Q",
+          "B": "The Euclidean geometric distance between two vector centroids in Hilbert space",
+          "C": "The covariance ratio between two independent continuous Gaussian random variables",
+          "D": "The classification accuracy of a generative adversarial discriminator"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Kullback-Leibler Divergence",
+        "explanation": "KL divergence D_KL(P || Q) = sum(P(x) * log(P(x) / Q(x))) measures the expected excess surprise or information lost when Q is used to approximate the true distribution P. It is non-negative, zero if and only if P = Q, and non-symmetric.",
+        "option_explanations": {
+          "A": "Correct: KL divergence quantifies relative entropy and information divergence between two probability distributions.",
+          "B": "Incorrect: KL divergence is an asymmetric information-theoretic measure, not a metric Euclidean distance.",
+          "C": "Incorrect: Covariance ratios measure bivariate correlation, not distribution divergence.",
+          "D": "Incorrect: While used in VAEs and generative models, KL divergence is a general statistical divergence measure, not discriminator accuracy."
+        }
+      },
+      {
+        "question": "Huber Loss is often used in robust regression. How does it transition between L2 (MSE) and L1 (MAE) based on threshold parameter delta?",
+        "options": {
+          "A": "It behaves as 0.5 * e^2 for small errors |e| <= delta (smooth and differentiable), and transitions to delta * (|e| - 0.5 * delta) for large errors |e| > delta (linear, robust to outliers)",
+          "B": "It applies L1 for small errors and exponential penalties for large errors",
+          "C": "It sets loss to zero whenever |e| > delta to discard outliers completely",
+          "D": "It switches from cross-entropy to hinge loss at error magnitude delta"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "Convexity and Optimization",
+        "explanation": "Huber loss strikes a compromise between MSE and MAE: for small residuals (|e| <= delta) it is quadratic (0.5 * e^2) ensuring a smooth unique minimum with continuous gradients; for large residuals (|e| > delta) it becomes linear (delta * |e| - 0.5 * delta^2), bounding gradient magnitude to +/- delta.",
+        "option_explanations": {
+          "A": "Correct: Huber loss is quadratic near 0 for smooth convergence and linear in the tails for outlier resilience.",
+          "B": "Incorrect: Huber loss is quadratic for small errors and linear for large errors, not exponential.",
+          "C": "Incorrect: Truncating loss to zero for large errors creates a discontinuous step penalty, unlike Huber loss.",
+          "D": "Incorrect: Huber loss operates entirely in the continuous regression domain between L1 and L2 penalties."
+        }
+      },
+      {
+        "question": "Focal Loss introduces a modulating factor (1 - p_t)^gamma to standard Cross-Entropy Loss. What problem in deep object detection (e.g. RetinaNet) does this solve?",
+        "options": {
+          "A": "Extreme class imbalance between easy background negatives and sparse foreground objects by down-weighting the loss contribution of well-classified easy examples",
+          "B": "Vanishing gradients caused by deep residual connections in transformer backbones",
+          "C": "Excessive memory allocation during multi-GPU gradient synchronization",
+          "D": "Overfitting caused by insufficient dropout in dense prediction heads"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "Focal Loss and Class Imbalance",
+        "explanation": "In dense object detection, millions of easily classified background candidates dominate the cumulative gradient. Focal loss adds (1 - p_t)^gamma: when p_t approx 1 (easy sample), (1 - p_t)^gamma approaches 0, suppressing easy negative gradients and focusing updates on hard, misclassified samples.",
+        "option_explanations": {
+          "A": "Correct: Focal loss dynamically scales cross-entropy, down-weighting well-classified easy examples to focus on difficult minority classes.",
+          "B": "Incorrect: Residual connections resolve vanishing gradients; focal loss addresses class imbalance.",
+          "C": "Incorrect: Gradient synchronization overhead is a distributed computing issue managed by AllReduce, not the loss function.",
+          "D": "Incorrect: Overfitting mitigation is achieved through regularization, data augmentation, or weight decay."
+        }
+      }
+    ]
+  },
+  "22AM301::Loss Function": {
+    "subject": "Deep Learning",
+    "topic": "Loss Function",
+    "questions": [
+      {
+        "question": "What is the primary purpose of a loss function (cost function) in training a deep neural network?",
+        "options": {
+          "A": "To quantify the discrepancy between the network's predicted output and the true ground-truth targets to guide parameter updates",
+          "B": "To increase the total number of layers and hidden units automatically",
+          "C": "To store the input training dataset in GPU memory without compression",
+          "D": "To speed up the network clock speed during forward inference"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Loss Function Core Principles",
+        "explanation": "A loss function computes a scalar error value representing the difference between model predictions and ground-truth labels. The gradients of this loss with respect to model parameters dictate backpropagation weight updates.",
+        "option_explanations": {
+          "A": "Correct: The loss function measures prediction error, providing the scalar objective minimized via gradient descent.",
+          "B": "Incorrect: Architecture sizing and layer additions are determined by model design or hyperparameter search, not the loss formula.",
+          "C": "Incorrect: Data loading and GPU memory caching are handled by the data loader and tensor frameworks, not the loss function.",
+          "D": "Incorrect: Clock frequency and execution hardware speed are system properties unrelated to loss calculation."
+        }
+      },
+      {
+        "question": "For a multi-class classification problem with C mutually exclusive classes using a Softmax output layer, which loss function is standard?",
+        "options": {
+          "A": "Categorical Cross-Entropy Loss",
+          "B": "Mean Absolute Error (L1 Loss)",
+          "C": "Hinge Loss",
+          "D": "Triplet Margin Loss"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Cross-Entropy Loss",
+        "explanation": "Categorical Cross-Entropy Loss measures the performance of a classification model whose output is a probability distribution over C mutually exclusive classes generated by the softmax function: L = -sum(y_i * log(p_i)).",
+        "option_explanations": {
+          "A": "Correct: Categorical cross-entropy aligns with the probabilistic interpretation of softmax outputs in multi-class classification.",
+          "B": "Incorrect: Mean Absolute Error is suited for regression tasks, not multi-class discrete probability outputs.",
+          "C": "Incorrect: Hinge loss is primarily used in maximum-margin classifiers such as Support Vector Machines (SVMs).",
+          "D": "Incorrect: Triplet margin loss is used in metric learning and face verification, not standard multi-class classification."
+        }
+      },
+      {
+        "question": "In continuous regression problems, what is a key distinction between Mean Squared Error (MSE / L2) and Mean Absolute Error (MAE / L1)?",
+        "options": {
+          "A": "MSE penalizes large outlier errors quadratically, whereas MAE penalizes errors linearly and is more robust to outliers",
+          "B": "MSE can only take negative scalar values while MAE is strictly positive",
+          "C": "MAE is differentiable everywhere whereas MSE has a non-differentiable cusp at zero",
+          "D": "MSE requires binary target labels whereas MAE requires one-hot encoded vectors"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Mean Squared Error",
+        "explanation": "Because MSE squares the residual differences (y - y_hat)^2, large deviations receive quadratically amplified penalties. In contrast, MAE uses absolute deviations |y - y_hat|, resulting in constant gradient magnitude and superior robustness against isolated outliers.",
+        "option_explanations": {
+          "A": "Correct: Squaring the error makes MSE heavily sensitive to outliers, while L1 linear penalty is outlier-robust.",
+          "B": "Incorrect: Both MSE and MAE produce non-negative real scalar loss values.",
+          "C": "Incorrect: MSE is smooth and differentiable everywhere; MAE has a non-differentiable subgradient at error zero.",
+          "D": "Incorrect: Both MSE and MAE operate on continuous real-valued regression outputs, not discrete labels."
+        }
+      },
+      {
+        "question": "Which loss function is specifically designed for binary classification with a single sigmoid output unit p in (0, 1)?",
+        "options": {
+          "A": "Binary Cross-Entropy Loss (Log Loss)",
+          "B": "Poisson Negative Log-Likelihood Loss",
+          "C": "Connectionist Temporal Classification Loss",
+          "D": "Huber Loss with delta = 0"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Binary Classification Loss",
+        "explanation": "Binary Cross-Entropy (BCE) calculates L = -[y * log(p) + (1 - y) * log(1 - p)], deriving directly from the Bernoulli negative log-likelihood for binary target y in {0, 1}.",
+        "option_explanations": {
+          "A": "Correct: Binary cross-entropy is the standard maximum likelihood loss for Bernoulli-distributed binary classification.",
+          "B": "Incorrect: Poisson loss is tailored for count data and Poisson-distributed target variables.",
+          "C": "Incorrect: CTC loss is designed for sequence-to-sequence alignment tasks like speech recognition where input and output lengths differ.",
+          "D": "Incorrect: Huber loss is a robust regression loss combining L1 and L2 penalties."
+        }
+      },
+      {
+        "question": "Why does pairing Mean Squared Error (MSE) with a Sigmoid activation in the final layer of a classification network lead to slow initial learning (gradient saturation)?",
+        "options": {
+          "A": "The gradient of the loss with respect to the pre-activation input contains the term sigma'(z) = sigma(z)(1 - sigma(z)), which approaches zero when predictions are confidently wrong",
+          "B": "MSE cannot be differentiated when paired with transcendental functions like sigmoid",
+          "C": "The output of sigmoid exceeds the mathematical range expected by MSE",
+          "D": "Backpropagation fails because the Hessian matrix becomes strictly singular"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Optimization Implications",
+        "explanation": "For MSE with sigmoid output sigma(z), dL/dz = (sigma(z) - y) * sigma'(z). When the model is confidently wrong (e.g., y=1 but z << 0, sigma(z) approx 0), sigma'(z) becomes vanishingly small, causing the gradient to vanish and learning to stall.",
+        "option_explanations": {
+          "A": "Correct: The derivative of the sigmoid saturates near 0 for extreme values, causing vanishing gradients when combined with MSE.",
+          "B": "Incorrect: The composition of MSE and sigmoid is smooth and analytically differentiable everywhere.",
+          "C": "Incorrect: Sigmoid outputs are bounded in (0, 1), which fits safely within MSE's expected real domain.",
+          "D": "Incorrect: The loss surface is non-convex, but the failure is caused by gradient vanishing, not universal Hessian singularity."
+        }
+      },
+      {
+        "question": "How does Cross-Entropy loss paired with a Softmax or Sigmoid activation circumvent the gradient vanishing issue experienced by MSE?",
+        "options": {
+          "A": "The derivative of the log in cross-entropy cancels out the saturating exponential terms in sigmoid/softmax, producing a linear error gradient (p - y)",
+          "B": "Cross-entropy enforces zero gradient when the prediction error is large",
+          "C": "Cross-entropy computes second-order Newton-Raphson gradients directly",
+          "D": "Cross-entropy converts all non-linear activations into linear piecewise functions"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Gradient Behavior",
+        "explanation": "Because d/dz [-log(sigma(z))] = - (1 / sigma(z)) * sigma(z)(1 - sigma(z)) = sigma(z) - 1, the denominator cancels the derivative of the activation. The resulting gradient dL/dz is simply (p - y), which is directly proportional to the prediction error and never saturates when wrong.",
+        "option_explanations": {
+          "A": "Correct: The logarithm in cross-entropy mathematically cancels the sigmoid/softmax derivative, leaving a clean (prediction - target) gradient.",
+          "B": "Incorrect: A large prediction error produces a strong, non-zero gradient to quickly correct the model weights.",
+          "C": "Incorrect: Cross-entropy is evaluated using standard first-order backpropagation, not second-order Newton methods.",
+          "D": "Incorrect: Cross-entropy is a loss function and does not alter the underlying network activation functions."
+        }
+      },
+      {
+        "question": "In maximum margin classification and Support Vector Machines, what is the mathematical formulation of the standard Hinge Loss for true label y in {-1, +1} and model score s?",
+        "options": {
+          "A": "L(y, s) = max(0, 1 - y * s)",
+          "B": "L(y, s) = (1 - y * s)^2",
+          "C": "L(y, s) = log(1 + exp(-y * s))",
+          "D": "L(y, s) = -y * log(s)"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Hinge Loss",
+        "explanation": "Hinge loss is defined as L(y, s) = max(0, 1 - y * s). When the prediction is correct with margin at least 1 (y * s >= 1), the loss is exactly 0. Any sample violating the margin (y * s < 1) incurs a linear penalty.",
+        "option_explanations": {
+          "A": "Correct: Hinge loss yields zero penalty when the score satisfies the margin criterion y * s >= 1, and linear penalty otherwise.",
+          "B": "Incorrect: (1 - y * s)^2 represents Squared Hinge loss.",
+          "C": "Incorrect: log(1 + exp(-y * s)) represents the softplus / logistic loss used in logistic regression.",
+          "D": "Incorrect: -y * log(s) represents cross-entropy loss."
+        }
+      },
+      {
+        "question": "What does the Kullback-Leibler (KL) Divergence D_KL(P || Q) measure between probability distribution P and approximating distribution Q?",
+        "options": {
+          "A": "The relative entropy or information loss incurred when approximating the true distribution P with distribution Q",
+          "B": "The Euclidean geometric distance between two vector centroids in Hilbert space",
+          "C": "The covariance ratio between two independent continuous Gaussian random variables",
+          "D": "The classification accuracy of a generative adversarial discriminator"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Kullback-Leibler Divergence",
+        "explanation": "KL divergence D_KL(P || Q) = sum(P(x) * log(P(x) / Q(x))) measures the expected excess surprise or information lost when Q is used to approximate the true distribution P. It is non-negative, zero if and only if P = Q, and non-symmetric.",
+        "option_explanations": {
+          "A": "Correct: KL divergence quantifies relative entropy and information divergence between two probability distributions.",
+          "B": "Incorrect: KL divergence is an asymmetric information-theoretic measure, not a metric Euclidean distance.",
+          "C": "Incorrect: Covariance ratios measure bivariate correlation, not distribution divergence.",
+          "D": "Incorrect: While used in VAEs and generative models, KL divergence is a general statistical divergence measure, not discriminator accuracy."
+        }
+      },
+      {
+        "question": "Huber Loss is often used in robust regression. How does it transition between L2 (MSE) and L1 (MAE) based on threshold parameter delta?",
+        "options": {
+          "A": "It behaves as 0.5 * e^2 for small errors |e| <= delta (smooth and differentiable), and transitions to delta * (|e| - 0.5 * delta) for large errors |e| > delta (linear, robust to outliers)",
+          "B": "It applies L1 for small errors and exponential penalties for large errors",
+          "C": "It sets loss to zero whenever |e| > delta to discard outliers completely",
+          "D": "It switches from cross-entropy to hinge loss at error magnitude delta"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "Convexity and Optimization",
+        "explanation": "Huber loss strikes a compromise between MSE and MAE: for small residuals (|e| <= delta) it is quadratic (0.5 * e^2) ensuring a smooth unique minimum with continuous gradients; for large residuals (|e| > delta) it becomes linear (delta * |e| - 0.5 * delta^2), bounding gradient magnitude to +/- delta.",
+        "option_explanations": {
+          "A": "Correct: Huber loss is quadratic near 0 for smooth convergence and linear in the tails for outlier resilience.",
+          "B": "Incorrect: Huber loss is quadratic for small errors and linear for large errors, not exponential.",
+          "C": "Incorrect: Truncating loss to zero for large errors creates a discontinuous step penalty, unlike Huber loss.",
+          "D": "Incorrect: Huber loss operates entirely in the continuous regression domain between L1 and L2 penalties."
+        }
+      },
+      {
+        "question": "Focal Loss introduces a modulating factor (1 - p_t)^gamma to standard Cross-Entropy Loss. What problem in deep object detection (e.g. RetinaNet) does this solve?",
+        "options": {
+          "A": "Extreme class imbalance between easy background negatives and sparse foreground objects by down-weighting the loss contribution of well-classified easy examples",
+          "B": "Vanishing gradients caused by deep residual connections in transformer backbones",
+          "C": "Excessive memory allocation during multi-GPU gradient synchronization",
+          "D": "Overfitting caused by insufficient dropout in dense prediction heads"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "Focal Loss and Class Imbalance",
+        "explanation": "In dense object detection, millions of easily classified background candidates dominate the cumulative gradient. Focal loss adds (1 - p_t)^gamma: when p_t approx 1 (easy sample), (1 - p_t)^gamma approaches 0, suppressing easy negative gradients and focusing updates on hard, misclassified samples.",
+        "option_explanations": {
+          "A": "Correct: Focal loss dynamically scales cross-entropy, down-weighting well-classified easy examples to focus on difficult minority classes.",
+          "B": "Incorrect: Residual connections resolve vanishing gradients; focal loss addresses class imbalance.",
+          "C": "Incorrect: Gradient synchronization overhead is a distributed computing issue managed by AllReduce, not the loss function.",
+          "D": "Incorrect: Overfitting mitigation is achieved through regularization, data augmentation, or weight decay."
         }
       }
     ]

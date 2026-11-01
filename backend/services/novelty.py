@@ -227,7 +227,9 @@ GENERIC_DOMAIN_WORDS = {
     "function", "functions", "model", "models", "structure", "structures",
     "analysis", "technique", "techniques", "simple", "general", "standard",
     "different", "following", "given", "common", "important", "order", "value", "values",
-    "data", "database", "databases", "query", "queries"
+    "data", "database", "databases", "query", "queries",
+    "layer", "layers", "activation", "activations", "gradient", "gradients",
+    "output", "outputs", "input", "inputs", "parameter", "parameters", "weight", "weights"
 }
 
 
@@ -282,10 +284,10 @@ def is_question_relevant_to_topic(
             from services.curriculum_service import curriculum_service
             crs = curriculum_service.get_course(course_code)
             if crs:
-                target_lower = topic_name.strip().lower()
+                target_clean = re.sub(r'[^a-z0-9]', '', topic_name.lower()).replace('losss', 'loss')
                 for ct in crs.get("topics", []):
-                    ct_name = ct.get("name", "").strip().lower()
-                    if ct_name == target_lower or ct_name in target_lower or target_lower in ct_name:
+                    ct_clean = re.sub(r'[^a-z0-9]', '', ct.get("name", "").lower()).replace('losss', 'loss')
+                    if ct_clean == target_clean or (len(target_clean) >= 4 and target_clean in ct_clean) or (len(ct_clean) >= 4 and ct_clean in target_clean):
                         for c in ct.get("concepts", []):
                             target_concepts_lower.add(str(c).strip().lower())
                             for kw in extract_concept_keywords(normalise_text(str(c))):
@@ -310,7 +312,7 @@ def is_question_relevant_to_topic(
 
     stem_matches = []
     for kw in target_keywords:
-        if kw not in GENERIC_DOMAIN_WORDS and len(kw) >= 4 and any(kw in qw or qw in kw for qw in q_keywords if len(qw) >= 4):
+        if kw not in GENERIC_DOMAIN_WORDS and len(kw) >= 4 and any((qw.startswith(kw) or kw.startswith(qw)) for qw in q_keywords if len(qw) >= 4):
             stem_matches.append(kw)
 
     has_target_relevance = (len(distinctive) >= 1) or (len(shared) >= 2) or (len(stem_matches) >= 1)
@@ -332,16 +334,27 @@ def is_question_relevant_to_topic(
             elif isinstance(ct, dict) and ct.get("topic_name") and ct["topic_name"].strip().lower() not in seen_competing_names:
                 seen_competing_names.add(ct["topic_name"].strip().lower())
                 competing_specs.append({"name": ct["topic_name"].strip(), "concepts": ct.get("matched_concepts", [])})
+    course_wide_kws: Set[str] = set()
     if course_code:
         try:
             from services.curriculum_service import curriculum_service
+            from collections import Counter
             crs = curriculum_service.get_course(course_code)
             if crs:
-                target_lower = topic_name.strip().lower()
+                course_kws = extract_concept_keywords(normalise_text(crs.get("name", "")))
+                kw_counts = Counter()
+                for ct in crs.get("topics", []):
+                    vocab = [ct.get("name", "")] + [str(c) for c in ct.get("concepts", [])]
+                    for kw in extract_concept_keywords(normalise_text(" ".join(vocab))):
+                        kw_counts[kw] += 1
+                course_wide_kws = {kw for kw, cnt in kw_counts.items() if cnt >= 2} | course_kws
+
+                target_clean = re.sub(r'[^a-z0-9]', '', topic_name.lower()).replace('losss', 'loss')
                 for ct in crs.get("topics", []):
                     ct_name = ct.get("name", "").strip()
+                    ct_clean = re.sub(r'[^a-z0-9]', '', ct_name.lower()).replace('losss', 'loss')
                     if ct_name and ct_name.lower() not in seen_competing_names:
-                        if target_lower in ct_name.lower() or ct_name.lower() in target_lower:
+                        if ct_clean == target_clean or (len(target_clean) >= 4 and target_clean in ct_clean) or (len(ct_clean) >= 4 and ct_clean in target_clean):
                             continue
                         seen_competing_names.add(ct_name.lower())
                         competing_specs.append(ct)
@@ -357,8 +370,8 @@ def is_question_relevant_to_topic(
         c_norm = normalise_text(" ".join(c_vocab))
         c_kw = extract_concept_keywords(c_norm)
 
-        # Competing keywords exclusive of target topic keywords
-        comp_exclusive = (c_kw - target_keywords) - GENERIC_DOMAIN_WORDS
+        # Competing keywords exclusive of target topic keywords, generic domain words, and course-wide terms
+        comp_exclusive = ((c_kw - target_keywords) - GENERIC_DOMAIN_WORDS) - course_wide_kws
         if not comp_exclusive:
             continue
 

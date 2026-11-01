@@ -167,6 +167,9 @@ class NvidiaProvider(BaseAIProvider):
         candidate_models = [primary_model]
         if fallback_model and fallback_model.lower() not in ("none", "false", "") and fallback_model not in candidate_models:
             candidate_models.append(fallback_model)
+        for alt in ["meta/llama-3.1-8b-instruct"]:
+            if alt not in candidate_models:
+                candidate_models.append(alt)
 
         last_error = None
         overall_start = time.perf_counter()
@@ -273,16 +276,17 @@ class NvidiaProvider(BaseAIProvider):
         # Both keys exhausted
         if last_error:
             cat = self._categorize(last_error)
+            clean_err = sanitize_error_text(last_error)
             if cat == "RATE_LIMIT_429":
                 raise ProviderUnavailableError("NVIDIA rate limit reached.", category="RATE_LIMIT_429") from None
-
-            clean_err = sanitize_error_text(last_error)
-            if cat in ("SERVICE_UNAVAILABLE_503", "CLIENT_TIMEOUT", "NETWORK_ERROR") or cat.startswith("SERVER_ERROR"):
-                raise ProviderUnavailableError(f"NVIDIA service unavailable: {clean_err}", category="SERVICE_UNAVAILABLE") from None
+            if cat == "CLIENT_TIMEOUT" or "timeout" in clean_err.lower():
+                raise ProviderUnavailableError(f"NVIDIA request timed out: {clean_err}", category="TIMEOUT") from None
+            if cat in ("SERVICE_UNAVAILABLE_503", "NETWORK_ERROR") or cat.startswith("SERVER_ERROR"):
+                raise ProviderUnavailableError(f"NVIDIA service unavailable: {clean_err}", category=cat) from None
 
             raise ProviderError(f"NVIDIA call failed ({cat}): {clean_err}", category="UNKNOWN_ERROR") from None
 
-        raise ProviderUnavailableError("NVIDIA: budget exhausted or all models/keys exhausted.", category="SERVICE_UNAVAILABLE") from None
+        raise ProviderUnavailableError("NVIDIA: budget exhausted or all models/keys exhausted.", category="TIMEOUT") from None
 
     def generate_quiz_raw(
         self,

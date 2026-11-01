@@ -156,6 +156,14 @@ def _load_local_demo_questions(
         if key in demo_data:
             data = demo_data[key]
         else:
+            import re
+            norm_key = re.sub(r'[^a-zA-Z0-9]+', '', key).lower().replace('losss', 'loss')
+            for k in demo_data:
+                k_norm = re.sub(r'[^a-zA-Z0-9]+', '', k).lower().replace('losss', 'loss')
+                if k_norm == norm_key:
+                    data = demo_data[k]
+                    break
+        if not data:
             for item in demo_data.get("quizzes", []):
                 if item.get("course_code") == course_code and item.get("topic") == topic_name:
                     data = item
@@ -367,7 +375,7 @@ def generate_quiz(
 
     # ── Provider orchestration ────────────────────────────────────────────────
     start_time = time.perf_counter()
-    overall_deadline = float(os.getenv("OVERALL_DEADLINE_SECONDS", "25.0"))
+    overall_deadline = float(os.getenv("OVERALL_DEADLINE_SECONDS", "40.0"))
 
     providers = _get_providers()
     configured_providers = [p for p in providers if p.is_configured()]
@@ -408,7 +416,7 @@ def generate_quiz(
     best_novelty_score = -1
 
     num_configured = len(configured_providers)
-    provider_timeout_budget = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "12.0"))
+    provider_timeout_budget = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "25.0"))
     max_retries = int(os.getenv("MAX_PROVIDER_RETRIES") or os.getenv("AI_MAX_RETRIES", "1"))
 
     for p_idx, provider in enumerate(configured_providers):
@@ -433,7 +441,7 @@ def generate_quiz(
             else:
                 # Multi-provider mode: reserve budget for subsequent configured providers
                 remaining_providers = configured_providers[p_idx + 1:]
-                reserve_needed = sum(10.0 if p.name == "gemini" else (4.0 if p.name == "nvidia" else 3.0) for p in remaining_providers)
+                reserve_needed = sum(10.0 if p.name == "gemini" else (12.0 if p.name == "nvidia" else 5.0) for p in remaining_providers)
                 if reserve_needed > 0 and time_remaining > min_required_time:
                     max_alloc = max(time_remaining - reserve_needed, min_required_time)
                     provider_timeout = min(provider_timeout_budget, max_alloc)

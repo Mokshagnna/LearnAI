@@ -140,6 +140,7 @@ def clean_topic_display_name(raw_name: str) -> str:
 
     cleaned = re.sub(r'\bFirst Order Differential Equations\b', 'First-Order Differential Equations', cleaned, flags=re.I)
     cleaned = re.sub(r'\bSecond Order Differential Equations\b', 'Second-Order Differential Equations', cleaned, flags=re.I)
+    cleaned = re.sub(r'\bLosss\b', 'Loss', cleaned, flags=re.I)
 
     return cleaned
 
@@ -711,17 +712,18 @@ class CurriculumService:
                 if t["name"].strip().lower() == clean_target:
                     return course, t
 
-            # 3. Lookup ignoring hyphens and punctuation
+            # 3. Lookup ignoring hyphens and punctuation with typo tolerance
             clean_alnum_target = re.sub(r'[^a-z0-9]', '', clean_target)
+            clean_alnum_norm = clean_alnum_target.replace('losss', 'loss')
             for t in topics:
                 t_alnum = re.sub(r'[^a-z0-9]', '', t["name"].lower())
-                if t_alnum and t_alnum == clean_alnum_target:
+                if t_alnum and (t_alnum == clean_alnum_target or t_alnum.replace('losss', 'loss') == clean_alnum_norm):
                     return course, t
 
             # 4. Lookup by raw_name alias
             for t in topics:
                 raw_n = (t.get("raw_name") or "").strip().lower()
-                if raw_n == clean_target:
+                if raw_n == clean_target or raw_n.replace('losss', 'loss') == clean_target.replace('losss', 'loss'):
                     return course, t
 
             # 5. Lookup by concepts
