@@ -65,7 +65,7 @@ class GroqProvider(BaseAIProvider):
         primary_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
         candidate_models = [primary_model]
-        for alt in [fallback_model, "llama-3.1-70b-versatile", "mixtral-8x7b-32768"]:
+        for alt in [fallback_model, "llama-3.1-8b-instant"]:
             if alt and alt not in candidate_models:
                 candidate_models.append(alt)
 

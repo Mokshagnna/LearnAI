@@ -1858,12 +1858,13 @@ $("retakeBtn").addEventListener("click", async () => {
   // 2. Clear all result view DOM elements so old marks can NEVER leak
   clearResultDisplay();
 
-  // 3. Clear question view DOM elements
+  // 3. Clear question view DOM elements and session state
   if ($("options")) $("options").innerHTML = "";
   if ($("question")) $("question").textContent = "";
   if ($("concept")) $("concept").textContent = "";
   if ($("progressBar")) $("progressBar").style.width = "0%";
   if ($("progressPercent")) $("progressPercent").textContent = "0% completed";
+  clearSessionState();
 
   // 4. Launch fresh quiz generation for retake
   await startQuizGeneration(courseCode, topic, true, topicId, activeNotesSessionId, activeStudyMaterialId);
@@ -1907,6 +1908,15 @@ function returnFromLoading() {
     openStudyMaterials();
   } else {
     goToHome();
+    if (activeCourseCode && $("course")) {
+      $("course").value = activeCourseCode;
+      $("course").dispatchEvent(new Event("change"));
+      setTimeout(() => {
+        if ($("topic") && activeTopicName) {
+          $("topic").value = activeTopicName;
+        }
+      }, 50);
+    }
   }
 }
 
@@ -2020,8 +2030,8 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
 
     if (!res.ok) {
       const errMsg = (data && data.detail)
-        ? (typeof data.detail === "object" ? data.detail.message : data.detail)
-        : "AI service is temporarily busy. Please try again.";
+        ? (typeof data.detail === "object" ? (data.detail.message || "Quiz generation is temporarily unavailable. Please try again shortly.") : data.detail)
+        : "Quiz generation is temporarily unavailable. Please try again shortly.";
       throw new Error(errMsg);
     }
 
@@ -2073,11 +2083,23 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     // Stay on loading section with clean, human-readable error with Retry & Cancel
     if (spinner) spinner.style.display = "none";
 
-    let friendlyMsg = "AI service is temporarily busy. Please try again shortly.";
+    let friendlyMsg = "Quiz generation is temporarily unavailable. Please try again shortly.";
     if (e.name === "AbortError") {
       friendlyMsg = "Quiz generation was cancelled or timed out. Please try again.";
     } else if (e.message && typeof e.message === "string" && e.message.trim().length > 0 && !e.message.startsWith("{")) {
-      friendlyMsg = e.message;
+      const lower = e.message.toLowerCase();
+      if (
+        lower.includes("high demand") ||
+        lower.includes("rate limit") ||
+        lower.includes("quota exceeded") ||
+        lower.includes("unavailable") ||
+        lower.includes("temporarily busy") ||
+        lower.includes("timed out")
+      ) {
+        friendlyMsg = "Quiz generation is temporarily unavailable. Please try again shortly.";
+      } else {
+        friendlyMsg = e.message;
+      }
     }
 
     if ($("loadingErrorMsg")) $("loadingErrorMsg").textContent = friendlyMsg;

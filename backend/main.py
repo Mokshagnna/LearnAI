@@ -1527,7 +1527,12 @@ def create_quiz(req: QuizRequest, request: Request):
 
         )
 
-        raise HTTPException(status_code=status_code, detail=str(e))
+        headers = {
+            "X-Error-Category": cat,
+            "X-Retryable": "true" if getattr(e, "retryable", False) else "false"
+        }
+
+        raise HTTPException(status_code=status_code, detail=str(e), headers=headers)
 
     except Exception as e:
 

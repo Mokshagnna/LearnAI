@@ -103,6 +103,10 @@ class GeminiProvider(BaseAIProvider):
         status = (getattr(exc, "status", "") or "").lower()
         if "not found" in msg or "404" in msg:
             return "MODEL_NOT_FOUND_404"
+        if "503" in msg or "service unavailable" in msg or "high demand" in msg:
+            return "SERVICE_UNAVAILABLE_503"
+        if "429" in msg or "rate limit" in msg or "resource exhausted" in msg or "quota" in msg:
+            return "RATE_LIMIT_429"
         if "deadline" in msg or "deadline_exceeded" in status or "504" in msg:
             return "DEADLINE_EXCEEDED_504"
         exc_name = type(exc).__name__
@@ -136,11 +140,11 @@ class GeminiProvider(BaseAIProvider):
         if not keys_to_try:
             raise ProviderConfigError("GEMINI_API_KEY is not configured.", category="MISSING_CREDENTIALS") from None
 
-        # Official verified Gemini models: gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-flash
-        primary_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        # Official verified active Gemini models: gemini-2.0-flash, gemini-1.5-flash
+        primary_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
         fallback_model = os.getenv(
             "GEMINI_FALLBACK_MODEL",
-            "gemini-2.0-flash" if primary_model != "gemini-2.0-flash" else "gemini-1.5-flash"
+            "gemini-1.5-flash" if primary_model != "gemini-1.5-flash" else "gemini-2.0-flash"
         )
 
         models_to_try = [primary_model]

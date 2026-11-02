@@ -162,7 +162,7 @@ class NvidiaProvider(BaseAIProvider):
         primary_model = os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
         fallback_model = os.getenv(
             "NVIDIA_FALLBACK_MODEL",
-            "meta/llama-3.1-70b-instruct" if primary_model != "meta/llama-3.1-70b-instruct" else "meta/llama-3.3-70b-instruct"
+            "meta/llama-3.1-8b-instruct" if primary_model != "meta/llama-3.1-8b-instruct" else "meta/llama-3.3-70b-instruct"
         )
         candidate_models = [primary_model]
         if fallback_model and fallback_model.lower() not in ("none", "false", "") and fallback_model not in candidate_models:

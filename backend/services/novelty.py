@@ -11,7 +11,7 @@ from typing import List, Tuple, Dict, Any, Set, Optional
 
 logger = logging.getLogger("learnai.novelty")
 
-TEXT_DUPLICATE_THRESHOLD = 0.45     # Jaccard on word trigrams/bigrams (lower = stricter)
+TEXT_DUPLICATE_THRESHOLD = 0.55     # Jaccard on word trigrams/bigrams (lower = stricter)
 CONCEPT_SIMILARITY_THRESHOLD = 0.50 # Jaccard on normalized concept tokens (lower = stricter)
 HISTORY_QUESTION_LIMIT = 50         # Max recent questions retained in memory
 HISTORY_CONCEPT_LIMIT = 30          # Max recent concepts retained in memory
@@ -23,8 +23,233 @@ COMMON_STOPWORDS = {
     "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
     "do", "does", "did", "which", "what", "how", "why", "when", "where", "who",
     "that", "this", "these", "those", "and", "or", "but", "if", "not", "as",
-    "can", "could", "should", "would", "will", "shall", "into", "through", "about"
+    "can", "could", "should", "would", "will", "shall", "into", "through", "about",
+    "its", "it", "they", "them", "their", "take", "takes", "taken", "main", "primary",
+    "one", "single", "following", "given", "statement", "true", "false", "correct",
+    "incorrect", "best", "describes", "describe", "regarding", "respect", "using",
+    "question", "questions", "attempt", "attempts", "quiz",
+    "logical", "gate", "gates", "neuron", "neurons"
 }
+
+LOGIC_KEYWORDS = {
+    "and", "or", "not", "xor", "nand", "nor", "xnor",
+    "and_gate", "or_gate", "not_gate", "xor_gate", "nand_gate", "nor_gate", "xnor_gate"
+}
+
+# ── Domain Alias and Learning Objective Canonicalization ─────────────────────
+ALIAS_MAP = {
+    "and gate": "and_gate",
+    "or gate": "or_gate",
+    "not gate": "not_gate",
+    "xor gate": "xor_gate",
+    "nand gate": "nand_gate",
+    "nor gate": "nor_gate",
+    "xnor gate": "xnor_gate",
+    "logical and": "and_gate",
+    "logical or": "or_gate",
+    "logical not": "not_gate",
+    "logical xor": "xor_gate",
+    "logical nand": "nand_gate",
+    "logical nor": "nor_gate",
+    "inhibitory input": "inhibition_facet",
+    "inhibitory inputs": "inhibition_facet",
+    "excitatory input": "excitation_facet",
+    "excitatory inputs": "excitation_facet",
+    "input values": "input_domain_facet",
+    "allowed inputs": "input_domain_facet",
+    "binary inputs": "input_domain_facet",
+    "input domain": "input_domain_facet",
+    "primary function": "purpose_facet",
+    "function of": "purpose_facet",
+    "main purpose": "purpose_facet",
+    "mcculloch-pitts neuron": "mp_neuron",
+    "mcculloch pitts neuron": "mp_neuron",
+    "mcculloch-pitts neurons": "mp_neuron",
+    "mcculloch pitts neurons": "mp_neuron",
+    "mcculloch pitts": "mp_neuron",
+    "mcculloch-pitts": "mp_neuron",
+    "m-p": "mp_neuron",
+    "m p": "mp_neuron",
+    "mp neuron": "mp_neuron",
+    "mp neurons": "mp_neuron",
+    "artificial neural network": "ann",
+    "artificial neural networks": "ann",
+    "neural network": "ann",
+    "neural networks": "ann",
+    "convolutional neural network": "cnn",
+    "convolutional neural networks": "cnn",
+    "recurrent neural network": "rnn",
+    "recurrent neural networks": "rnn",
+    "exclusive or": "xor",
+    "exclusive-or": "xor",
+    "support vector machine": "svm",
+    "support vector machines": "svm",
+    "gradient descent": "gd",
+    "stochastic gradient descent": "sgd",
+    "mean squared error": "mse",
+    "mean square error": "mse",
+    "cross entropy": "cross_entropy",
+    "cross-entropy": "cross_entropy",
+    "backpropagation": "backprop",
+    "back-propagation": "backprop",
+    "back propagation": "backprop",
+    "activation function": "activation_facet",
+    "transfer function": "activation_facet",
+    "loss function": "loss_facet",
+    "cost function": "loss_facet",
+    "objective function": "loss_facet",
+}
+
+SYNONYM_MAP = {
+    "purpose": "purpose_facet",
+    "role": "purpose_facet",
+    "objective": "purpose_facet",
+    "goal": "purpose_facet",
+    "aim": "purpose_facet",
+    "implement": "implement_facet",
+    "implements": "implement_facet",
+    "implementing": "implement_facet",
+    "realize": "implement_facet",
+    "realizes": "implement_facet",
+    "realizing": "implement_facet",
+    "realise": "implement_facet",
+    "realises": "implement_facet",
+    "realising": "implement_facet",
+    "realizable": "implement_facet",
+    "realisable": "implement_facet",
+    "compute": "implement_facet",
+    "computing": "implement_facet",
+    "solve": "implement_facet",
+    "solves": "implement_facet",
+    "solving": "implement_facet",
+    "values": "input_domain_facet",
+    "value": "input_domain_facet",
+    "accepted": "input_domain_facet",
+    "domain": "input_domain_facet",
+    "allowed": "input_domain_facet",
+    "inhibition": "inhibition_facet",
+    "inhibitory": "inhibition_facet",
+    "excitation": "excitation_facet",
+    "excitatory": "excitation_facet",
+    "cannot": "limitation_facet",
+    "cant": "limitation_facet",
+    "unable": "limitation_facet",
+    "prevent": "limitation_facet",
+    "prevents": "limitation_facet",
+    "prevented": "limitation_facet",
+    "limitation": "limitation_facet",
+    "limitations": "limitation_facet",
+    "drawback": "limitation_facet",
+    "drawbacks": "limitation_facet",
+    "weakness": "limitation_facet",
+    "weaknesses": "limitation_facet",
+    "fail": "limitation_facet",
+    "fails": "limitation_facet",
+    "failure": "limitation_facet",
+    "advantage": "advantage_facet",
+    "benefit": "advantage_facet",
+    "strength": "advantage_facet",
+    "definition": "definition_facet",
+    "define": "definition_facet",
+    "meaning": "definition_facet",
+    "characteristic": "property_facet",
+    "property": "property_facet",
+    "feature": "property_facet",
+    "linear": "linear_facet",
+    "linearly": "linear_facet",
+    "separable": "separable_facet",
+    "separability": "separable_facet",
+    "chain rule": "chain_rule_facet",
+    "weight update": "weight_update_facet",
+    "update weights": "weight_update_facet",
+    "weights updated": "weight_update_facet",
+    "gradient calculation": "gradient_calc_facet",
+    "calculating gradients": "gradient_calc_facet",
+    "compute derivatives": "gradient_calc_facet",
+}
+
+def canonicalize_text(text: str, topic_name: str = "") -> str:
+    """Normalize text and map domain aliases and synonyms to canonical tokens."""
+    if not text:
+        return ""
+    t = text.lower()
+    t = re.sub(r"['\"’]", "", t)
+    t = re.sub(r"[^\w\s-]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+
+    # Map multi-word aliases first
+    for alias, replacement in ALIAS_MAP.items():
+        t = re.sub(rf"\b{re.escape(alias)}\b", replacement, t)
+
+    for phrase, replacement in SYNONYM_MAP.items():
+        if " " in phrase:
+            t = re.sub(rf"\b{re.escape(phrase)}\b", replacement, t)
+
+    words = t.split()
+    mapped_words = []
+    for w in words:
+        clean_w = w.strip("-")
+        mapped = SYNONYM_MAP.get(clean_w, clean_w)
+        mapped_words.append(mapped)
+
+    res = " ".join(mapped_words)
+    if topic_name:
+        topic_entity = None
+        for alias, rep in ALIAS_MAP.items():
+            if alias in topic_name.lower():
+                topic_entity = rep
+                break
+        if topic_entity and topic_entity not in res:
+            res = f"{res} {topic_entity}"
+
+    return res
+
+def extract_canonical_tokens(text: str, topic_name: str = "") -> Set[str]:
+    """Extract canonical semantic tokens after alias and synonym normalization."""
+    can = canonicalize_text(text, topic_name=topic_name)
+    words = set(can.split())
+    return {w for w in words if w not in COMMON_STOPWORDS and len(w) > 2}
+
+def calculate_canonical_similarity(q1: str, q2: str, topic_name: str = "") -> float:
+    """Calculates Jaccard overlap on canonicalized domain and facet tokens."""
+    t1 = extract_canonical_tokens(q1, topic_name=topic_name)
+    t2 = extract_canonical_tokens(q2, topic_name=topic_name)
+    if not t1 or not t2:
+        return 0.0
+    if t1 == t2:
+        return 1.0
+    intersection = len(t1 & t2)
+    union = len(t1 | t2)
+    return intersection / union if union else 0.0
+
+def extract_learning_objective(question_text: str, concept_tag: str = "", topic_name: str = "") -> str:
+    """
+    Extracts a structured entity:facet learning objective tag.
+    Identifies the core target entity and the cognitive facet being tested.
+    """
+    combined = f"{question_text} {concept_tag} {topic_name}"
+    can_tokens = extract_canonical_tokens(combined, topic_name=topic_name)
+
+    # 1. Identify Target Entity
+    entity = "general_topic"
+    for e in ["mp_neuron", "perceptron", "mlp", "ann", "cnn", "rnn", "lstm", "svm", "backprop", "xor", "loss_facet", "mse", "cross_entropy", "gd", "sgd"]:
+        if e in can_tokens:
+            entity = e
+            break
+
+    # 2. Specific logic gate facet
+    for g in ["and_gate", "or_gate", "not_gate", "xor_gate", "nand_gate", "nor_gate", "xnor_gate"]:
+        if g in can_tokens:
+            return f"{entity}:{g}"
+
+    # 3. Identify Target Facet
+    facet = "concept_general"
+    for f in ["purpose_facet", "implement_facet", "input_domain_facet", "inhibition_facet", "excitation_facet", "limitation_facet", "advantage_facet", "definition_facet", "chain_rule_facet", "weight_update_facet", "gradient_calc_facet"]:
+        if f in can_tokens:
+            facet = f
+            break
+
+    return f"{entity}:{facet}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -47,10 +272,10 @@ def fingerprint(question_text: str) -> str:
 
 
 def extract_concept_keywords(concept_text: str) -> Set[str]:
-    """Extract significant content keywords from a concept tag."""
+    """Extract significant content keywords from a concept tag, preserving domain logic operators."""
     norm = normalise_text(concept_text)
     words = set(norm.split())
-    keywords = {w for w in words if w not in COMMON_STOPWORDS and len(w) > 2}
+    keywords = {w for w in words if (w in LOGIC_KEYWORDS or (w not in COMMON_STOPWORDS and len(w) > 2))}
     return keywords if keywords else words
 
 
@@ -96,8 +321,9 @@ def calculate_question_similarity(q1: str, q2: str) -> float:
     bigrams2 = _ngrams(norm2, 2)
     j_bi = _jaccard(bigrams1, bigrams2)
 
-    # Blend: strong keyword overlap (paraphrasing) or n-gram match (phrasing copy)
-    return max(j_tri, j_bi * 0.9, j_kw * 0.85)
+    can_sim = calculate_canonical_similarity(q1, q2)
+    # Blend: strong keyword overlap, n-gram match, or canonical alias/synonym overlap
+    return max(j_tri, j_bi * 0.9, j_kw * 0.85, can_sim)
 
 
 def calculate_concept_similarity(concept1: str, concept2: str) -> float:
@@ -138,15 +364,17 @@ def are_options_duplicate(opts1: Any, opts2: Any) -> Tuple[bool, float]:
     return (overlap >= 0.75, overlap)
 
 
-def is_question_near_duplicate(q1: Dict[str, Any], q2: Dict[str, Any]) -> Tuple[bool, str]:
+def is_question_near_duplicate(q1: Dict[str, Any], q2: Dict[str, Any], topic_name: str = "") -> Tuple[bool, str]:
     """
-    Determines if q2 is an exact or near-duplicate of q1 within the same quiz or across attempts.
+    Determines if q2 is an exact, near-duplicate, or equivalent learning objective duplicate of q1.
     Checks:
-      1. Exact wording match
+      1. Exact wording match (Level 1)
       2. Artificial variation patterns: '(Application Variation)', 'Variation'
-      3. High textual similarity (phrasing copy)
-      4. Option set permutation with shared question topic
-      5. Same correct answer text with moderate question overlap
+      3. High textual / phrasing similarity (Level 2)
+      4. Canonical alias & synonym similarity (Level 2)
+      5. Option set permutation with shared question topic
+      6. Same correct answer text with moderate question overlap
+      7. Equivalent learning objective (Level 3): tests identical target entity and cognitive facet
     """
     t1 = str(q1.get("question", "")).strip()
     t2 = str(q2.get("question", "")).strip()
@@ -156,33 +384,80 @@ def is_question_near_duplicate(q1: Dict[str, Any], q2: Dict[str, Any]) -> Tuple[
     norm1 = normalise_text(t1)
     norm2 = normalise_text(t2)
 
-    # 1. Exact match
+    # 1. Exact match (Level 1)
     if norm1 == norm2:
         return True, f"Exact identical question wording: '{t2[:60]}...'"
 
     # 2. Artificial variations (e.g. "(Application Variation)")
-    base1 = re.sub(r'\(?\b(?:application\s+)?variation\b\)?', '', norm1).strip()
-    base2 = re.sub(r'\(?\b(?:application\s+)?variation\b\)?', '', norm2).strip()
-    if base1 == base2 or (base1 and base2 and calculate_question_similarity(base1, base2) >= 0.70):
-        return True, f"Artificial variation of existing question: '{t2[:60]}...'"
+    if "variation" in norm1 or "variation" in norm2:
+        base1 = re.sub(r'\(?\b(?:application\s+)?variation\b\)?', '', norm1).strip()
+        base2 = re.sub(r'\(?\b(?:application\s+)?variation\b\)?', '', norm2).strip()
+        if base1 == base2 or (base1 and base2 and calculate_question_similarity(base1, base2) >= 0.70):
+            return True, f"Artificial variation of existing question: '{t2[:60]}...'"
 
-    # 3. High textual / phrasing similarity
+    # Safeguard against false positive collisions on distinct technical concepts
+    # When questions test mutually exclusive domain facets or operators,
+    # they are NOT duplicates even if they share high template/stem similarity:
+    can_tokens1 = extract_canonical_tokens(f"{t1} {q1.get('concept', '')}", topic_name=topic_name)
+    can_tokens2 = extract_canonical_tokens(f"{t2} {q2.get('concept', '')}", topic_name=topic_name)
+
+    # A. Distinct logic gates (AND vs OR vs NOT vs XOR vs NAND vs NOR vs XNOR)
+    gates = {"and_gate", "or_gate", "not_gate", "xor_gate", "nand_gate", "nor_gate", "xnor_gate"}
+    g1 = can_tokens1 & gates
+    g2 = can_tokens2 & gates
+    if g1 and g2 and g1 != g2:
+        return False, ""
+
+    # B. Distinct input mechanisms (excitatory vs inhibitory)
+    in_types = {"excitation_facet", "inhibition_facet"}
+    it1 = can_tokens1 & in_types
+    it2 = can_tokens2 & in_types
+    if it1 and it2 and it1 != it2:
+        return False, ""
+
+    # C. Distinct function types (activation function vs loss function)
+    fn_types = {"activation_facet", "loss_facet"}
+    ft1 = can_tokens1 & fn_types
+    ft2 = can_tokens2 & fn_types
+    if ft1 and ft2 and ft1 != ft2:
+        return False, ""
+
+    # D. Distinct backpropagation mechanisms (chain rule vs weight updates vs gradient calculation)
+    bp_types = {"chain_rule_facet", "weight_update_facet", "gradient_calc_facet"}
+    bt1 = can_tokens1 & bp_types
+    bt2 = can_tokens2 & bp_types
+    if bt1 and bt2 and bt1 != bt2:
+        return False, ""
+
+    # 3. Canonical alias & synonym similarity (Level 2)
+    can_sim = calculate_canonical_similarity(t1, t2, topic_name=topic_name)
+    if can_sim >= 0.55:
+        return True, f"Near-duplicate wording / paraphrasing ({can_sim:.2f}) with question: '{t1[:60]}...'"
+
+    # 4. High textual / phrasing similarity (Level 2)
     sim = calculate_question_similarity(t1, t2)
     if sim >= 0.50:
         return True, f"High phrasing similarity ({sim:.2f}) with question: '{t1[:60]}...'"
 
-    # 4. Option set duplication (permuted options)
+    # 5. Option set duplication (permuted options)
     opts_dup, opt_ratio = are_options_duplicate(q1.get("options"), q2.get("options"))
-    if opts_dup and sim >= 0.28:
+    if opts_dup and (sim >= 0.28 or can_sim >= 0.28):
         return True, f"Identical answer option set ({opt_ratio:.0%} match) with question: '{t1[:60]}...'"
 
-    # 5. Same correct answer text with moderate question overlap
+    # 6. Same correct answer text with moderate question overlap
     c1 = str(q1.get("correct_answer", "")).upper()
     c2 = str(q2.get("correct_answer", "")).upper()
     ans_val1 = normalise_text(str(q1.get("options", {}).get(c1, "")))
     ans_val2 = normalise_text(str(q2.get("options", {}).get(c2, "")))
-    if ans_val1 and ans_val2 and ans_val1 == ans_val2 and len(ans_val1.split()) >= 2 and sim >= 0.38:
-        return True, f"Tests identical target answer fact ('{ans_val1[:40]}') with similar stem ({sim:.2f})"
+    if ans_val1 and ans_val2 and ans_val1 == ans_val2 and len(ans_val1.split()) >= 2 and (sim >= 0.38 or can_sim >= 0.38):
+        return True, f"Tests identical target answer fact ('{ans_val1[:40]}') with similar stem ({max(sim, can_sim):.2f})"
+
+    # 7. Equivalent learning objective (Level 3): same target entity and cognitive facet with semantic overlap
+    lo1 = extract_learning_objective(t1, str(q1.get("concept", "")), topic_name=topic_name)
+    lo2 = extract_learning_objective(t2, str(q2.get("concept", "")), topic_name=topic_name)
+    if lo1 and lo2 and not lo1.endswith(":concept_general") and not lo1.startswith("general_topic:") and lo1 == lo2:
+        if can_sim >= 0.25 or sim >= 0.25:
+            return True, f"Tests equivalent learning objective ('{lo1}') with question: '{t1[:60]}...'"
 
     return False, ""
 
@@ -519,11 +794,15 @@ def extract_concepts_from_history(topic_history: List[Dict[str, Any]]) -> List[s
 def evaluate_quiz_novelty(
     questions: List[Dict[str, Any]],
     history_fingerprints: List[str],
-    history_concepts: List[str]
+    history_concepts: List[str],
+    history_questions: Optional[List[Dict[str, Any]]] = None,
+    topic_name: str = ""
 ) -> Dict[str, Any]:
     """
-    Evaluates whether a generated quiz contains duplicates (text phrasing or concepts)
-    compared to the student's previous attempts.
+    Evaluates whether a generated quiz contains duplicates across three levels:
+      - Level 1: Exact duplicate detection (normalized text / fingerprint match).
+      - Level 2: Near-duplicate detection (paraphrased wording, canonical alias/synonyms).
+      - Level 3: Concept and learning-objective detection (identical target entity and facet).
 
     Returns:
         dict:
@@ -534,7 +813,7 @@ def evaluate_quiz_novelty(
             duplicate_reasons: List[str]
             novel_count: int
     """
-    if not history_fingerprints and not history_concepts:
+    if not history_fingerprints and not history_concepts and not history_questions:
         return {
             "is_fully_novel": True,
             "text_duplicate_indices": [],
@@ -548,37 +827,64 @@ def evaluate_quiz_novelty(
     concept_dups = []
     reasons = []
 
+    # Precompute normalized fingerprints for Level 1 exact matching
+    norm_hist_fps = {normalise_text(fp) for fp in history_fingerprints if fp}
+
     for idx, q in enumerate(questions):
-        q_text = q.get("question", "")
-        q_concept = q.get("concept", "")
-        q_fp = fingerprint(q_text)
+        q_text = str(q.get("question", "")).strip()
+        q_concept = str(q.get("concept", "")).strip()
+        q_fp = normalise_text(q_text)
+        is_dup = False
 
-        # 1. Text duplicate check
-        is_text_dup = False
-        for hist_fp in history_fingerprints:
-            sim = calculate_question_similarity(q_fp, hist_fp)
-            if sim >= TEXT_DUPLICATE_THRESHOLD:
-                text_dups.append(idx)
-                reasons.append(f"Q{idx + 1} phrasing similarity ({sim:.2f}) with previous question: '{hist_fp[:50]}...'")
-                is_text_dup = True
-                break
+        # Level 1: Exact duplicate match
+        if q_fp in norm_hist_fps:
+            text_dups.append(idx)
+            reasons.append(f"[Level 1 Exact Duplicate] Q{idx + 1} matches previous attempt wording: '{q_text[:55]}...'")
+            is_dup = True
 
-        # 2. Concept tracking (informational, not a duplicate rejection)
-        if not is_text_dup and history_concepts:
-            for hist_concept in history_concepts:
-                c_sim = calculate_concept_similarity(q_concept, hist_concept)
-                if c_sim >= CONCEPT_SIMILARITY_THRESHOLD:
-                    concept_dups.append(idx)
+        # Level 2 & 3: Match against detailed history questions if available
+        if not is_dup and history_questions:
+            for prev_q in history_questions:
+                dup_found, dup_msg = is_question_near_duplicate(prev_q, q, topic_name=topic_name)
+                if dup_found:
+                    if "learning objective" in dup_msg.lower():
+                        concept_dups.append(idx)
+                        reasons.append(f"[Level 3 Learning Objective] Q{idx + 1} {dup_msg}")
+                    else:
+                        text_dups.append(idx)
+                        reasons.append(f"[Level 2 Near-Duplicate] Q{idx + 1} {dup_msg}")
+                    is_dup = True
                     break
 
-    # Only actual phrasing / question duplicates are flagged for replacement
-    all_flagged = sorted(list(set(text_dups)))
+        # Level 2 fallback: High phrasing similarity against raw historical fingerprints
+        if not is_dup and history_fingerprints:
+            for hist_fp in history_fingerprints:
+                sim = calculate_question_similarity(q_text, hist_fp)
+                can_sim = calculate_canonical_similarity(q_text, hist_fp, topic_name=topic_name)
+                max_s = max(sim, can_sim)
+                if max_s >= TEXT_DUPLICATE_THRESHOLD:
+                    text_dups.append(idx)
+                    reasons.append(f"[Level 2 Near-Duplicate] Q{idx + 1} phrasing similarity ({max_s:.2f}) with previous question: '{hist_fp[:50]}...'")
+                    is_dup = True
+                    break
+
+        # Level 3 fallback: Concept tracking against history concepts
+        if not is_dup and history_concepts:
+            for hist_concept in history_concepts:
+                c_sim = calculate_concept_similarity(q_concept, hist_concept)
+                if c_sim >= 0.85:  # Very high concept match on concise tags
+                    concept_dups.append(idx)
+                    reasons.append(f"[Level 3 Concept Overlap] Q{idx + 1} tests already-covered concept: '{hist_concept}'")
+                    is_dup = True
+                    break
+
+    all_flagged = sorted(list(set(text_dups + concept_dups)))
     is_fully_novel = len(all_flagged) == 0
 
     return {
         "is_fully_novel": is_fully_novel,
-        "text_duplicate_indices": text_dups,
-        "concept_duplicate_indices": concept_dups,
+        "text_duplicate_indices": sorted(list(set(text_dups))),
+        "concept_duplicate_indices": sorted(list(set(concept_dups))),
         "all_flagged_indices": all_flagged,
         "duplicate_reasons": reasons,
         "novel_count": len(questions) - len(all_flagged)

@@ -25,7 +25,8 @@ from services.database import (
     get_concept_performance,
     get_question_fingerprints,
     get_question_concepts,
-    get_stored_questions_for_topic
+    get_stored_questions_for_topic,
+    get_question_history_full
 )
 from services.adaptive import (
     compute_adaptive_decision,
@@ -76,7 +77,7 @@ class AIError(Exception):
 
 class AIServiceUnavailableError(AIError):
     """Raised when all configured AI providers are temporarily unavailable or overloaded."""
-    def __init__(self, message: str, category: str = "SERVICE_UNAVAILABLE", status_code: int = 503, retryable: bool = True):
+    def __init__(self, message: str = "Quiz generation is temporarily unavailable. Please try again shortly.", category: str = "SERVICE_UNAVAILABLE", status_code: int = 503, retryable: bool = True):
         super().__init__(message, category=category, status_code=status_code, retryable=retryable)
 
 
@@ -339,6 +340,7 @@ def generate_quiz(
         all_concepts = history_concepts_from_attempts + [
             c for c in history_concepts_from_metadata if c not in history_concepts_from_attempts
         ]
+        history_questions_full = get_question_history_full(student_id, course_code, topic_name, conn=conn)
 
         eligible_stored = get_stored_questions_for_topic(
             course_code=course_code,
@@ -583,7 +585,8 @@ REQUIREMENTS:
                         for cand_q in rep_validated["questions"]:
                             if len(current_unique) >= num_questions:
                                 break
-                            if not any(is_question_near_duplicate(ex_q, cand_q)[0] for ex_q in current_unique):
+                            if (not any(is_question_near_duplicate(ex_q, cand_q, topic_name=topic_name)[0] for ex_q in current_unique) and
+                                not any(is_question_near_duplicate(hist_q, cand_q, topic_name=topic_name)[0] for hist_q in history_questions_full)):
                                 current_unique.append(cand_q)
                         t_replenishment_total += (time.perf_counter() - t_rep_start)
                         validated_quiz["questions"] = current_unique
@@ -626,7 +629,9 @@ REQUIREMENTS:
                 novelty_result = evaluate_quiz_novelty(
                     questions=validated_quiz["questions"],
                     history_fingerprints=all_fingerprints,
-                    history_concepts=all_concepts
+                    history_concepts=all_concepts,
+                    history_questions=history_questions_full,
+                    topic_name=topic_name
                 )
 
                 is_novel = novelty_result["is_fully_novel"]
@@ -647,20 +652,25 @@ REQUIREMENTS:
                         f"Repair attempt {novelty_repair_count}/{MAX_NOVELTY_REPAIR_ATTEMPTS}."
                     )
 
-                    # Targeted Replacement: Retain novel questions and replace only duplicated questions
-                    if text_dup_indices and novelty_repair_count <= MAX_NOVELTY_REPAIR_ATTEMPTS:
+                    # Targeted Replacement: Retain novel questions and replace all flagged duplicate questions (Level 1, 2, 3)
+                    if flagged_indices and novelty_repair_count <= MAX_NOVELTY_REPAIR_ATTEMPTS:
                         elapsed_now = time.perf_counter() - start_time
                         repair_budget = overall_deadline - elapsed_now
                         min_repair_budget = 8.0 if provider.name == "gemini" else 2.5
                         if repair_budget > min_repair_budget:
                             try:
-                                novel_kept = [q for idx, q in enumerate(validated_quiz["questions"]) if idx not in text_dup_indices]
+                                novel_kept = [q for idx, q in enumerate(validated_quiz["questions"]) if idx not in flagged_indices]
                                 needed_novel = num_questions - len(novel_kept)
+                                missing_difficulties = [validated_quiz["questions"][idx].get("difficulty", "Medium") for idx in flagged_indices]
+                                rejected_questions = [validated_quiz["questions"][idx].get("question", "") for idx in flagged_indices]
                                 if needed_novel > 0:
                                     logger.info(
                                         f"[TARGETED REPLACEMENT] Retaining {len(novel_kept)} novel questions. Requesting {needed_novel} replacements..."
                                     )
                                     concept_str = ", ".join(concepts) if concepts else topic_name
+                                    rejected_block = "\n".join(f"  - [REJECTED DUPLICATE]: {q}" for q in rejected_questions if q)
+                                    avoid_block = "\n".join(f"  - [ALREADY COVERED]: {q.get('question', '')}" for q in (novel_kept + history_questions_full[:8]) if q.get("question"))
+                                    diff_req_str = ", ".join(missing_difficulties)
                                     tr_prompt = f"""You are an expert academic AI quiz generator for {course_code} - {course_name}.
 Selected Topic: {topic_name}
 Authorized Syllabus Concepts: {concept_str}
@@ -668,8 +678,11 @@ Authorized Syllabus Concepts: {concept_str}
 STRICT TOPIC MANDATE: Every question must test ONLY '{topic_name}'.
 
 We need EXACTLY {needed_novel} additional replacement multiple-choice questions for '{topic_name}' testing different angles/learning objectives.
-Do NOT duplicate or rephrase any of these already accepted questions:
-""" + "\n".join(f"  - {q['question']}" for q in novel_kept) + f"""
+Required difficulty distribution for replacements: {diff_req_str}.
+
+DO NOT duplicate, rephrase, or test the same learning objective as any of these questions:
+{rejected_block}
+{avoid_block}
 
 REQUIREMENTS:
 - Return EXACTLY {needed_novel} questions strictly assessing '{topic_name}'.
@@ -685,7 +698,7 @@ REQUIREMENTS:
       "question": "Question text directly testing {topic_name}",
       "options": {{"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D"}},
       "correct_answer": "A",
-      "difficulty": "Medium",
+      "difficulty": "{missing_difficulties[0] if missing_difficulties else 'Medium'}",
       "concept": "{concepts[0] if concepts else topic_name}",
       "explanation": "Detailed explanation showing step-by-step calculations, rules, or code trace.",
       "option_explanations": {{
@@ -721,14 +734,19 @@ REQUIREMENTS:
                                     for cand_q in val_tr.get("questions", []):
                                         if len(novel_kept) >= num_questions:
                                             break
-                                        if not any(is_question_near_duplicate(ex_q, cand_q)[0] for ex_q in novel_kept):
+                                        if (not any(is_question_near_duplicate(ex_q, cand_q, topic_name=topic_name)[0] for ex_q in novel_kept) and
+                                            not any(is_question_near_duplicate(hist_q, cand_q, topic_name=topic_name)[0] for hist_q in history_questions_full)):
+                                            if missing_difficulties:
+                                                cand_q["difficulty"] = missing_difficulties.pop(0)
                                             novel_kept.append(cand_q)
                                     if len(novel_kept) == num_questions:
                                         validated_quiz["questions"] = novel_kept
                                         novelty_result = evaluate_quiz_novelty(
                                             questions=validated_quiz["questions"],
                                             history_fingerprints=all_fingerprints,
-                                            history_concepts=all_concepts
+                                            history_concepts=all_concepts,
+                                            history_questions=history_questions_full,
+                                            topic_name=topic_name
                                         )
                                         is_novel = novelty_result["is_fully_novel"]
                                         novel_count = novelty_result["novel_count"]
@@ -792,7 +810,9 @@ REQUIREMENTS:
                                     novelty_repair = evaluate_quiz_novelty(
                                         questions=validated_repair["questions"],
                                         history_fingerprints=all_fingerprints,
-                                        history_concepts=all_concepts
+                                        history_concepts=all_concepts,
+                                        history_questions=history_questions_full,
+                                        topic_name=topic_name
                                     )
 
                                     if novelty_repair["novel_count"] >= novel_count:
@@ -891,8 +911,28 @@ REQUIREMENTS:
                 logger.warning(
                     f"[PROVIDER FAILED] provider={provider.name} "
                     f"category={cat} retryable={retryable} "
+                    f"attempt={attempt_idx + 1}/{max_retries + 1} "
                     f"proceeding_to_next_provider={has_next} (next={next_provider_name}): {clean_pe}"
                 )
+
+                # Bounded retry with exponential backoff for temporary errors (503, 429, 500, 502) if time permits
+                time_left_now = overall_deadline - (time.perf_counter() - start_time)
+                min_time_needed = 10.0 if provider.name == "gemini" else (4.0 if provider.name == "nvidia" else 3.0)
+                is_transient = retryable or any(term in cat for term in ["SERVICE_UNAVAILABLE", "RATE_LIMIT", "SERVER_ERROR"])
+
+                # If there are fallback providers available, prefer fallback sequence to avoid duplicate requests;
+                # Only retry when no fallback provider exists (sole provider or last provider in sequence).
+                if not has_next and is_transient and attempt_idx < max_retries and time_left_now > min_time_needed + 1.0:
+                    import random
+                    backoff = min(1.5, 0.4 * (2 ** attempt_idx)) + random.uniform(0.05, 0.15)
+                    if time_left_now > min_time_needed + backoff:
+                        logger.info(
+                            f"[PROVIDER RETRY] provider={provider.name} retrying after {backoff:.2f}s backoff "
+                            f"(attempt {attempt_idx + 2}/{max_retries + 1}, category={cat})..."
+                        )
+                        time.sleep(backoff)
+                        continue
+
                 # If only 1 provider is configured and error is non-retryable permanent error, fail fast without masking
                 if (
                     len(configured_providers) == 1
@@ -998,10 +1038,25 @@ REQUIREMENTS:
                 f"AI provider '{sole_name}' timed out generating the quiz. No fallback providers ({unconfigured_str}) are configured in Render.",
                 category="TIMEOUT"
             ) from last_error
-        elif last_error_category in ("RATE_LIMIT_429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"):
+        elif last_error_category in ("RATE_LIMIT_429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED") or "429" in last_error_category:
             raise AIRateLimitError(
                 f"AI provider '{sole_name}' rate limit or quota exceeded. No fallback providers ({unconfigured_str}) are configured in Render.",
-                category=last_error_category
+                category="RATE_LIMIT_429"
+            ) from last_error
+        elif "503" in last_error_category or "SERVICE_UNAVAILABLE" in last_error_category:
+            raise AIServiceUnavailableError(
+                f"AI provider '{sole_name}' is temporarily unavailable (503). No fallback providers ({unconfigured_str}) are configured in Render.",
+                category="SERVICE_UNAVAILABLE_503",
+                status_code=503,
+                retryable=True
+            ) from last_error
+        elif "502" in last_error_category or "500" in last_error_category or "SERVER_ERROR" in last_error_category:
+            code = 502 if "502" in last_error_category else 500
+            raise AIServiceUnavailableError(
+                f"AI provider '{sole_name}' encountered a server or gateway error ({code}). Please retry.",
+                category=f"SERVER_ERROR_{code}",
+                status_code=code,
+                retryable=True
             ) from last_error
 
     # Differentiate failure categories across multi-provider attempts
@@ -1015,21 +1070,35 @@ REQUIREMENTS:
             "Quiz generation timed out across configured providers. Please try again.",
             category="TIMEOUT"
         ) from last_error
-    elif last_error_category in ("RATE_LIMIT_429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"):
+    elif last_error_category in ("RATE_LIMIT_429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED") or "429" in last_error_category:
         raise AIRateLimitError(
             "AI service rate limit or quota exceeded across configured providers. Please wait a moment and retry.",
-            category=last_error_category
+            category="RATE_LIMIT_429"
         ) from last_error
-    elif last_error_category in ("NETWORK_ERROR", "CONNECTION_ERROR"):
+    elif "503" in last_error_category or "SERVICE_UNAVAILABLE" in last_error_category:
         raise AIServiceUnavailableError(
-            "Unable to connect to AI provider network. Please check network connectivity and retry.",
-            category=last_error_category,
+            "Quiz generation is temporarily unavailable. Please try again shortly.",
+            category="SERVICE_UNAVAILABLE_503",
+            status_code=503,
+            retryable=True
+        ) from last_error
+    elif "502" in last_error_category or last_error_category in ("NETWORK_ERROR", "CONNECTION_ERROR"):
+        raise AIServiceUnavailableError(
+            "Quiz generation is temporarily unavailable. Please try again shortly.",
+            category="SERVER_ERROR_502",
             status_code=502,
+            retryable=True
+        ) from last_error
+    elif "500" in last_error_category or "SERVER_ERROR_500" in last_error_category:
+        raise AIServiceUnavailableError(
+            "Quiz generation is temporarily unavailable. Please try again shortly.",
+            category="SERVER_ERROR_500",
+            status_code=500,
             retryable=True
         ) from last_error
 
     raise AIServiceUnavailableError(
-        "AI service is temporarily experiencing high demand. Please try again shortly.",
+        "Quiz generation is temporarily unavailable. Please try again shortly.",
         category="SERVICE_UNAVAILABLE",
         status_code=503,
         retryable=True

@@ -339,6 +339,9 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
 
     # 2. Add optional session_id column to quiz_attempts if migrating from Phase 1
     _ensure_column(cursor, "quiz_attempts", "session_id", "TEXT REFERENCES quiz_sessions(id)")
+    _ensure_column(cursor, "question_metadata", "normalized_text", "TEXT")
+    _ensure_column(cursor, "question_metadata", "topic_id", "TEXT")
+    _ensure_column(cursor, "question_metadata", "learning_objective", "TEXT")
 
     # 3. New Phase 2 Table: quiz_sessions (Session Persistence & Ownership)
     cursor.execute("""
@@ -1208,17 +1211,25 @@ def submit_quiz_atomic(
             q_id = str(uuid.uuid4())
             q_text = q.get("question", "")
             q_fp = normalise_text(q_text)
+            try:
+                from services.novelty import extract_learning_objective
+                lo = extract_learning_objective(q_text, str(q.get("concept", "")), topic_name=session.get("topic_name", ""))
+            except Exception:
+                lo = ""
+            top_id = session.get("topic_id", "")
             cursor.execute("""
                 INSERT INTO question_metadata (
                     id, attempt_id, student_id, course_code, topic_name,
                     question_index, question_text, question_fingerprint,
-                    concept, difficulty, question_type, correct_answer, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    concept, difficulty, question_type, correct_answer, created_at,
+                    normalized_text, topic_id, learning_objective
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 q_id, attempt_id, eff_student_id, session["course_code"],
                 session["topic_name"], idx, q_text, q_fp,
                 q.get("concept", ""), q.get("difficulty", ""),
-                "mcq", q.get("correct_answer", ""), now_iso
+                "mcq", q.get("correct_answer", ""), now_iso,
+                q_fp, top_id, lo
             ))
 
         # Step d: Save granular student answers
@@ -1703,12 +1714,19 @@ def save_quiz_attempt(
         q_id = str(uuid.uuid4())
         q_text = q.get("question", "")
         q_fp = normalise_text(q_text)
+        try:
+            from services.novelty import extract_learning_objective
+            lo = extract_learning_objective(q_text, str(q.get("concept", "")), topic_name=topic_name)
+        except Exception:
+            lo = ""
+        top_id = quiz_data.get("topic_id", "")
         cursor.execute("""
             INSERT INTO question_metadata (
                 id, attempt_id, student_id, course_code, topic_name,
                 question_index, question_text, question_fingerprint,
-                concept, difficulty, question_type, correct_answer, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                concept, difficulty, question_type, correct_answer, created_at,
+                normalized_text, topic_id, learning_objective
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             q_id,
             attempt_id,
@@ -1722,7 +1740,10 @@ def save_quiz_attempt(
             q.get("difficulty", ""),
             "mcq",
             q.get("correct_answer", ""),
-            now
+            now,
+            q_fp,
+            top_id,
+            lo
         ))
 
     # 3. If session_id and details are provided, complete the session and save granular answers
@@ -1931,25 +1952,50 @@ def get_difficulty_performance(student_id: str, course_code: Optional[str] = Non
 
 
 def get_question_fingerprints(student_id: str, course_code: str, topic_name: str, limit: int = 50, conn: Optional[sqlite3.Connection] = None) -> List[str]:
-    """Get question fingerprints from question_metadata table for novelty checking."""
+    """Get question fingerprints from question_metadata and recent quiz_sessions snapshots for novelty checking."""
     close_conn = False
     if conn is None:
         conn = get_connection()
         close_conn = True
 
+    clean_course = course_code.strip() if course_code else ""
+    clean_topic = topic_name.strip() if topic_name else ""
+
     cursor = conn.cursor()
     cursor.execute("""
         SELECT question_fingerprint FROM question_metadata
-        WHERE student_id = ? AND course_code = ? AND topic_name = ?
+        WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?)) AND (topic_name = ? OR LOWER(TRIM(topic_name)) = LOWER(?))
         ORDER BY created_at DESC
         LIMIT ?
-    """, (student_id, course_code, topic_name, limit))
+    """, (student_id, clean_course, clean_course, clean_topic, clean_topic, limit))
 
     rows = cursor.fetchall()
+    fingerprints = [row["question_fingerprint"] for row in rows if row["question_fingerprint"]]
+
+    # Also include questions from recent quiz_sessions (capturing unsubmitted/in-progress retake sessions)
+    try:
+        cursor.execute("""
+            SELECT questions_snapshot FROM quiz_sessions
+            WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?)) AND (topic_name = ? OR LOWER(TRIM(topic_name)) = LOWER(?))
+            ORDER BY created_at DESC
+            LIMIT 5
+        """, (student_id, clean_course, clean_course, clean_topic, clean_topic))
+        sess_rows = cursor.fetchall()
+        for s_row in sess_rows:
+            raw_snap = s_row["questions_snapshot"]
+            if raw_snap:
+                snap_data = json.loads(raw_snap) if isinstance(raw_snap, str) else raw_snap
+                if isinstance(snap_data, list):
+                    for sq in snap_data:
+                        sq_text = sq.get("question", "") if isinstance(sq, dict) else ""
+                        if sq_text:
+                            fingerprints.append(normalise_text(sq_text))
+    except Exception:
+        pass
+
     if close_conn:
         conn.close()
 
-    fingerprints = [row["question_fingerprint"] for row in rows if row["question_fingerprint"]]
     seen = set()
     unique = []
     for fp in fingerprints:
@@ -1960,25 +2006,49 @@ def get_question_fingerprints(student_id: str, course_code: str, topic_name: str
 
 
 def get_question_concepts(student_id: str, course_code: str, topic_name: str, limit: int = 30, conn: Optional[sqlite3.Connection] = None) -> List[str]:
-    """Get question concepts from question_metadata table for novelty checking."""
+    """Get question concepts from question_metadata and recent quiz_sessions snapshots for novelty checking."""
     close_conn = False
     if conn is None:
         conn = get_connection()
         close_conn = True
 
+    clean_course = course_code.strip() if course_code else ""
+    clean_topic = topic_name.strip() if topic_name else ""
+
     cursor = conn.cursor()
     cursor.execute("""
         SELECT concept FROM question_metadata
-        WHERE student_id = ? AND course_code = ? AND topic_name = ?
+        WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?)) AND (topic_name = ? OR LOWER(TRIM(topic_name)) = LOWER(?))
         ORDER BY created_at DESC
         LIMIT ?
-    """, (student_id, course_code, topic_name, limit))
+    """, (student_id, clean_course, clean_course, clean_topic, clean_topic, limit))
 
     rows = cursor.fetchall()
+    concepts = [row["concept"] for row in rows if row["concept"]]
+
+    try:
+        cursor.execute("""
+            SELECT questions_snapshot FROM quiz_sessions
+            WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?)) AND (topic_name = ? OR LOWER(TRIM(topic_name)) = LOWER(?))
+            ORDER BY created_at DESC
+            LIMIT 5
+        """, (student_id, clean_course, clean_course, clean_topic, clean_topic))
+        sess_rows = cursor.fetchall()
+        for s_row in sess_rows:
+            raw_snap = s_row["questions_snapshot"]
+            if raw_snap:
+                snap_data = json.loads(raw_snap) if isinstance(raw_snap, str) else raw_snap
+                if isinstance(snap_data, list):
+                    for sq in snap_data:
+                        c = sq.get("concept", "") if isinstance(sq, dict) else ""
+                        if c:
+                            concepts.append(c)
+    except Exception:
+        pass
+
     if close_conn:
         conn.close()
 
-    concepts = [row["concept"] for row in rows if row["concept"]]
     seen = set()
     unique = []
     for c in concepts:
@@ -1986,6 +2056,82 @@ def get_question_concepts(student_id: str, course_code: str, topic_name: str, li
             seen.add(c)
             unique.append(c)
     return unique
+
+
+def get_question_history_full(
+    student_id: str,
+    course_code: str,
+    topic_name: str,
+    limit: int = 50,
+    conn: Optional[sqlite3.Connection] = None
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve comprehensive historical questions for a student, course, and topic,
+    including full question text, options, concept, difficulty, and learning objective.
+    Combines completed question_metadata and recent quiz_sessions snapshots.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    clean_course = course_code.strip() if course_code else ""
+    clean_topic = topic_name.strip() if topic_name else ""
+
+    cursor = conn.cursor()
+    questions_out: List[Dict[str, Any]] = []
+    seen_fps = set()
+
+    # 1. From recent quiz_sessions snapshots (contains full options and details)
+    try:
+        cursor.execute("""
+            SELECT questions_snapshot FROM quiz_sessions
+            WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?)) AND (topic_name = ? OR LOWER(TRIM(topic_name)) = LOWER(?))
+            ORDER BY created_at DESC
+            LIMIT 5
+        """, (student_id, clean_course, clean_course, clean_topic, clean_topic))
+        for row in cursor.fetchall():
+            raw_snap = row["questions_snapshot"]
+            if raw_snap:
+                snap_data = json.loads(raw_snap) if isinstance(raw_snap, str) else raw_snap
+                if isinstance(snap_data, list):
+                    for sq in snap_data:
+                        if isinstance(sq, dict) and sq.get("question"):
+                            fp = normalise_text(sq["question"])
+                            if fp not in seen_fps:
+                                seen_fps.add(fp)
+                                questions_out.append(sq)
+    except Exception:
+        pass
+
+    # 2. From question_metadata table
+    try:
+        cursor.execute("""
+            SELECT question_text, concept, difficulty, correct_answer, learning_objective, question_fingerprint
+            FROM question_metadata
+            WHERE student_id = ? AND (course_code = ? OR LOWER(TRIM(course_code)) = LOWER(?)) AND (topic_name = ? OR LOWER(TRIM(topic_name)) = LOWER(?))
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (student_id, clean_course, clean_course, clean_topic, clean_topic, limit))
+        for q_row in cursor.fetchall():
+            keys = q_row.keys() if hasattr(q_row, "keys") else []
+            fp = q_row["question_fingerprint"] if "question_fingerprint" in keys else normalise_text(q_row["question_text"])
+            if fp not in seen_fps:
+                seen_fps.add(fp)
+                questions_out.append({
+                    "question": q_row["question_text"],
+                    "concept": q_row["concept"],
+                    "difficulty": q_row["difficulty"],
+                    "correct_answer": q_row["correct_answer"],
+                    "learning_objective": q_row["learning_objective"] if "learning_objective" in keys else ""
+                })
+    except Exception:
+        pass
+
+    if close_conn:
+        conn.close()
+
+    return questions_out[:limit]
 
 
 # ── Student Progress Dashboard & Learning Analytics ───────────────────────────
