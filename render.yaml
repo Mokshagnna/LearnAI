@@ -15,13 +15,19 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_SECONDARY_API_KEY
+        sync: false
       - key: GEMINI_BACKUP_API_KEY
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: GROQ_SECONDARY_API_KEY
+        sync: false
       - key: GROQ_BACKUP_API_KEY
         sync: false
       - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_SECONDARY_API_KEY
         sync: false
       - key: NVIDIA_BACKUP_API_KEY
         sync: false
@@ -47,8 +53,14 @@ services:
         sync: false
       - key: GROQ_MODEL
         sync: false
+      - key: GROQ_FALLBACK_MODEL
+        sync: false
       - key: NVIDIA_MODEL
         sync: false
+      - key: NVIDIA_FALLBACK_MODEL
+        sync: false
+      - key: ENABLE_LOCAL_DEMO_FALLBACK
+        value: "true"
 
       # Reverse proxy & networking for Render cloud environment
       - key: ENVIRONMENT
