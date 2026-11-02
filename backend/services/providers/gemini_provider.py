@@ -12,7 +12,8 @@ from services.providers.base import (
     ProviderConfigError,
     ProviderError,
     get_quiz_prompt,
-    get_analysis_prompt
+    get_analysis_prompt,
+    extract_json_from_text
 )
 from services.logger_utils import sanitize_error_text
 
@@ -39,8 +40,6 @@ class GeminiProvider(BaseAIProvider):
     def _get_client(self, timeout_sec: float, api_key: str) -> genai.Client:
         if not api_key:
             raise ProviderConfigError("GEMINI_API_KEY is missing from environment.", category="MISSING_CREDENTIALS")
-        # Google GenAI requires a minimum allowed deadline of 10.0 seconds (10,000 ms) if manually set.
-        # Ensure timeout_ms is at least 10,000ms to prevent HTTP 400 INVALID_ARGUMENT from Google.
         timeout_ms = max(int(timeout_sec * 1000), 10000)
         return genai.Client(
             api_key=api_key,
@@ -82,6 +81,8 @@ class GeminiProvider(BaseAIProvider):
         if any(w in msg for w in ["503", "unavailable", "high demand", "429", "rate limit", "timed out", "temporarily"]):
             if not any(t in msg for t in ["api_key", "permission", "forbidden", "unauthorized"]):
                 return True
+        if "empty response" in msg or "malformed json" in msg:
+            return True
         return False
 
     def _categorize(self, exc: Exception) -> str:
@@ -113,6 +114,10 @@ class GeminiProvider(BaseAIProvider):
             return "RATE_LIMIT_429"
         if "deadline" in msg or "deadline_exceeded" in status or "504" in msg:
             return "DEADLINE_EXCEEDED_504"
+        if "empty response" in msg:
+            return "EMPTY_RESPONSE"
+        if "malformed json" in msg:
+            return "MALFORMED_JSON_PARSE_ERROR"
         exc_name = type(exc).__name__
         if "Timeout" in exc_name:
             return "CLIENT_TIMEOUT"
@@ -120,15 +125,37 @@ class GeminiProvider(BaseAIProvider):
             return "NETWORK_ERROR"
         return "UNKNOWN_ERROR"
 
-    def _execute_with_models(self, prompt: str, timeout_seconds: float, response_mime_type: Optional[str] = None) -> str:
+    def _execute_with_models(
+        self,
+        prompt: str,
+        timeout_seconds: float,
+        response_mime_type: Optional[str] = None,
+        expected_schema_key: Optional[str] = None
+    ) -> str:
         MIN_GEMINI_DEADLINE_SECONDS = 10.0
-        GEMINI_BUDGET_TOLERANCE_SECONDS = 9.0
-        if timeout_seconds < GEMINI_BUDGET_TOLERANCE_SECONDS:
+        # Google GenAI strictly requires an API server deadline of at least 10.0s (10,000ms).
+        # Any request with X-Server-Timeout < 10 returns HTTP 400 INVALID_ARGUMENT.
+        # If GEMINI_SAFETY_MARGIN_SECONDS is explicitly configured in environment, require the budget
+        # to accommodate both Google's minimum deadline and the safety margin.
+        # Otherwise, the absolute minimum floor is Google's required 10.0s deadline.
+        margin_env = os.getenv("GEMINI_SAFETY_MARGIN_SECONDS")
+        if margin_env is not None:
+            GEMINI_SAFETY_MARGIN_SECONDS = float(margin_env)
+            MIN_SAFE_GEMINI_BUDGET = MIN_GEMINI_DEADLINE_SECONDS + GEMINI_SAFETY_MARGIN_SECONDS
+        else:
+            GEMINI_SAFETY_MARGIN_SECONDS = 1.5
+            MIN_SAFE_GEMINI_BUDGET = float(os.getenv("MIN_GEMINI_REQUEST_BUDGET", str(MIN_GEMINI_DEADLINE_SECONDS)))
+
+        # Microsecond jitter tolerance (50ms) to prevent microsecond budget starvation on exact-deadline allocations
+        BUDGET_JITTER_EPSILON = 0.05
+
+        if timeout_seconds < (MIN_SAFE_GEMINI_BUDGET - BUDGET_JITTER_EPSILON):
             logger.warning(
-                f"[GEMINI] Timeout budget {timeout_seconds:.1f}s is below Gemini's minimum allowed deadline ({MIN_GEMINI_DEADLINE_SECONDS:.1f}s)."
+                f"[GEMINI TIMEOUT] Initial budget {timeout_seconds:.1f}s is below minimum safe budget ({MIN_SAFE_GEMINI_BUDGET:.1f}s). "
+                "Yielding without issuing network request."
             )
             raise ProviderUnavailableError(
-                f"Gemini: timeout budget {timeout_seconds:.1f}s is below minimum allowed deadline of {MIN_GEMINI_DEADLINE_SECONDS:.1f}s.",
+                f"Gemini: initial timeout budget {timeout_seconds:.1f}s is below minimum safe budget of {MIN_SAFE_GEMINI_BUDGET:.1f}s.",
                 category="TIMEOUT"
             )
 
@@ -173,52 +200,124 @@ class GeminiProvider(BaseAIProvider):
 
         for key_value, key_label in keys_to_try:
             key_had_recoverable_error = False
-            key_had_auth_error = False
 
             for model_idx, model in enumerate(models_to_try):
                 elapsed = time.perf_counter() - start_time
                 time_remaining = timeout_seconds - elapsed
-                if time_remaining < GEMINI_BUDGET_TOLERANCE_SECONDS:
+                if time_remaining < (MIN_SAFE_GEMINI_BUDGET - BUDGET_JITTER_EPSILON):
                     logger.warning(
-                        f"[GEMINI] Time budget exhausted ({time_remaining:.1f}s left). "
-                        f"Cannot attempt model={model} (min {MIN_GEMINI_DEADLINE_SECONDS:.1f}s required)."
+                        f"[GEMINI TIMEOUT] Time budget exhausted ({time_remaining:.1f}s left). "
+                        f"Cannot attempt model={model} (min safe budget {MIN_SAFE_GEMINI_BUDGET:.1f}s required)."
                     )
                     break
 
-                # We must never send a deadline below 10.0s to Google GenAI.
-                # If time_remaining >= 20.0s and multiple models exist, allocate a split;
-                # otherwise allocate full time_remaining without creating a sub-10s deadline.
-                if len(models_to_try) > 1 and time_remaining >= 20.0:
-                    per_call_timeout = min(time_remaining, max(time_remaining * 0.6, MIN_GEMINI_DEADLINE_SECONDS))
+                usable_budget = max(time_remaining - GEMINI_SAFETY_MARGIN_SECONDS, MIN_GEMINI_DEADLINE_SECONDS)
+                if len(models_to_try) > 1 and time_remaining >= 24.0:
+                    per_call_timeout = min(time_remaining, max(time_remaining * 0.5, MIN_GEMINI_DEADLINE_SECONDS))
                 else:
-                    per_call_timeout = time_remaining
+                    per_call_timeout = max(time_remaining, MIN_GEMINI_DEADLINE_SECONDS)
 
                 client = self._get_client(per_call_timeout, api_key=key_value)
-
-                # Max 1 retry per model only if budget permits at least another full 10.0s attempt
-                attempts = 2 if time_remaining >= 20.0 else 1
+                attempts = 2 if time_remaining >= 24.0 else 1
 
                 for attempt in range(1, attempts + 1):
                     cur_remaining = timeout_seconds - (time.perf_counter() - start_time)
-                    if cur_remaining < GEMINI_BUDGET_TOLERANCE_SECONDS:
+                    if cur_remaining < (MIN_SAFE_GEMINI_BUDGET - BUDGET_JITTER_EPSILON):
                         logger.warning(
-                            f"[GEMINI] Time budget exhausted ({cur_remaining:.1f}s left). "
-                            f"Skipping attempt {attempt} on model={model} (min {MIN_GEMINI_DEADLINE_SECONDS:.1f}s required)."
+                            f"[GEMINI TIMEOUT] Time budget exhausted ({cur_remaining:.1f}s left). "
+                            f"Skipping attempt {attempt} on model={model} (min safe budget {MIN_SAFE_GEMINI_BUDGET:.1f}s required)."
                         )
                         break
 
                     call_start = time.perf_counter()
-                    logger.info(f"[GEMINI START] key={key_label} model={model} attempt={attempt}/{attempts} budget={cur_remaining:.1f}s")
+                    # Calculate per-call HTTP timeout:
+                    # 1. Deduct safety margin when remaining time permits (cur_remaining >= 10.0 + margin).
+                    # 2. When budget is at exact Google deadline boundary (within jitter epsilon), allocate exactly 10.0s.
+                    # 3. Defensively ensure call_timeout_sec is at least Google's required 10.0s deadline when within boundary.
+                    if cur_remaining >= MIN_GEMINI_DEADLINE_SECONDS + GEMINI_SAFETY_MARGIN_SECONDS:
+                        call_timeout_sec = cur_remaining - GEMINI_SAFETY_MARGIN_SECONDS
+                    elif cur_remaining >= MIN_GEMINI_DEADLINE_SECONDS - BUDGET_JITTER_EPSILON:
+                        call_timeout_sec = MIN_GEMINI_DEADLINE_SECONDS
+                    else:
+                        call_timeout_sec = cur_remaining
+
+                    call_timeout_ms = int(call_timeout_sec * 1000)
+
+                    logger.info(
+                        f"[GEMINI START] key={key_label} model={model} attempt={attempt}/{attempts} "
+                        f"budget={cur_remaining:.1f}s (call_timeout={call_timeout_sec:.1f}s)"
+                    )
                     try:
-                        config = {}
-                        if response_mime_type:
-                            config["response_mime_type"] = response_mime_type
-                        resp = client.models.generate_content(model=model, contents=prompt, config=config if config else None)
-                        if not resp or not resp.text:
-                            raise ValueError("Gemini returned empty text response.")
+                        # Explicitly disable AFC and set per-call http timeout in config
+                        config = types.GenerateContentConfig(
+                            response_mime_type=response_mime_type,
+                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                            http_options=types.HttpOptions(timeout=call_timeout_ms)
+                        )
+                        resp = client.models.generate_content(
+                            model=model,
+                            contents=prompt,
+                            config=config
+                        )
                         duration = time.perf_counter() - call_start
-                        logger.info(f"[GEMINI SUCCESS] key={key_label} model={model} attempt={attempt} duration={duration:.2f}s")
-                        return resp.text
+
+                        finish_reason = "unknown"
+                        raw_text = None
+                        if resp and getattr(resp, "candidates", None) and len(resp.candidates) > 0:
+                            cand = resp.candidates[0]
+                            fr = getattr(cand, "finish_reason", "unknown")
+                            finish_reason = getattr(fr, "name", str(fr))
+
+                        # 1. Primary text extraction
+                        try:
+                            raw_text = resp.text
+                        except Exception:
+                            raw_text = None
+
+                        # 2. Candidate content parts extraction fallback
+                        if not raw_text and resp and getattr(resp, "candidates", None) and len(resp.candidates) > 0:
+                            cand = resp.candidates[0]
+                            if hasattr(cand, "content") and hasattr(cand.content, "parts") and cand.content.parts:
+                                text_parts = []
+                                for part in cand.content.parts:
+                                    if getattr(part, "thought", False):
+                                        continue
+                                    p_txt = getattr(part, "text", None)
+                                    if p_txt and isinstance(p_txt, str):
+                                        text_parts.append(p_txt)
+                                if text_parts:
+                                    raw_text = "".join(text_parts)
+
+                        if not raw_text or not raw_text.strip():
+                            logger.warning(
+                                f"[GEMINI EMPTY_RESPONSE] key={key_label} model={model} attempt={attempt} "
+                                f"duration={duration:.2f}s finish_reason='{finish_reason}': content is empty or absent."
+                            )
+                            raise ValueError(f"Gemini model {model} returned an empty response (finish_reason='{finish_reason}').")
+
+                        # 3. JSON shape validation if json response requested
+                        if response_mime_type == "application/json":
+                            from services.providers.base import extract_json_from_text
+                            try:
+                                parsed_json = extract_json_from_text(raw_text)
+                                if not isinstance(parsed_json, dict):
+                                    raise ValueError("Response is not a valid JSON dictionary.")
+                                if expected_schema_key and expected_schema_key not in parsed_json:
+                                    raise ValueError(f"Response missing required root key '{expected_schema_key}'.")
+                            except Exception as parse_err:
+                                logger.warning(
+                                    f"[GEMINI PARSE_ERROR] key={key_label} model={model} attempt={attempt} "
+                                    f"duration={duration:.2f}s: response failed JSON schema validation: {sanitize_error_text(parse_err)}"
+                                )
+                                raise ValueError(f"Gemini model {model} returned malformed JSON: {sanitize_error_text(parse_err)}") from parse_err
+
+                        budget_left = timeout_seconds - (time.perf_counter() - start_time)
+                        logger.info(
+                            f"[GEMINI SUCCESS] key={key_label} model={model} attempt={attempt} "
+                            f"duration={duration:.2f}s budget_left={budget_left:.1f}s"
+                        )
+                        return raw_text
+
                     except Exception as e:
                         duration = time.perf_counter() - call_start
                         last_error = e
@@ -226,57 +325,75 @@ class GeminiProvider(BaseAIProvider):
 
                         if self._is_auth_error(e):
                             logger.error(
-                                f"[GEMINI AUTH FAILED] key={key_label} model={model} duration={duration:.2f}s "
-                                f"category={cat} error={sanitize_error_text(e)}"
+                                f"[GEMINI API_ERROR] key={key_label} model={model} attempt={attempt} "
+                                f"duration={duration:.2f}s category={cat} error={sanitize_error_text(e)}"
                             )
                             raise ProviderConfigError(
                                 "Gemini API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR"
                             ) from None
 
-                        if cat in ("MODEL_NOT_FOUND_404", "MODEL_DEPRECATED_410"):
-                            logger.warning(
-                                f"[GEMINI MODEL NOT FOUND] key={key_label} model={model} duration={duration:.2f}s "
-                                f"category={cat}: {sanitize_error_text(e)}. Attempting fallback model..."
-                            )
-                            # Advance immediately to next candidate model without redundant retries of this model
-                            break
-
                         if not self._is_retryable(e):
                             clean_err = sanitize_error_text(e)
-                            logger.error(f"[GEMINI PERMANENT ERROR] key={key_label} model={model} duration={duration:.2f}s category={cat}: {clean_err}")
+                            logger.error(
+                                f"[GEMINI API_ERROR] key={key_label} model={model} attempt={attempt} "
+                                f"duration={duration:.2f}s category={cat}: {clean_err}"
+                            )
+                            if cat in ("MODEL_NOT_FOUND_404", "MODEL_DEPRECATED_410"):
+                                if model_idx < len(models_to_try) - 1:
+                                    logger.warning(
+                                        f"[GEMINI MODEL FAILOVER] key={key_label} model={model} returned {cat}. Trying next candidate model..."
+                                    )
+                                    break
+                                raise ProviderConfigError(
+                                    f"Gemini model '{model}' not found or invalid model ID.", category="MODEL_NOT_FOUND_404"
+                                ) from None
                             if cat == "MALFORMED_REQUEST_400":
-                                raise ProviderError(f"Gemini malformed request: {clean_err}", category="MALFORMED_REQUEST_400", retryable=False) from None
-                            raise ProviderError(f"Gemini permanent error ({cat}): {clean_err}", category=cat, retryable=False) from None
+                                raise ProviderError(
+                                    f"Gemini malformed request: {clean_err}", category="MALFORMED_REQUEST_400", retryable=False
+                                ) from None
+                            raise ProviderError(
+                                f"Gemini permanent error ({cat}): {clean_err}", category=cat, retryable=False
+                            ) from None
 
+                        # Retryable transient errors, timeouts, empty responses, or malformed JSON
                         key_had_recoverable_error = True
-                        logger.warning(f"[GEMINI RETRYABLE ERROR] key={key_label} model={model} attempt={attempt}/{attempts} duration={duration:.2f}s category={cat}: {sanitize_error_text(e)}")
 
-                        # Avoid redundant retries of the same timed-out model
                         if cat in ("DEADLINE_EXCEEDED_504", "CLIENT_TIMEOUT", "REQUEST_TIMEOUT_408") or "deadline" in str(e).lower() or "timeout" in str(e).lower():
-                            logger.info(f"[GEMINI TIMEOUT] model={model} timed out after {duration:.2f}s. Yielding without redundant retries of this model.")
+                            logger.warning(
+                                f"[GEMINI TIMEOUT] key={key_label} model={model} attempt={attempt} "
+                                f"duration={duration:.2f}s category={cat}: {sanitize_error_text(e)}. Yielding without redundant retries of this model."
+                            )
                             break
 
-                        # If another attempt is budgeted on this model
+                        if cat in ("EMPTY_RESPONSE", "MALFORMED_JSON_PARSE_ERROR"):
+                            # Empty response or malformed JSON: break to try fallback model
+                            logger.warning(
+                                f"[GEMINI API_ERROR] key={key_label} model={model} attempt={attempt} "
+                                f"duration={duration:.2f}s category={cat}: {sanitize_error_text(e)}. Falling over to next model..."
+                            )
+                            break
+
+                        logger.warning(
+                            f"[GEMINI API_ERROR] key={key_label} model={model} attempt={attempt}/{attempts} "
+                            f"duration={duration:.2f}s category={cat}: {sanitize_error_text(e)}"
+                        )
+
                         elapsed_now = time.perf_counter() - start_time
-                        if attempt < attempts and (timeout_seconds - elapsed_now) >= GEMINI_BUDGET_TOLERANCE_SECONDS:
-                            delay = random.uniform(0.8, 1.5)
+                        if attempt < attempts and (timeout_seconds - elapsed_now) >= (MIN_SAFE_GEMINI_BUDGET - BUDGET_JITTER_EPSILON):
+                            delay = random.uniform(0.5, 1.0)
                             time.sleep(delay)
                         else:
                             break
 
-
-                # If primary model failed, log failover
                 if model_idx < len(models_to_try) - 1:
                     logger.info(f"[GEMINI MODEL FAILOVER] key={key_label} Moving to next model due to {model} unavailability.")
 
-            # After exhausting all models on this key, try secondary if failure was recoverable
             if key_had_recoverable_error and key_label == "primary" and len(keys_to_try) > 1:
                 logger.warning("[GEMINI KEY FALLBACK] Primary key exhausted with recoverable errors. Trying secondary key.")
                 continue
             elif key_had_recoverable_error:
-                break  # Secondary also failed or no secondary available
+                break
             else:
-                # If all candidate models failed with 404/permanent on this key, fail fast
                 if last_error and self._categorize(last_error) in ("MODEL_NOT_FOUND_404", "MODEL_DEPRECATED_410"):
                     raise ProviderConfigError(f"Gemini model not found across candidate models: {models_to_try}.", category="MODEL_NOT_FOUND_404") from None
                 break
@@ -299,7 +416,12 @@ class GeminiProvider(BaseAIProvider):
             prompt = custom_prompt
         else:
             prompt = get_quiz_prompt(course_code, course_name, topic_name, syllabus_context)
-        return self._execute_with_models(prompt, timeout_seconds, response_mime_type="application/json")
+        return self._execute_with_models(
+            prompt,
+            timeout_seconds,
+            response_mime_type="application/json",
+            expected_schema_key="questions"
+        )
 
     def generate_analysis_raw(
         self,
@@ -311,4 +433,9 @@ class GeminiProvider(BaseAIProvider):
         timeout_seconds: float
     ) -> str:
         prompt = get_analysis_prompt(subject, topic, weak_concepts, score, total)
-        return self._execute_with_models(prompt, timeout_seconds, response_mime_type="application/json")
+        return self._execute_with_models(
+            prompt,
+            timeout_seconds,
+            response_mime_type="application/json",
+            expected_schema_key="summary"
+        )

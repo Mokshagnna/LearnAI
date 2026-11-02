@@ -3,6 +3,7 @@ import time
 import random
 import logging
 import threading
+import json
 from typing import Optional, List
 from services.providers.base import (
     BaseAIProvider,
@@ -10,7 +11,8 @@ from services.providers.base import (
     ProviderConfigError,
     ProviderError,
     get_quiz_prompt,
-    get_analysis_prompt
+    get_analysis_prompt,
+    extract_json_from_text
 )
 from services.logger_utils import sanitize_error_text
 
@@ -52,7 +54,7 @@ class GroqProvider(BaseAIProvider):
                     raise ProviderConfigError("groq python package is not installed.", category="DEPENDENCY_MISSING") from e
             return client
 
-    def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 3000) -> str:
+    def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 4000) -> str:
         primary_key = os.getenv("GROQ_API_KEY", "")
         secondary_key = os.getenv("GROQ_SECONDARY_API_KEY") or os.getenv("GROQ_BACKUP_API_KEY", "")
 
@@ -65,24 +67,43 @@ class GroqProvider(BaseAIProvider):
         if not keys_to_try:
             raise ProviderConfigError("GROQ_API_KEY is not configured.", category="MISSING_CREDENTIALS")
 
-        # Verified active Groq models: llama-3.1-8b-instant (primary), mixtral-8x7b-32768 (fallback)
-        DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
-        KNOWN_INVALID_GROQ_MODELS = {"llama3-70b-8192", "llama3-8b-8192", "llama-3.2-90b-text-preview"}
+        # Verified active Groq models: openai/gpt-oss-120b (primary), openai/gpt-oss-20b (fallback)
+        DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+        DEFAULT_GROQ_FALLBACK = "openai/gpt-oss-20b"
+        KNOWN_INVALID_GROQ_MODELS = {
+            "llama3-70b-8192",
+            "llama3-8b-8192",
+            "llama-3.2-90b-text-preview",
+            "mixtral-8x7b-32768",
+            "llama-3.1-8b-instant",
+            "llama-3.3-70b-versatile",
+        }
 
         configured_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip()
-        fallback_model = (os.getenv("GROQ_FALLBACK_MODEL") or "mixtral-8x7b-32768").strip()
+        fallback_model = (os.getenv("GROQ_FALLBACK_MODEL") or DEFAULT_GROQ_FALLBACK).strip()
 
         if configured_model in KNOWN_INVALID_GROQ_MODELS:
             logger.warning(
-                "[GROQ CONFIG WARNING] Configured GROQ_MODEL '%s' is a known-deprecated model. "
+                "[GROQ CONFIG WARNING] Configured GROQ_MODEL '%s' is a known-deprecated or decommissioned model. "
                 "Adding verified active model '%s' to candidate models.",
                 configured_model, DEFAULT_GROQ_MODEL
             )
 
+        if fallback_model in KNOWN_INVALID_GROQ_MODELS:
+            logger.warning(
+                "[GROQ CONFIG WARNING] Configured GROQ_FALLBACK_MODEL '%s' is a known-deprecated or decommissioned model. "
+                "Adding verified active model '%s' to candidate models.",
+                fallback_model, DEFAULT_GROQ_FALLBACK
+            )
+
         candidate_models = [configured_model]
-        for alt in [fallback_model, DEFAULT_GROQ_MODEL, "mixtral-8x7b-32768", "llama-3.3-70b-versatile"]:
-            if alt and alt not in candidate_models:
-                candidate_models.append(alt)
+        if fallback_model and fallback_model not in candidate_models:
+            candidate_models.append(fallback_model)
+
+        if configured_model in KNOWN_INVALID_GROQ_MODELS and DEFAULT_GROQ_MODEL not in candidate_models:
+            candidate_models.append(DEFAULT_GROQ_MODEL)
+        if fallback_model in KNOWN_INVALID_GROQ_MODELS and DEFAULT_GROQ_FALLBACK not in candidate_models:
+            candidate_models.append(DEFAULT_GROQ_FALLBACK)
 
         last_error = None
         overall_start = time.perf_counter()
@@ -103,20 +124,58 @@ class GroqProvider(BaseAIProvider):
                 call_start = time.perf_counter()
                 try:
                     logger.info(f"[GROQ START] key={key_label} model={current_model} timeout={time_left:.1f}s")
-                    chat_completion = client.chat.completions.create(
-                        model=current_model,
-                        messages=[
+                    create_kwargs = {
+                        "model": current_model,
+                        "messages": [
                             {"role": "user", "content": prompt}
                         ],
-                        temperature=0.3,
-                        max_tokens=max_tokens,
-                        timeout=time_left
-                    )
-                    duration = time.perf_counter() - call_start
-                    if not chat_completion.choices or not chat_completion.choices[0].message.content:
-                        raise ValueError(f"Groq model {current_model} returned an empty response.")
+                        "temperature": 0.3,
+                        "max_tokens": max_tokens,
+                        "timeout": time_left
+                    }
+                    if "json" in prompt.lower():
+                        create_kwargs["response_format"] = {"type": "json_object"}
 
-                    result_text = chat_completion.choices[0].message.content
+                    try:
+                        chat_completion = client.chat.completions.create(**create_kwargs)
+                    except Exception as call_err:
+                        err_str = str(call_err).lower()
+                        if "response_format" in err_str and "response_format" in create_kwargs:
+                            logger.warning(
+                                f"[GROQ] response_format parameter not supported by {current_model}: {call_err}. "
+                                "Retrying call without response_format."
+                            )
+                            create_kwargs.pop("response_format", None)
+                            chat_completion = client.chat.completions.create(**create_kwargs)
+                        else:
+                            raise call_err
+
+                    duration = time.perf_counter() - call_start
+
+                    if not chat_completion or not getattr(chat_completion, "choices", None):
+                        raise ValueError(f"Groq model {current_model} returned no choices in response.")
+
+                    choice = chat_completion.choices[0]
+                    message = getattr(choice, "message", None) if not isinstance(choice, dict) else choice.get("message")
+                    if message is None:
+                        raise ValueError(f"Groq model {current_model} returned a choice with no message.")
+
+                    # Primary extraction: message.content only.
+                    # Per architectural directive: message.reasoning or reasoning_content must NOT
+                    # be used as a source of quiz answers, even if it contains JSON-like text.
+                    raw_content = getattr(message, "content", None) if not isinstance(message, dict) else message.get("content")
+                    result_text = None
+
+                    if raw_content is not None and isinstance(raw_content, str) and raw_content.strip():
+                        result_text = raw_content.strip()
+
+                    if not result_text:
+                        finish_reason = getattr(choice, "finish_reason", None) or (choice.get("finish_reason") if isinstance(choice, dict) else "unknown")
+                        raise ValueError(
+                            f"Groq model {current_model} returned an empty response "
+                            f"(content is empty, finish_reason='{finish_reason}')."
+                        )
+
                     logger.info(f"[GROQ SUCCESS] key={key_label} model={current_model} duration={duration:.2f}s")
                     return result_text
 
@@ -196,7 +255,7 @@ class GroqProvider(BaseAIProvider):
         syllabus_context: str,
         timeout_seconds: float,
         custom_prompt: Optional[str] = None,
-        max_tokens: int = 2200,
+        max_tokens: int = 4000,
         **kwargs
     ) -> str:
         if custom_prompt:
@@ -215,4 +274,4 @@ class GroqProvider(BaseAIProvider):
         timeout_seconds: float
     ) -> str:
         prompt = get_analysis_prompt(subject, topic, weak_concepts, score, total)
-        return self._execute(prompt, timeout_seconds, max_tokens=600)
+        return self._execute(prompt, timeout_seconds, max_tokens=1500)
