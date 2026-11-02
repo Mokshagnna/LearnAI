@@ -192,6 +192,196 @@
           "C": "Correct: Parallel lines in 3D that are not parallel to the camera image plane converge at vanishing points, so parallelism is NOT preserved.",
           "D": "Incorrect: Incidence (whether a point lies on a line) is strictly preserved under perspective projection."
         }
+      },
+      {
+        "question": "In the human visual system, which photoreceptor cells operate primarily in low-light conditions (scotopic vision) but lack color discrimination capability?",
+        "options": {
+          "A": "Rods",
+          "B": "Cones",
+          "C": "Bipolar cells",
+          "D": "Ganglion cells"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Photopic and Scotopic Vision",
+        "explanation": "Rods are highly sensitive photoreceptor cells in the retina optimized for scotopic vision in dim lighting, whereas cones operate in photopic vision and provide color perception.",
+        "option_explanations": {
+          "A": "Correct: Rods are responsible for vision at low light levels (scotopic vision) with high light sensitivity but no color distinction.",
+          "B": "Incorrect: Cones function under bright light conditions (photopic vision) and mediate color vision through three photopigment types.",
+          "C": "Incorrect: Bipolar cells are interneurons that transmit signals from photoreceptors to ganglion cells, not primary light sensors.",
+          "D": "Incorrect: Retinal ganglion cells receive visual signals from bipolar cells and form the optic nerve transmitting impulses to the brain."
+        }
+      },
+      {
+        "question": "Which color representation space decouples achromatic intensity (luminance) from chromatic color information to provide robustness against illumination variations?",
+        "options": {
+          "A": "HSV (Hue, Saturation, Value) / Lab",
+          "B": "Direct CMYK color printing space",
+          "C": "Raw Bayer mosaic pattern",
+          "D": "Uncompressed RGB channel triplets"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Color Representation Spaces",
+        "explanation": "Color spaces like HSV and CIE-Lab separate brightness/luminance from chrominance (hue/color tones), making color analysis resilient to intensity changes.",
+        "option_explanations": {
+          "A": "Correct: HSV and Lab isolate luminance from chromaticity channels, allowing vision algorithms to operate robustly despite lighting shifts.",
+          "B": "Incorrect: CMYK is a subtractive color model designed for physical ink printing, not invariant computer vision analysis.",
+          "C": "Incorrect: The Bayer filter pattern is a sensor color filter array layout (RGGB) before demosaicing, not an invariant color space.",
+          "D": "Incorrect: In standard RGB, luminance and chromatic information are entangled across all three channels, making it sensitive to lighting changes."
+        }
+      },
+      {
+        "question": "According to the Nyquist-Shannon sampling theorem in image acquisition, what occurs if the spatial sampling frequency of an image sensor is less than twice the highest spatial frequency in the optical scene?",
+        "options": {
+          "A": "Spatial aliasing artifacts such as Moir\u00e9 patterns appear",
+          "B": "The dynamic range of the camera sensor increases linearly",
+          "C": "The lens focal length automatically decreases",
+          "D": "Specular highlights are completely removed from the image"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Nyquist-Shannon Sampling in Vision",
+        "explanation": "Under-sampling an optical image below the Nyquist rate folds high-frequency scene details into spurious low-frequency patterns known as spatial aliasing or Moir\u00e9 effects.",
+        "option_explanations": {
+          "A": "Correct: When sampling frequency is below 2*f_max, high spatial frequencies are incorrectly reconstructed as lower frequencies (aliasing/Moir\u00e9).",
+          "B": "Incorrect: Sensor dynamic range is determined by full-well pixel capacity and read noise, not spatial sampling frequency.",
+          "C": "Incorrect: Focal length is a fixed optical property of the lens glass elements and is independent of spatial sampling density.",
+          "D": "Incorrect: Specular highlights depend on surface reflectance and light geometry, not sensor spatial sampling frequency."
+        }
+      },
+      {
+        "question": "What is a primary architectural difference between CCD (Charge-Coupled Device) and CMOS image sensors in digital computer vision cameras?",
+        "options": {
+          "A": "CMOS sensors integrate amplification and analog-to-digital conversion within each pixel, enabling lower power consumption and flexible windowing",
+          "B": "CCD sensors process pixel charges purely in the optical domain without electric charge transfer",
+          "C": "CMOS sensors cannot capture color images and require external mechanical color filter wheels",
+          "D": "CCD sensors do not require lenses to focus light onto the sensor array"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Image Sensor Architectures",
+        "explanation": "CMOS active-pixel sensors contain dedicated readout electronics per pixel, allowing high-speed parallel readout, random pixel access, and lower energy usage compared to serial charge-shifting CCDs.",
+        "option_explanations": {
+          "A": "Correct: CMOS sensors feature in-pixel amplifiers and integrated ADCs, providing high frame rates, regional windowing, and low power dissipation.",
+          "B": "Incorrect: CCD sensors transfer electric charge packets serially across capacitive bins across rows to a single output amplifier.",
+          "C": "Incorrect: Modern CMOS sensors capture color using on-chip Bayer filter mosaics identically to color CCD cameras.",
+          "D": "Incorrect: Both CCD and CMOS sensors are planar semiconductor detector arrays requiring focusing optics."
+        }
+      },
+      {
+        "question": "How does reducing the lens aperture size (increasing the f-number, e.g., from f/2.8 to f/16) affect depth of field and image acquisition in a vision system?",
+        "options": {
+          "A": "It increases the depth of field but reduces the amount of light reaching the sensor, requiring longer exposure or higher gain",
+          "B": "It eliminates perspective distortion while doubling image brightness",
+          "C": "It decreases the depth of field and makes distant objects blurrier",
+          "D": "It alters the focal length of the camera lens permanently"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Aperture and Depth of Field",
+        "explanation": "Stopping down the aperture narrows the light cone converging on the sensor, expanding the range of depths in sharp focus (depth of field) at the cost of reduced photon throughput.",
+        "option_explanations": {
+          "A": "Correct: A smaller aperture increases the depth of field allowing near and far objects to stay in focus, but decreases total illumination reaching the sensor.",
+          "B": "Incorrect: Narrowing the aperture reduces brightness (proportional to 1/f^2) rather than doubling it, and does not alter perspective distortion.",
+          "C": "Incorrect: Narrowing the aperture increases depth of field; wide apertures (e.g., f/1.4) create shallow depth of field.",
+          "D": "Incorrect: The physical focal length of a lens remains constant when the aperture iris diameter changes."
+        }
+      },
+      {
+        "question": "In camera calibration, which geometric model is commonly used to correct barrel and pincushion lens distortion where rays bend more at the edges of the lens?",
+        "options": {
+          "A": "Polynomial radial distortion model based on powers of the radial distance from the principal point: r * (1 + k1*r^2 + k2*r^4)",
+          "B": "Affine shear transformation along the optical axis",
+          "C": "Fourier frequency phase shifting along the scanline",
+          "D": "Histogram equalization across peripheral pixels"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Lens Radial Distortion Models",
+        "explanation": "Brown-Conrady radial distortion models correct symmetric radial displacement away from or toward the optical center using low-order polynomial terms in r^2 and r^4.",
+        "option_explanations": {
+          "A": "Correct: Standard camera calibration uses polynomial radial distortion coefficients (k1, k2, k3) with radial distance r from the optical center.",
+          "B": "Incorrect: 2D affine shears deform axes linearly across a plane, failing to model radially symmetric non-linear barrel/pincushion curvature.",
+          "C": "Incorrect: Fourier phase shifting modifies spatial frequencies in frequency domain, not geometric pixel coordinates.",
+          "D": "Incorrect: Histogram equalization adjusts image contrast and intensity distribution, having no effect on geometric lens distortion."
+        }
+      },
+      {
+        "question": "Under which operational condition can orthographic projection be safely assumed instead of perspective projection in computer vision?",
+        "options": {
+          "A": "When the depth variation of the observed 3D object is very small compared to its average distance from the camera",
+          "B": "When the camera is placed extremely close to a wide-angle fisheye lens",
+          "C": "When the scene contains strong perspective vanishing points on the horizon",
+          "D": "When the optical axis is tilted at an acute angle to a planar floor"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Orthographic vs Perspective Projection",
+        "explanation": "When scene depth range delta_Z is negligible relative to average camera distance Z_0 (delta_Z << Z_0), perspective scaling 1/Z is approximately constant, enabling affine or orthographic projection models.",
+        "option_explanations": {
+          "A": "Correct: Weak perspective or orthographic projection holds when object depth variations are tiny compared to camera-to-object distance.",
+          "B": "Incorrect: Close-up wide-angle lenses maximize perspective perspective distortion and require full perspective or spherical projection models.",
+          "C": "Incorrect: Prominent vanishing points indicate strong perspective convergence where parallel lines meet, which orthographic projection cannot model.",
+          "D": "Incorrect: Tilting the camera relative to a floor plane induces severe perspective depth gradients along the vertical image axis."
+        }
+      },
+      {
+        "question": "In photometric computer vision, what distinguishes specular reflection from diffuse (Lambertian) reflection?",
+        "options": {
+          "A": "Specular reflection reflects incoming light primarily in the mirror reflection direction, while Lambertian reflection scatters light equally in all viewing directions",
+          "B": "Lambertian reflection only occurs under polarized ultraviolet illumination",
+          "C": "Specular reflection maintains constant observed brightness regardless of camera viewpoint",
+          "D": "Lambertian surfaces exhibit sharp highlight glints that shift position when the camera moves"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Illumination and Surface Reflection",
+        "explanation": "Lambertian diffuse reflection scatters incident light isotropically over the hemisphere so radiance is independent of viewing angle, whereas specular reflection concentrates energy along the reflection angle.",
+        "option_explanations": {
+          "A": "Correct: Lambertian surfaces appear equally bright from all view angles (L = rho * cos(theta_i)), whereas specular surfaces exhibit directional highlights.",
+          "B": "Incorrect: Lambertian diffuse reflection is a ubiquitous property of rough matte surfaces under any visible illumination.",
+          "C": "Incorrect: Specular reflection depends critically on viewing angle and changes intensity dramatically when the viewer moves.",
+          "D": "Incorrect: Specular surfaces exhibit highlight glints; Lambertian surfaces exhibit soft, uniform matte appearance without view-dependent glints."
+        }
+      },
+      {
+        "question": "In two-view stereo computer vision, what is an 'epipole' on an image plane?",
+        "options": {
+          "A": "The intersection of the baseline connecting the two optical camera centers with the image plane",
+          "B": "The point where the optical axis intersects the lens glass surface",
+          "C": "The center of curvature of the radial distortion field",
+          "D": "The point on the image plane with maximum pixel irradiance"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "Epipolar Geometry Fundamentals",
+        "explanation": "In epipolar geometry, the baseline is the 3D line connecting the two camera projection centers. The points where this baseline intersects the respective image planes are the epipoles (e1 and e2).",
+        "option_explanations": {
+          "A": "Correct: The epipole is the image of one camera's optical center as seen by the other camera (the intersection of the camera baseline with the image plane).",
+          "B": "Incorrect: The intersection of the optical axis with the image plane is the principal point, not the epipole.",
+          "C": "Incorrect: The center of radial distortion is close to the principal point, which is independent of multi-view epipolar geometry.",
+          "D": "Incorrect: Irradiance peaks depend on light sources and surface reflection, not geometric projection centers."
+        }
+      },
+      {
+        "question": "How many degrees of freedom does a 3x3 planar projective homography matrix H possess when relating two perspective views of a planar scene?",
+        "options": {
+          "A": "8 degrees of freedom, because the 9 matrix elements are determined up to an arbitrary non-zero scale factor",
+          "B": "6 degrees of freedom, corresponding strictly to 3D rotation and translation",
+          "C": "9 independent degrees of freedom with no scale ambiguity",
+          "D": "3 degrees of freedom representing 2D rigid motion"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "Planar Homography Transformations",
+        "explanation": "A 3x3 homography matrix has 9 entries, but because projective equality x' ~ H*x holds up to an overall scalar scale factor lambda, there are 8 independent ratios/degrees of freedom.",
+        "option_explanations": {
+          "A": "Correct: Homography H has 8 degrees of freedom (typically normalized by setting H[2,2] = 1 or ||H||_F = 1), requiring at least 4 point correspondences to solve.",
+          "B": "Incorrect: 6 degrees of freedom correspond to Euclidean rigid motion in 3D (3 rotation angles + 3 translation components).",
+          "C": "Incorrect: Scale is arbitrary in homogeneous projective coordinates, meaning entries cannot be determined independently without normalization.",
+          "D": "Incorrect: 2D rigid motion has 3 degrees of freedom (1 rotation angle + 2 translation components), far fewer than general projective homography."
+        }
       }
     ]
   },
@@ -388,6 +578,196 @@
           "C": "Incorrect: Gradient synchronization overhead is a distributed computing issue managed by AllReduce, not the loss function.",
           "D": "Incorrect: Overfitting mitigation is achieved through regularization, data augmentation, or weight decay."
         }
+      },
+      {
+        "question": "Why is Mean Absolute Error (MAE / L1 loss) generally preferred over Mean Squared Error (MSE / L2 loss) when training models on datasets with significant outlier corruptions?",
+        "options": {
+          "A": "MAE penalizes errors linearly, preventing distant outliers from exerting disproportionate quadratic gradient influence on parameter updates",
+          "B": "MAE produces smooth non-zero gradients everywhere, including at zero error",
+          "C": "MAE is strictly non-convex, allowing gradient descent to escape local minima faster",
+          "D": "MAE computes log-likelihood probabilities directly without subtraction"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Mean Absolute Error vs MSE",
+        "explanation": "MSE squares the error (e^2), causing large outlier residual values to generate massive gradients that dominate training. MAE has constant gradient magnitude (+1 or -1), ensuring robustness to anomalous points.",
+        "option_explanations": {
+          "A": "Correct: L1 loss treats large errors linearly, so extreme outlier observations do not skew model parameter estimates quadratically.",
+          "B": "Incorrect: The derivative of |e| is undefined at e=0, which can cause oscillations around zero without subgradient handling.",
+          "C": "Incorrect: Both MAE and MSE are convex functions for linear models; MAE is not non-convex.",
+          "D": "Incorrect: MAE computes absolute residual differences |y - y_hat|, not probabilistic log-likelihoods."
+        }
+      },
+      {
+        "question": "What is the primary motivation for using Smooth L1 (Huber) loss instead of standard L1 loss in bounding box regression for object detectors?",
+        "options": {
+          "A": "It provides a smooth quadratic curve near zero error (|e| < delta) to avoid gradient oscillations while retaining robust linear penalties for large errors",
+          "B": "It forces predicted coordinates to sum to exactly one across all four boundaries",
+          "C": "It eliminates the need for computing gradients via backpropagation",
+          "D": "It guarantees that the regression loss is always zero for background samples"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Smooth L1 and Huber Loss Derivatives",
+        "explanation": "Smooth L1 uses 0.5 * e^2 for small errors (|e| < 1) ensuring continuous zero-gradient convergence at the minimum, and transitions to |e| - 0.5 for large errors preventing gradient explosions from outliers.",
+        "option_explanations": {
+          "A": "Correct: Smooth L1 combines quadratic differentiability near zero with outlier robustness of linear L1 for large residuals.",
+          "B": "Incorrect: Bounding box coordinates represent spatial coordinates (x, y, w, h), not probability distributions requiring unit sum.",
+          "C": "Incorrect: Smooth L1 is specifically designed for standard reverse-mode automatic differentiation and backpropagation.",
+          "D": "Incorrect: Background sample handling is controlled by objectness/classification loss and target assignment, not the regression loss formula itself."
+        }
+      },
+      {
+        "question": "In deep metric learning, what is the core optimization objective enforced by the Triplet Loss function with margin alpha?",
+        "options": {
+          "A": "To ensure the Euclidean distance between Anchor and Positive is smaller than the distance between Anchor and Negative by at least margin alpha",
+          "B": "To classify samples into three mutually exclusive discrete categorical bins",
+          "C": "To maximize the sum of squared weights across the three hidden layers",
+          "D": "To equalize the variance of features across Anchor, Positive, and Negative embeddings"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Triplet Loss in Metric Learning",
+        "explanation": "Triplet loss optimizes L = max(0, ||f(a) - f(p)||^2 - ||f(a) - f(n)||^2 + alpha), driving positive embeddings closer than negative embeddings by at least margin alpha.",
+        "option_explanations": {
+          "A": "Correct: Triplet loss pushes negative embeddings away from the anchor while pulling positive embeddings together with a margin buffer alpha.",
+          "B": "Incorrect: Triplet loss learns continuous metric embeddings without categorical class assignments.",
+          "C": "Incorrect: Triplet loss operates on representation embeddings f(x), not raw neural layer weight magnitudes.",
+          "D": "Incorrect: Triplet loss does not constrain embedding variance directly, but rather pairwise geometric distance relationships."
+        }
+      },
+      {
+        "question": "In pairwise Siamese networks trained with contrastive loss, what is the role of the margin hyperparameter m for dissimilar (negative) pairs?",
+        "options": {
+          "A": "It defines a distance threshold beyond which negative pairs cease to contribute to the loss, preventing already well-separated pairs from influencing gradients",
+          "B": "It sets the maximum allowable learning rate during gradient updates",
+          "C": "It forces similar pairs to maintain a minimum non-zero distance",
+          "D": "It normalizes the input feature vector to unit variance"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Contrastive Loss Margin",
+        "explanation": "Contrastive loss penalizes negative pairs via max(0, m - D)^2. When distance D exceeds margin m, the loss drops to zero, allowing the network to focus on hard negatives that are closer than m.",
+        "option_explanations": {
+          "A": "Correct: Margin m ensures that pairs already separated by at least distance m produce zero loss and zero gradient updates.",
+          "B": "Incorrect: Learning rate is controlled by the optimization schedule (e.g., Adam/SGD), not the loss margin.",
+          "C": "Incorrect: Similar pairs are pulled to zero distance (loss = D^2), not pushed apart.",
+          "D": "Incorrect: Vector normalization (such as L2 unit sphere projection) is an architectural choice, distinct from the loss margin m."
+        }
+      },
+      {
+        "question": "Why is Dice Loss (or Soft Dice Loss) commonly favored over standard cross-entropy loss in medical image semantic segmentation?",
+        "options": {
+          "A": "It directly optimizes the overlap (Sorensen-Dice coefficient) between predicted and ground-truth masks, mitigating severe class imbalance caused by tiny foreground lesions",
+          "B": "It does not require ground truth segmentation annotations during training",
+          "C": "It guarantees zero loss whenever the background class is predicted correctly",
+          "D": "It computes spatial convolution faster on GPU architectures"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Dice Loss in Image Segmentation",
+        "explanation": "In medical imaging where tiny tumors occupy <1% of pixels, pixel-wise cross-entropy is overwhelmed by background pixels. Dice loss optimizes intersection-over-union directly, balancing foreground and background regardless of area ratio.",
+        "option_explanations": {
+          "A": "Correct: Dice loss is inherently normalized by total foreground size, making it resilient to extreme class imbalances where target objects are minuscule.",
+          "B": "Incorrect: Dice loss requires pixel-level binary or multi-class ground truth segmentations to compute intersection and union.",
+          "C": "Incorrect: Dice loss measures overlap with ground-truth foreground; predicting pure background for an image with lesions yields maximum loss.",
+          "D": "Incorrect: Dice loss is computed element-wise across masks and does not affect the speed of convolutional backbone forward passes."
+        }
+      },
+      {
+        "question": "For sequence-to-sequence tasks such as speech recognition and handwriting OCR where input and target sequence lengths differ, what is the key benefit of CTC (Connectionist Temporal Classification) Loss?",
+        "options": {
+          "A": "It marginalizes over all possible valid alignments between input audio frames and target character sequences using dynamic programming and a blank token",
+          "B": "It requires manual frame-by-frame time-alignment labels for every phoneme in the dataset",
+          "C": "It computes cross-entropy strictly between sequences of identical length",
+          "D": "It replaces recurrent neural networks with decision trees during inference"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Connectionist Temporal Classification Loss",
+        "explanation": "CTC loss introduces a blank symbol and dynamic programming (forward-backward algorithm) to sum probabilities over all frame alignments that collapse to the target transcription, eliminating the need for frame-level alignment.",
+        "option_explanations": {
+          "A": "Correct: CTC allows end-to-end training without explicit segment time-alignments by summing probabilities over all valid collapsible paths.",
+          "B": "Incorrect: The central innovation of CTC is that it eliminates the requirement for expensive frame-level alignment annotations.",
+          "C": "Incorrect: CTC is specifically designed for cases where input length T is much greater than target label length U.",
+          "D": "Incorrect: CTC is an objective function evaluated on top of neural network temporal outputs (RNNs, Conformers, Transformers), not a replacement model."
+        }
+      },
+      {
+        "question": "Why does the Wasserstein-1 (Earth Mover's Distance) loss in WGANs resolve the vanishing gradient problem encountered with standard JS-divergence GAN loss?",
+        "options": {
+          "A": "The Wasserstein distance provides a continuous and almost everywhere differentiable metric between probability distributions even when their supports do not overlap",
+          "B": "The Wasserstein loss forces the discriminator to output discrete binary predictions (0 or 1)",
+          "C": "It restricts the generator output to strictly positive real values",
+          "D": "It eliminates the need for computing gradients in the critic network"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Wasserstein Loss in WGANs",
+        "explanation": "Standard JS divergence is constant (log 2) when distribution supports are disjoint in high-dimensional space, yielding zero gradients. Wasserstein distance reflects physical transport cost, providing clean informative gradients everywhere.",
+        "option_explanations": {
+          "A": "Correct: Under the Kantorovich-Rubinstein duality with 1-Lipschitz continuity, Wasserstein loss yields linear informative gradients even when real and fake distributions have zero overlap.",
+          "B": "Incorrect: WGAN critics output continuous scalar scores without sigmoid saturation, avoiding binary 0/1 clamping.",
+          "C": "Incorrect: WGAN generator outputs represent continuous data samples (e.g. image pixels normalized to [-1, 1]).",
+          "D": "Incorrect: Training the critic requires gradient ascent to approximate the Wasserstein distance between real and generated distributions."
+        }
+      },
+      {
+        "question": "In image super-resolution and style transfer, why does optimizing perceptual loss (VGG feature reconstruction loss) produce sharper results than minimizing pixel-wise MSE?",
+        "options": {
+          "A": "Pixel-wise MSE averages all plausible high-frequency textures leading to blurry images, whereas perceptual loss matches high-level semantic feature representations extracted by deep conv layers",
+          "B": "Pixel-wise MSE cannot be differentiated with respect to convolutional kernel weights",
+          "C": "Perceptual loss calculates color values only at the four corners of the image",
+          "D": "Perceptual loss guarantees zero loss for any downsampled input image"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Perceptual Loss vs Pixel MSE",
+        "explanation": "Pixel-space L2 loss penalizes spatial misalignments heavily, encouraging the model to predict the blurry conditional mean of all possible high-frequency textures. Perceptual loss measures perceptual similarity in deep feature space.",
+        "option_explanations": {
+          "A": "Correct: Perceptual loss compares activations in pre-trained feature hierarchies (e.g. VGG-19), preserving sharp textures, edges, and semantic structure.",
+          "B": "Incorrect: Pixel-wise MSE is easily differentiable and historically was the standard loss in early super-resolution models (e.g., SRCNN).",
+          "C": "Incorrect: Perceptual loss operates across entire spatial feature activation maps across multiple convolutional layers.",
+          "D": "Incorrect: Perceptual loss penalizes differences between generated and ground-truth images across semantic feature representations."
+        }
+      },
+      {
+        "question": "In self-supervised contrastive representation learning (e.g., SimCLR, MoCo), what is the function of the temperature parameter tau in the InfoNCE loss?",
+        "options": {
+          "A": "It controls the penalty strength on hard negative samples: smaller tau creates a sharper distribution that focuses gradient updates on the nearest, most challenging negative representations",
+          "B": "It modulates the physical GPU operating temperature to prevent thermal throttling",
+          "C": "It scales the learning rate exponentially with each training epoch",
+          "D": "It clamps the dot product of normalized embeddings to strictly positive values"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "InfoNCE Contrastive Loss Temperature",
+        "explanation": "In InfoNCE loss (softmax over similarity scores divided by tau), a smaller temperature tau amplifies differences among negative logits, making the gradient heavily dominated by hard negative samples closest to the anchor.",
+        "option_explanations": {
+          "A": "Correct: Temperature tau controls hardness awareness: lower tau values force the network to push away the closest negative embeddings aggressively.",
+          "B": "Incorrect: Temperature tau is a mathematical softmax scaling hyperparameter and has no relationship to hardware thermodynamics.",
+          "C": "Incorrect: Learning rate scheduling is managed by optimizer schedulers (e.g., cosine decay), independent of loss temperature.",
+          "D": "Incorrect: Cosine similarities between L2-normalized vectors range from -1 to +1 and are not clamped by tau."
+        }
+      },
+      {
+        "question": "In structural risk minimization, what is the geometric difference between augmenting a loss function with L1 regularization (Lasso) versus L2 regularization (Ridge)?",
+        "options": {
+          "A": "The L1 norm constraint has sharp diamond corners along the coordinate axes where the loss contours frequently touch first, inducing exact feature sparsity (zero coefficients)",
+          "B": "The L2 norm constraint produces sparse weight vectors with exactly zero coefficients for irrelevant features",
+          "C": "L1 regularization increases the variance of the model while L2 regularization only affects the bias",
+          "D": "L2 regularization prevents gradient descent from converging to the global minimum of convex loss functions"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "Regularized Empirical Risk Minimization",
+        "explanation": "The L1 ball is a polyhedron with vertices along coordinate axes. The elliptical contours of the unregularized loss typically intersect an L1 vertex first, driving parameters to exactly zero (sparsity). The spherical L2 ball shrinks weights smoothly without zeroing them.",
+        "option_explanations": {
+          "A": "Correct: The non-differentiable sharp corners of the L1 diamond constraint boundary intersect loss level sets at coordinate axes, producing exact zeros.",
+          "B": "Incorrect: L2 regularization shrinks weights toward zero smoothly (weight decay) but rarely drives coefficients to exactly zero.",
+          "C": "Incorrect: Both L1 and L2 regularization introduce bias to reduce variance (bias-variance tradeoff) and prevent overfitting.",
+          "D": "Incorrect: L2 regularized objectives with strictly convex penalties have unique, stable global minima that gradient descent converges to reliably."
+        }
       }
     ]
   },
@@ -583,6 +963,196 @@
           "B": "Incorrect: Residual connections resolve vanishing gradients; focal loss addresses class imbalance.",
           "C": "Incorrect: Gradient synchronization overhead is a distributed computing issue managed by AllReduce, not the loss function.",
           "D": "Incorrect: Overfitting mitigation is achieved through regularization, data augmentation, or weight decay."
+        }
+      },
+      {
+        "question": "Why is Mean Absolute Error (MAE / L1 loss) generally preferred over Mean Squared Error (MSE / L2 loss) when training models on datasets with significant outlier corruptions?",
+        "options": {
+          "A": "MAE penalizes errors linearly, preventing distant outliers from exerting disproportionate quadratic gradient influence on parameter updates",
+          "B": "MAE produces smooth non-zero gradients everywhere, including at zero error",
+          "C": "MAE is strictly non-convex, allowing gradient descent to escape local minima faster",
+          "D": "MAE computes log-likelihood probabilities directly without subtraction"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Mean Absolute Error vs MSE",
+        "explanation": "MSE squares the error (e^2), causing large outlier residual values to generate massive gradients that dominate training. MAE has constant gradient magnitude (+1 or -1), ensuring robustness to anomalous points.",
+        "option_explanations": {
+          "A": "Correct: L1 loss treats large errors linearly, so extreme outlier observations do not skew model parameter estimates quadratically.",
+          "B": "Incorrect: The derivative of |e| is undefined at e=0, which can cause oscillations around zero without subgradient handling.",
+          "C": "Incorrect: Both MAE and MSE are convex functions for linear models; MAE is not non-convex.",
+          "D": "Incorrect: MAE computes absolute residual differences |y - y_hat|, not probabilistic log-likelihoods."
+        }
+      },
+      {
+        "question": "What is the primary motivation for using Smooth L1 (Huber) loss instead of standard L1 loss in bounding box regression for object detectors?",
+        "options": {
+          "A": "It provides a smooth quadratic curve near zero error (|e| < delta) to avoid gradient oscillations while retaining robust linear penalties for large errors",
+          "B": "It forces predicted coordinates to sum to exactly one across all four boundaries",
+          "C": "It eliminates the need for computing gradients via backpropagation",
+          "D": "It guarantees that the regression loss is always zero for background samples"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Smooth L1 and Huber Loss Derivatives",
+        "explanation": "Smooth L1 uses 0.5 * e^2 for small errors (|e| < 1) ensuring continuous zero-gradient convergence at the minimum, and transitions to |e| - 0.5 for large errors preventing gradient explosions from outliers.",
+        "option_explanations": {
+          "A": "Correct: Smooth L1 combines quadratic differentiability near zero with outlier robustness of linear L1 for large residuals.",
+          "B": "Incorrect: Bounding box coordinates represent spatial coordinates (x, y, w, h), not probability distributions requiring unit sum.",
+          "C": "Incorrect: Smooth L1 is specifically designed for standard reverse-mode automatic differentiation and backpropagation.",
+          "D": "Incorrect: Background sample handling is controlled by objectness/classification loss and target assignment, not the regression loss formula itself."
+        }
+      },
+      {
+        "question": "In deep metric learning, what is the core optimization objective enforced by the Triplet Loss function with margin alpha?",
+        "options": {
+          "A": "To ensure the Euclidean distance between Anchor and Positive is smaller than the distance between Anchor and Negative by at least margin alpha",
+          "B": "To classify samples into three mutually exclusive discrete categorical bins",
+          "C": "To maximize the sum of squared weights across the three hidden layers",
+          "D": "To equalize the variance of features across Anchor, Positive, and Negative embeddings"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Triplet Loss in Metric Learning",
+        "explanation": "Triplet loss optimizes L = max(0, ||f(a) - f(p)||^2 - ||f(a) - f(n)||^2 + alpha), driving positive embeddings closer than negative embeddings by at least margin alpha.",
+        "option_explanations": {
+          "A": "Correct: Triplet loss pushes negative embeddings away from the anchor while pulling positive embeddings together with a margin buffer alpha.",
+          "B": "Incorrect: Triplet loss learns continuous metric embeddings without categorical class assignments.",
+          "C": "Incorrect: Triplet loss operates on representation embeddings f(x), not raw neural layer weight magnitudes.",
+          "D": "Incorrect: Triplet loss does not constrain embedding variance directly, but rather pairwise geometric distance relationships."
+        }
+      },
+      {
+        "question": "In pairwise Siamese networks trained with contrastive loss, what is the role of the margin hyperparameter m for dissimilar (negative) pairs?",
+        "options": {
+          "A": "It defines a distance threshold beyond which negative pairs cease to contribute to the loss, preventing already well-separated pairs from influencing gradients",
+          "B": "It sets the maximum allowable learning rate during gradient updates",
+          "C": "It forces similar pairs to maintain a minimum non-zero distance",
+          "D": "It normalizes the input feature vector to unit variance"
+        },
+        "correct_answer": "A",
+        "difficulty": "Easy",
+        "concept": "Contrastive Loss Margin",
+        "explanation": "Contrastive loss penalizes negative pairs via max(0, m - D)^2. When distance D exceeds margin m, the loss drops to zero, allowing the network to focus on hard negatives that are closer than m.",
+        "option_explanations": {
+          "A": "Correct: Margin m ensures that pairs already separated by at least distance m produce zero loss and zero gradient updates.",
+          "B": "Incorrect: Learning rate is controlled by the optimization schedule (e.g., Adam/SGD), not the loss margin.",
+          "C": "Incorrect: Similar pairs are pulled to zero distance (loss = D^2), not pushed apart.",
+          "D": "Incorrect: Vector normalization (such as L2 unit sphere projection) is an architectural choice, distinct from the loss margin m."
+        }
+      },
+      {
+        "question": "Why is Dice Loss (or Soft Dice Loss) commonly favored over standard cross-entropy loss in medical image semantic segmentation?",
+        "options": {
+          "A": "It directly optimizes the overlap (Sorensen-Dice coefficient) between predicted and ground-truth masks, mitigating severe class imbalance caused by tiny foreground lesions",
+          "B": "It does not require ground truth segmentation annotations during training",
+          "C": "It guarantees zero loss whenever the background class is predicted correctly",
+          "D": "It computes spatial convolution faster on GPU architectures"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Dice Loss in Image Segmentation",
+        "explanation": "In medical imaging where tiny tumors occupy <1% of pixels, pixel-wise cross-entropy is overwhelmed by background pixels. Dice loss optimizes intersection-over-union directly, balancing foreground and background regardless of area ratio.",
+        "option_explanations": {
+          "A": "Correct: Dice loss is inherently normalized by total foreground size, making it resilient to extreme class imbalances where target objects are minuscule.",
+          "B": "Incorrect: Dice loss requires pixel-level binary or multi-class ground truth segmentations to compute intersection and union.",
+          "C": "Incorrect: Dice loss measures overlap with ground-truth foreground; predicting pure background for an image with lesions yields maximum loss.",
+          "D": "Incorrect: Dice loss is computed element-wise across masks and does not affect the speed of convolutional backbone forward passes."
+        }
+      },
+      {
+        "question": "For sequence-to-sequence tasks such as speech recognition and handwriting OCR where input and target sequence lengths differ, what is the key benefit of CTC (Connectionist Temporal Classification) Loss?",
+        "options": {
+          "A": "It marginalizes over all possible valid alignments between input audio frames and target character sequences using dynamic programming and a blank token",
+          "B": "It requires manual frame-by-frame time-alignment labels for every phoneme in the dataset",
+          "C": "It computes cross-entropy strictly between sequences of identical length",
+          "D": "It replaces recurrent neural networks with decision trees during inference"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Connectionist Temporal Classification Loss",
+        "explanation": "CTC loss introduces a blank symbol and dynamic programming (forward-backward algorithm) to sum probabilities over all frame alignments that collapse to the target transcription, eliminating the need for frame-level alignment.",
+        "option_explanations": {
+          "A": "Correct: CTC allows end-to-end training without explicit segment time-alignments by summing probabilities over all valid collapsible paths.",
+          "B": "Incorrect: The central innovation of CTC is that it eliminates the requirement for expensive frame-level alignment annotations.",
+          "C": "Incorrect: CTC is specifically designed for cases where input length T is much greater than target label length U.",
+          "D": "Incorrect: CTC is an objective function evaluated on top of neural network temporal outputs (RNNs, Conformers, Transformers), not a replacement model."
+        }
+      },
+      {
+        "question": "Why does the Wasserstein-1 (Earth Mover's Distance) loss in WGANs resolve the vanishing gradient problem encountered with standard JS-divergence GAN loss?",
+        "options": {
+          "A": "The Wasserstein distance provides a continuous and almost everywhere differentiable metric between probability distributions even when their supports do not overlap",
+          "B": "The Wasserstein loss forces the discriminator to output discrete binary predictions (0 or 1)",
+          "C": "It restricts the generator output to strictly positive real values",
+          "D": "It eliminates the need for computing gradients in the critic network"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Wasserstein Loss in WGANs",
+        "explanation": "Standard JS divergence is constant (log 2) when distribution supports are disjoint in high-dimensional space, yielding zero gradients. Wasserstein distance reflects physical transport cost, providing clean informative gradients everywhere.",
+        "option_explanations": {
+          "A": "Correct: Under the Kantorovich-Rubinstein duality with 1-Lipschitz continuity, Wasserstein loss yields linear informative gradients even when real and fake distributions have zero overlap.",
+          "B": "Incorrect: WGAN critics output continuous scalar scores without sigmoid saturation, avoiding binary 0/1 clamping.",
+          "C": "Incorrect: WGAN generator outputs represent continuous data samples (e.g. image pixels normalized to [-1, 1]).",
+          "D": "Incorrect: Training the critic requires gradient ascent to approximate the Wasserstein distance between real and generated distributions."
+        }
+      },
+      {
+        "question": "In image super-resolution and style transfer, why does optimizing perceptual loss (VGG feature reconstruction loss) produce sharper results than minimizing pixel-wise MSE?",
+        "options": {
+          "A": "Pixel-wise MSE averages all plausible high-frequency textures leading to blurry images, whereas perceptual loss matches high-level semantic feature representations extracted by deep conv layers",
+          "B": "Pixel-wise MSE cannot be differentiated with respect to convolutional kernel weights",
+          "C": "Perceptual loss calculates color values only at the four corners of the image",
+          "D": "Perceptual loss guarantees zero loss for any downsampled input image"
+        },
+        "correct_answer": "A",
+        "difficulty": "Medium",
+        "concept": "Perceptual Loss vs Pixel MSE",
+        "explanation": "Pixel-space L2 loss penalizes spatial misalignments heavily, encouraging the model to predict the blurry conditional mean of all possible high-frequency textures. Perceptual loss measures perceptual similarity in deep feature space.",
+        "option_explanations": {
+          "A": "Correct: Perceptual loss compares activations in pre-trained feature hierarchies (e.g. VGG-19), preserving sharp textures, edges, and semantic structure.",
+          "B": "Incorrect: Pixel-wise MSE is easily differentiable and historically was the standard loss in early super-resolution models (e.g., SRCNN).",
+          "C": "Incorrect: Perceptual loss operates across entire spatial feature activation maps across multiple convolutional layers.",
+          "D": "Incorrect: Perceptual loss penalizes differences between generated and ground-truth images across semantic feature representations."
+        }
+      },
+      {
+        "question": "In self-supervised contrastive representation learning (e.g., SimCLR, MoCo), what is the function of the temperature parameter tau in the InfoNCE loss?",
+        "options": {
+          "A": "It controls the penalty strength on hard negative samples: smaller tau creates a sharper distribution that focuses gradient updates on the nearest, most challenging negative representations",
+          "B": "It modulates the physical GPU operating temperature to prevent thermal throttling",
+          "C": "It scales the learning rate exponentially with each training epoch",
+          "D": "It clamps the dot product of normalized embeddings to strictly positive values"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "InfoNCE Contrastive Loss Temperature",
+        "explanation": "In InfoNCE loss (softmax over similarity scores divided by tau), a smaller temperature tau amplifies differences among negative logits, making the gradient heavily dominated by hard negative samples closest to the anchor.",
+        "option_explanations": {
+          "A": "Correct: Temperature tau controls hardness awareness: lower tau values force the network to push away the closest negative embeddings aggressively.",
+          "B": "Incorrect: Temperature tau is a mathematical softmax scaling hyperparameter and has no relationship to hardware thermodynamics.",
+          "C": "Incorrect: Learning rate scheduling is managed by optimizer schedulers (e.g., cosine decay), independent of loss temperature.",
+          "D": "Incorrect: Cosine similarities between L2-normalized vectors range from -1 to +1 and are not clamped by tau."
+        }
+      },
+      {
+        "question": "In structural risk minimization, what is the geometric difference between augmenting a loss function with L1 regularization (Lasso) versus L2 regularization (Ridge)?",
+        "options": {
+          "A": "The L1 norm constraint has sharp diamond corners along the coordinate axes where the loss contours frequently touch first, inducing exact feature sparsity (zero coefficients)",
+          "B": "The L2 norm constraint produces sparse weight vectors with exactly zero coefficients for irrelevant features",
+          "C": "L1 regularization increases the variance of the model while L2 regularization only affects the bias",
+          "D": "L2 regularization prevents gradient descent from converging to the global minimum of convex loss functions"
+        },
+        "correct_answer": "A",
+        "difficulty": "Hard",
+        "concept": "Regularized Empirical Risk Minimization",
+        "explanation": "The L1 ball is a polyhedron with vertices along coordinate axes. The elliptical contours of the unregularized loss typically intersect an L1 vertex first, driving parameters to exactly zero (sparsity). The spherical L2 ball shrinks weights smoothly without zeroing them.",
+        "option_explanations": {
+          "A": "Correct: The non-differentiable sharp corners of the L1 diamond constraint boundary intersect loss level sets at coordinate axes, producing exact zeros.",
+          "B": "Incorrect: L2 regularization shrinks weights toward zero smoothly (weight decay) but rarely drives coefficients to exactly zero.",
+          "C": "Incorrect: Both L1 and L2 regularization introduce bias to reduce variance (bias-variance tradeoff) and prevent overfitting.",
+          "D": "Incorrect: L2 regularized objectives with strictly convex penalties have unique, stable global minima that gradient descent converges to reliably."
         }
       }
     ]

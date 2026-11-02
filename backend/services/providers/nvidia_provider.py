@@ -31,7 +31,11 @@ class NvidiaProvider(BaseAIProvider):
         return self._name
 
     def is_configured(self) -> bool:
-        return bool(os.getenv("NVIDIA_API_KEY") or os.getenv("NVIDIA_BACKUP_API_KEY"))
+        return bool(
+            os.getenv("NVIDIA_API_KEY")
+            or os.getenv("NVIDIA_SECONDARY_API_KEY")
+            or os.getenv("NVIDIA_BACKUP_API_KEY")
+        )
 
     def _get_client(self, timeout_sec: float, api_key: str):
         if not api_key:
@@ -82,7 +86,7 @@ class NvidiaProvider(BaseAIProvider):
             return False
 
         status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-        if status_code in {400, 401, 403, 404, 422}:
+        if status_code in {400, 401, 403, 404, 410, 422}:
             return False
         if status_code in {408, 429, 500, 502, 503, 504}:
             return True
@@ -94,7 +98,7 @@ class NvidiaProvider(BaseAIProvider):
             return False
 
         msg = str(exc).lower()
-        if any(term in msg for term in ["model not found", "model does not exist", "404", "bad request", "400", "invalid_request_error"]):
+        if any(term in msg for term in ["model not found", "model does not exist", "404", "410", "gone", "bad request", "400", "invalid_request_error"]):
             return False
 
         retryable_terms = [
@@ -112,6 +116,8 @@ class NvidiaProvider(BaseAIProvider):
             return "RATE_LIMIT_429"
         if status_code == 503:
             return "SERVICE_UNAVAILABLE_503"
+        if status_code == 410:
+            return "MODEL_DEPRECATED_410"
         if status_code == 404:
             return "MODEL_NOT_FOUND_404"
         if status_code == 400:
@@ -130,6 +136,8 @@ class NvidiaProvider(BaseAIProvider):
             return "NETWORK_ERROR"
 
         msg = str(exc).lower()
+        if "410" in msg or "gone" in msg:
+            return "MODEL_DEPRECATED_410"
         if "400" in msg or "bad request" in msg:
             return "MALFORMED_REQUEST_400"
         if "rate limit" in msg or "429" in msg or "quota" in msg or "too many requests" in msg:
@@ -148,27 +156,34 @@ class NvidiaProvider(BaseAIProvider):
 
     def _execute(self, prompt: str, timeout_seconds: float) -> str:
         primary_key = os.getenv("NVIDIA_API_KEY", "")
-        backup_key = os.getenv("NVIDIA_BACKUP_API_KEY", "")
+        secondary_key = os.getenv("NVIDIA_SECONDARY_API_KEY") or os.getenv("NVIDIA_BACKUP_API_KEY", "")
 
         keys_to_try = []
         if primary_key:
             keys_to_try.append((primary_key, "primary"))
-        if backup_key and backup_key != primary_key:
-            keys_to_try.append((backup_key, "backup"))
+        if secondary_key and secondary_key != primary_key:
+            keys_to_try.append((secondary_key, "secondary"))
 
         if not keys_to_try:
             raise ProviderConfigError("NVIDIA_API_KEY is not configured.", category="MISSING_CREDENTIALS") from None
 
-        primary_model = os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
-        fallback_model = os.getenv(
-            "NVIDIA_FALLBACK_MODEL",
-            "meta/llama-3.1-8b-instruct" if primary_model != "meta/llama-3.1-8b-instruct" else "meta/llama-3.3-70b-instruct"
-        )
-        candidate_models = [primary_model]
-        if fallback_model and fallback_model.lower() not in ("none", "false", "") and fallback_model not in candidate_models:
-            candidate_models.append(fallback_model)
-        for alt in ["meta/llama-3.1-8b-instruct"]:
-            if alt not in candidate_models:
+        # Verified active NVIDIA models: meta/llama-3.1-8b-instruct (primary), meta/llama-3.1-70b-instruct (fallback)
+        DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-8b-instruct"
+        KNOWN_INVALID_NVIDIA_MODELS = {"meta/llama-3.3-70b-instruct"}
+
+        configured_model = os.getenv("NVIDIA_MODEL", DEFAULT_NVIDIA_MODEL).strip()
+        fallback_model = (os.getenv("NVIDIA_FALLBACK_MODEL") or "meta/llama-3.1-70b-instruct").strip()
+
+        if configured_model in KNOWN_INVALID_NVIDIA_MODELS:
+            logger.warning(
+                "[NVIDIA CONFIG WARNING] Configured NVIDIA_MODEL '%s' returned 410 Gone (endpoint deprecated) in production. "
+                "Adding verified active model '%s' to candidate models.",
+                configured_model, DEFAULT_NVIDIA_MODEL
+            )
+
+        candidate_models = [configured_model]
+        for alt in [fallback_model, DEFAULT_NVIDIA_MODEL, "meta/llama-3.1-70b-instruct", "mistralai/mixtral-8x7b-instruct-v0.1"]:
+            if alt and alt not in candidate_models:
                 candidate_models.append(alt)
 
         last_error = None
@@ -181,6 +196,7 @@ class NvidiaProvider(BaseAIProvider):
                 break
             client = self._get_client(time_left_for_key, api_key=key_value)
             key_error = None
+            key_had_auth_error = False
 
             for m_idx, current_model in enumerate(candidate_models):
                 time_left = timeout_seconds - (time.perf_counter() - overall_start)
@@ -227,7 +243,15 @@ class NvidiaProvider(BaseAIProvider):
                             "NVIDIA API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR"
                         ) from None
 
-                    # 2. Permanent non-retryable errors: do NOT attempt model fallback or backup key
+                    # 2. Model 410 Gone (Deprecated): attempt next candidate model!
+                    if cat == "MODEL_DEPRECATED_410":
+                        logger.warning(
+                            f"[NVIDIA MODEL DEPRECATED] key={key_label} model={current_model} "
+                            f"duration={duration:.2f}s category={cat}: {sanitize_error_text(e)}. Attempting fallback model..."
+                        )
+                        continue
+
+                    # 3. Permanent non-retryable errors: do NOT attempt model fallback or backup key
                     if not self._is_retryable(e):
                         clean_err = sanitize_error_text(e)
                         if cat == "MODEL_NOT_FOUND_404":
@@ -244,7 +268,7 @@ class NvidiaProvider(BaseAIProvider):
                         logger.error(f"[NVIDIA PERMANENT ERROR] key={key_label} model={current_model} duration={duration:.2f}s category={cat}: {clean_err}")
                         raise ProviderError(f"NVIDIA error ({cat}): {clean_err}", category=cat) from None
 
-                    # 3. Retryable error (rate-limit, temporary service, timeout, connection)
+                    # 4. Retryable error (rate-limit, temporary service, timeout, connection)
                     logger.warning(
                         f"[NVIDIA MODEL FALLBACK] key={key_label} model={current_model} "
                         f"failed with retryable error (duration={duration:.2f}s, category={cat}): {sanitize_error_text(e)}. "
@@ -261,13 +285,14 @@ class NvidiaProvider(BaseAIProvider):
                             time.sleep(backoff)
                     continue
 
-            # Check if recoverable error allows backup key attempt
+
+            # Check if recoverable error allows secondary key attempt
             if key_error is not None:
                 is_recoverable = self._is_retryable(key_error)
                 if is_recoverable and key_label == "primary" and len(keys_to_try) > 1:
                     logger.warning(
                         f"[NVIDIA KEY FALLBACK] key={key_label} recoverable error (duration={duration:.2f}s): {sanitize_error_text(key_error)}. "
-                        f"Trying backup key."
+                        f"Trying secondary key."
                     )
                     continue
 

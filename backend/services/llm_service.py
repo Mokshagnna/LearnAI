@@ -142,7 +142,9 @@ def _load_local_demo_questions(
     concepts: Optional[List[str]] = None,
     syllabus_context: Optional[str] = None,
     competing_topics: Optional[List[Any]] = None,
-    expected_count: int = 10
+    expected_count: int = 10,
+    prior_questions: Optional[List[Dict[str, Any]]] = None,
+    excluded_fingerprints: Optional[set] = None
 ) -> Optional[Dict[str, Any]]:
     """Safe fallback mechanism for college demonstration if local questions already exist."""
     if not DEMO_QUESTIONS_FILE.is_file():
@@ -171,9 +173,38 @@ def _load_local_demo_questions(
                     break
 
         if data:
+            raw_questions = data.get("questions", [])
+            from services.novelty import normalise_text, fingerprint, is_question_near_duplicate
+            filtered_questions = []
+            for q in raw_questions:
+                q_text = q.get("question", "")
+                q_fp = fingerprint(q_text)
+                q_norm = normalise_text(q_text)
+                if excluded_fingerprints and (q_fp in excluded_fingerprints or q_norm in excluded_fingerprints):
+                    continue
+                if prior_questions:
+                    is_dup = False
+                    for pq in prior_questions:
+                        dup_flag, _ = is_question_near_duplicate(q, pq, topic_name=topic_name)
+                        if dup_flag:
+                            is_dup = True
+                            break
+                    if is_dup:
+                        continue
+                filtered_questions.append(q)
+
+            if len(filtered_questions) < expected_count:
+                logger.info(
+                    f"[DEMO NOVELTY] Only {len(filtered_questions)} novel demo questions available (needed {expected_count})."
+                )
+                return None
+
+            candidate_data = dict(data)
+            candidate_data["questions"] = filtered_questions[:expected_count]
+
             validated = validate_quiz_data(
-                data,
-                data.get("subject", ""),
+                candidate_data,
+                candidate_data.get("subject", ""),
                 topic_name,
                 concepts=concepts,
                 syllabus_context=syllabus_context,
@@ -186,6 +217,9 @@ def _load_local_demo_questions(
             validated["questions"] = validated["questions"][:expected_count]
             validated["is_fallback"] = True
             validated["fallback_label"] = "Local Demo Question Bank (Offline Mode)"
+            validated["provider_used"] = "demo_fallback"
+            validated["provider"] = "demo_fallback"
+            validated["is_ai_generated"] = False
             return validated
     except Exception as e:
         logger.warning(f"[FALLBACK ERROR] Could not read local demo questions: {e}")
@@ -984,7 +1018,9 @@ REQUIREMENTS:
 
     local_quiz = _load_local_demo_questions(
         course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context,
-        expected_count=num_questions
+        expected_count=num_questions,
+        prior_questions=history_questions_full,
+        excluded_fingerprints=set(all_fingerprints)
     )
     if local_quiz and len(local_quiz.get("questions", [])) == num_questions:
         total_duration = time.perf_counter() - start_time
@@ -998,9 +1034,26 @@ REQUIREMENTS:
         local_quiz["adaptive_applied"] = adaptive_applied
         local_quiz["adaptive_explanation"] = adaptive_explanation
         local_quiz["adaptive_metadata"] = adaptive_decision
+        local_quiz["provider_used"] = "demo_fallback"
+        local_quiz["provider"] = "demo_fallback"
+        local_quiz["is_fallback"] = True
+        local_quiz["is_ai_generated"] = False
         return local_quiz
 
     total_duration = time.perf_counter() - start_time
+
+    # If this is a retake and the offline question bank does not have enough novel questions:
+    if history_questions_full and DEMO_QUESTIONS_FILE.is_file():
+        logger.warning(
+            f"[RETAKE POOL EXHAUSTED] All AI providers failed and local demo question pool "
+            f"has insufficient unique questions for retake attempt={attempt_number} topic='{topic_name}'"
+        )
+        raise AIServiceUnavailableError(
+            "AI service is temporarily unavailable and the offline question bank does not have enough unique questions for a fresh retake on this topic. Please try again shortly when AI providers are reachable.",
+            category="OFFLINE_POOL_EXHAUSTED",
+            retryable=True,
+            status_code=503
+        )
     last_error_category = getattr(last_error, 'category', 'UNKNOWN') if last_error else 'UNKNOWN'
     logger.error(
         f"[QUIZ GEN FAILED] All providers exhausted course={course_code} "

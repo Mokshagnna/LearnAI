@@ -31,7 +31,11 @@ class GroqProvider(BaseAIProvider):
         return self._name
 
     def is_configured(self) -> bool:
-        return bool(os.getenv("GROQ_API_KEY") or os.getenv("GROQ_BACKUP_API_KEY"))
+        return bool(
+            os.getenv("GROQ_API_KEY")
+            or os.getenv("GROQ_SECONDARY_API_KEY")
+            or os.getenv("GROQ_BACKUP_API_KEY")
+        )
 
     def _get_client(self, timeout_sec: float, api_key: str):
         if not api_key:
@@ -50,22 +54,33 @@ class GroqProvider(BaseAIProvider):
 
     def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 3000) -> str:
         primary_key = os.getenv("GROQ_API_KEY", "")
-        backup_key = os.getenv("GROQ_BACKUP_API_KEY", "")
+        secondary_key = os.getenv("GROQ_SECONDARY_API_KEY") or os.getenv("GROQ_BACKUP_API_KEY", "")
 
         keys_to_try = []
         if primary_key:
             keys_to_try.append((primary_key, "primary"))
-        if backup_key and backup_key != primary_key:
-            keys_to_try.append((backup_key, "backup"))
+        if secondary_key and secondary_key != primary_key:
+            keys_to_try.append((secondary_key, "secondary"))
 
         if not keys_to_try:
             raise ProviderConfigError("GROQ_API_KEY is not configured.", category="MISSING_CREDENTIALS")
 
-        # Official verified Groq models: llama-3.3-70b-versatile, llama-3.1-8b-instant, mixtral-8x7b-32768
-        primary_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        fallback_model = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
-        candidate_models = [primary_model]
-        for alt in [fallback_model, "llama-3.1-8b-instant"]:
+        # Verified active Groq models: llama-3.1-8b-instant (primary), mixtral-8x7b-32768 (fallback)
+        DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+        KNOWN_INVALID_GROQ_MODELS = {"llama3-70b-8192", "llama3-8b-8192", "llama-3.2-90b-text-preview"}
+
+        configured_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip()
+        fallback_model = (os.getenv("GROQ_FALLBACK_MODEL") or "mixtral-8x7b-32768").strip()
+
+        if configured_model in KNOWN_INVALID_GROQ_MODELS:
+            logger.warning(
+                "[GROQ CONFIG WARNING] Configured GROQ_MODEL '%s' is a known-deprecated model. "
+                "Adding verified active model '%s' to candidate models.",
+                configured_model, DEFAULT_GROQ_MODEL
+            )
+
+        candidate_models = [configured_model]
+        for alt in [fallback_model, DEFAULT_GROQ_MODEL, "mixtral-8x7b-32768", "llama-3.3-70b-versatile"]:
             if alt and alt not in candidate_models:
                 candidate_models.append(alt)
 
@@ -79,6 +94,7 @@ class GroqProvider(BaseAIProvider):
                 break
             client = self._get_client(time_left_for_key, api_key=key_value)
             key_error = None
+            key_had_auth_error = False
 
             for m_idx, current_model in enumerate(candidate_models):
                 time_left = timeout_seconds - (time.perf_counter() - overall_start)
@@ -110,15 +126,13 @@ class GroqProvider(BaseAIProvider):
                     duration = time.perf_counter() - call_start
                     msg = str(e).lower()
 
-                    # Auth errors cannot be solved by changing models or keys — fail immediately
+                    # Auth errors on primary key: fail immediately without trying secondary key
                     if any(term in msg for term in ["invalid api key", "authentication", "unauthorized", "api_key", "401"]):
                         logger.error(f"[GROQ AUTH FAILED] key={key_label} duration={duration:.2f}s error={sanitize_error_text(e)}")
-                        raise ProviderConfigError(
-                            "Groq API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR"
-                        ) from e
+                        raise ProviderConfigError("Groq API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR") from None
 
                     if any(term in msg for term in ["model_not_found", "model not found", "does not exist", "404"]):
-                        logger.error(
+                        logger.warning(
                             f"[GROQ MODEL NOT FOUND] key={key_label} model={current_model} "
                             f"duration={duration:.2f}s: {sanitize_error_text(e)}. Attempting fallback model..."
                         )
@@ -139,7 +153,8 @@ class GroqProvider(BaseAIProvider):
                             time.sleep(backoff)
                     continue
 
-            # All models on this key exhausted — decide whether to try backup key
+
+            # All models on this key exhausted — decide whether to try secondary key
             if key_error is not None:
                 msg = str(key_error).lower()
                 is_recoverable = any(term in msg for term in [
@@ -147,9 +162,9 @@ class GroqProvider(BaseAIProvider):
                     "503", "500", "502", "504", "unavailable", "timeout", "timed out"
                 ])
                 if is_recoverable and key_label == "primary" and len(keys_to_try) > 1:
-                    logger.warning("[GROQ KEY FALLBACK] Primary key failed with recoverable error. Trying backup key.")
+                    logger.warning("[GROQ KEY FALLBACK] Primary key failed with recoverable error. Trying secondary key.")
                     continue
-                # Non-recoverable error or no backup available — stop
+                # Non-recoverable error or no secondary available — stop
                 break
 
         if last_error:

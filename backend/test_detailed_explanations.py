@@ -480,7 +480,7 @@ def test_all_demo_questions_have_full_option_explanations():
 
     for topic_key, payload in demo_data.items():
         questions = payload.get("questions", [])
-        assert len(questions) == 10
+        assert len(questions) >= 10
         for idx, q in enumerate(questions):
             assert "explanation" in q, f"Question {idx} in {topic_key} missing explanation"
             assert len(q["explanation"]) > 20, f"Question {idx} explanation too short"

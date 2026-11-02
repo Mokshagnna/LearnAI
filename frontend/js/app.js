@@ -2139,7 +2139,8 @@ function renderQuizHeader(quizData) {
   if ($("quizAttemptNumber")) {
     const attempt = quizData.attempt_number || 1;
     const diff = (quizData.recommended_difficulty || "mixed").toUpperCase();
-    $("quizAttemptNumber").textContent = attempt > 1 ? `Attempt #${attempt} • ${diff}` : `Attempt #1 • ${diff}`;
+    const fallbackNotice = quizData.is_fallback ? " • [Offline Demo Bank]" : "";
+    $("quizAttemptNumber").textContent = attempt > 1 ? `Attempt #${attempt} • ${diff}${fallbackNotice}` : `Attempt #1 • ${diff}${fallbackNotice}`;
   }
 }
 
@@ -2438,6 +2439,15 @@ function showResult(data) {
   $("analysisSummary").textContent = analysis.summary || "";
   $("analysisRevision").textContent = analysis.revision || "";
   $("analysisRecommendation").textContent = analysis.recommendation || "";
+
+  const retakeBtn = $("retakeBtn");
+  if (retakeBtn) {
+    if (currentQuiz && currentQuiz.is_fallback) {
+      retakeBtn.textContent = "Retake Quiz (Offline Mode)";
+    } else {
+      retakeBtn.textContent = "Retake with New AI Questions";
+    }
+  }
 
   const reviewHtml = (data.details || []).map((d, i) => {
     const rawConcept = d.concept || (currentQuiz && currentQuiz.questions && currentQuiz.questions[i] && currentQuiz.questions[i].concept) || "General";

@@ -30,7 +30,11 @@ class GeminiProvider(BaseAIProvider):
         return self._name
 
     def is_configured(self) -> bool:
-        return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_BACKUP_API_KEY"))
+        return bool(
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GEMINI_SECONDARY_API_KEY")
+            or os.getenv("GEMINI_BACKUP_API_KEY")
+        )
 
     def _get_client(self, timeout_sec: float, api_key: str) -> genai.Client:
         if not api_key:
@@ -129,34 +133,47 @@ class GeminiProvider(BaseAIProvider):
             )
 
         primary_key = os.getenv("GEMINI_API_KEY", "")
-        backup_key = os.getenv("GEMINI_BACKUP_API_KEY", "")
+        secondary_key = os.getenv("GEMINI_SECONDARY_API_KEY") or os.getenv("GEMINI_BACKUP_API_KEY", "")
 
         keys_to_try = []
         if primary_key:
             keys_to_try.append((primary_key, "primary"))
-        if backup_key and backup_key != primary_key:
-            keys_to_try.append((backup_key, "backup"))
+        if secondary_key and secondary_key != primary_key:
+            keys_to_try.append((secondary_key, "secondary"))
 
         if not keys_to_try:
             raise ProviderConfigError("GEMINI_API_KEY is not configured.", category="MISSING_CREDENTIALS") from None
 
-        # Official verified active Gemini models: gemini-2.0-flash, gemini-1.5-flash
-        primary_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-        fallback_model = os.getenv(
-            "GEMINI_FALLBACK_MODEL",
-            "gemini-1.5-flash" if primary_model != "gemini-1.5-flash" else "gemini-2.0-flash"
-        )
+        # Verified active Gemini models: gemini-1.5-flash (primary), gemini-1.5-pro (fallback)
+        DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
+        KNOWN_INVALID_GEMINI_MODELS = {"gemini-2.0-flash", "gemini-2.0-flash-exp", "gemini-1.0-pro"}
 
-        models_to_try = [primary_model]
-        for alt in [fallback_model, "gemini-1.5-flash"]:
-            if alt and alt not in models_to_try:
-                models_to_try.append(alt)
+        configured_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
+        fallback_model = (os.getenv("GEMINI_FALLBACK_MODEL") or "").strip()
+
+        models_to_try = [configured_model]
+        if fallback_model and fallback_model.lower() not in ("none", "false", "") and fallback_model not in models_to_try:
+            models_to_try.append(fallback_model)
+        elif configured_model in KNOWN_INVALID_GEMINI_MODELS:
+            logger.warning(
+                "[GEMINI CONFIG WARNING] Configured GEMINI_MODEL '%s' is a known-invalid / deprecated model "
+                "(reported 404 on API v1beta). Adding verified active model '%s' to candidate models.",
+                configured_model, DEFAULT_GEMINI_MODEL
+            )
+            if DEFAULT_GEMINI_MODEL not in models_to_try:
+                models_to_try.append(DEFAULT_GEMINI_MODEL)
+        elif "GEMINI_MODEL" not in os.environ:
+            if DEFAULT_GEMINI_MODEL not in models_to_try:
+                models_to_try.append(DEFAULT_GEMINI_MODEL)
+            if "gemini-1.5-pro" not in models_to_try:
+                models_to_try.append("gemini-1.5-pro")
 
         last_error = None
         start_time = time.perf_counter()
 
         for key_value, key_label in keys_to_try:
             key_had_recoverable_error = False
+            key_had_auth_error = False
 
             for model_idx, model in enumerate(models_to_try):
                 elapsed = time.perf_counter() - start_time
@@ -208,14 +225,25 @@ class GeminiProvider(BaseAIProvider):
                         cat = self._categorize(e)
 
                         if self._is_auth_error(e):
-                            logger.error(f"[GEMINI AUTH FAILED] key={key_label} model={model} duration={duration:.2f}s category={cat} error={sanitize_error_text(e)}")
-                            raise ProviderConfigError("Gemini API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR") from None
+                            logger.error(
+                                f"[GEMINI AUTH FAILED] key={key_label} model={model} duration={duration:.2f}s "
+                                f"category={cat} error={sanitize_error_text(e)}"
+                            )
+                            raise ProviderConfigError(
+                                "Gemini API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR"
+                            ) from None
+
+                        if cat in ("MODEL_NOT_FOUND_404", "MODEL_DEPRECATED_410"):
+                            logger.warning(
+                                f"[GEMINI MODEL NOT FOUND] key={key_label} model={model} duration={duration:.2f}s "
+                                f"category={cat}: {sanitize_error_text(e)}. Attempting fallback model..."
+                            )
+                            # Advance immediately to next candidate model without redundant retries of this model
+                            break
 
                         if not self._is_retryable(e):
                             clean_err = sanitize_error_text(e)
                             logger.error(f"[GEMINI PERMANENT ERROR] key={key_label} model={model} duration={duration:.2f}s category={cat}: {clean_err}")
-                            if cat == "MODEL_NOT_FOUND_404":
-                                raise ProviderConfigError(f"Gemini model '{model}' not found or invalid model ID.", category="MODEL_NOT_FOUND_404") from None
                             if cat == "MALFORMED_REQUEST_400":
                                 raise ProviderError(f"Gemini malformed request: {clean_err}", category="MALFORMED_REQUEST_400", retryable=False) from None
                             raise ProviderError(f"Gemini permanent error ({cat}): {clean_err}", category=cat, retryable=False) from None
@@ -236,18 +264,22 @@ class GeminiProvider(BaseAIProvider):
                         else:
                             break
 
+
                 # If primary model failed, log failover
                 if model_idx < len(models_to_try) - 1:
                     logger.info(f"[GEMINI MODEL FAILOVER] key={key_label} Moving to next model due to {model} unavailability.")
 
-            # After exhausting all models on this key, try backup if failure was recoverable
+            # After exhausting all models on this key, try secondary if failure was recoverable
             if key_had_recoverable_error and key_label == "primary" and len(keys_to_try) > 1:
-                logger.warning("[GEMINI KEY FALLBACK] Primary key exhausted with recoverable errors. Trying backup key.")
+                logger.warning("[GEMINI KEY FALLBACK] Primary key exhausted with recoverable errors. Trying secondary key.")
                 continue
             elif key_had_recoverable_error:
-                break  # Backup also failed or no backup available
+                break  # Secondary also failed or no secondary available
             else:
-                break  # No error tracked — shouldn't reach here normally
+                # If all candidate models failed with 404/permanent on this key, fail fast
+                if last_error and self._categorize(last_error) in ("MODEL_NOT_FOUND_404", "MODEL_DEPRECATED_410"):
+                    raise ProviderConfigError(f"Gemini model not found across candidate models: {models_to_try}.", category="MODEL_NOT_FOUND_404") from None
+                break
 
         category = self._categorize(last_error) if last_error else "TIMEOUT"
         clean_err = sanitize_error_text(last_error) if last_error else "Budget exhausted"

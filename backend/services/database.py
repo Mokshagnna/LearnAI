@@ -201,13 +201,46 @@ def get_connection(db_path: Optional[Path] = None) -> Any:
     return _sqlite_adapter.get_connection()
 
 
-def _ensure_column(cursor: Any, table: str, column: str, column_type: str):
+def _ensure_column(cursor: Any, table: str, column: str, column_type: str, dialect: str = "sqlite"):
     """Safely add a column to an existing table if it does not already exist."""
-    cursor.execute(f"PRAGMA table_info({table})")
-    columns = [row[1] for row in cursor.fetchall()]
-    if column not in columns:
-        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
-        logger.info("Migrated schema: added column %s to table %s", column, table)
+    try:
+        if dialect == "mysql":
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s;",
+                (table, column)
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type};")
+                logger.info("Migrated schema (MySQL): added column %s to table %s", column, table)
+        else:
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [row[1] for row in cursor.fetchall()]
+            if column not in columns:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+                logger.info("Migrated schema (SQLite): added column %s to table %s", column, table)
+    except Exception as e:
+        logger.warning("Could not ensure column %s on table %s: %s", column, table, e)
+
+
+def _ensure_index(cursor: Any, table: str, index_name: str, columns: str, dialect: str = "sqlite"):
+    """Safely create an index if it does not already exist."""
+    try:
+        if dialect == "mysql":
+            cursor.execute(
+                "SELECT INDEX_NAME FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s;",
+                (table, index_name)
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                cursor.execute(f"CREATE INDEX {index_name} ON {table} ({columns});")
+                logger.info("Migrated schema (MySQL): created index %s on table %s", index_name, table)
+        else:
+            cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({columns});")
+    except Exception as e:
+        logger.warning("Could not ensure index %s on table %s: %s", index_name, table, e)
 
 
 def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
@@ -257,6 +290,12 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
         conn = _mysql_adapter.get_connection()
         try:
             applied = apply_migrations(conn, dialect="mysql")
+            cursor = conn.cursor()
+            _ensure_column(cursor, "question_metadata", "normalized_text", "TEXT", dialect="mysql")
+            _ensure_column(cursor, "question_metadata", "topic_id", "VARCHAR(100)", dialect="mysql")
+            _ensure_column(cursor, "question_metadata", "learning_objective", "TEXT", dialect="mysql")
+            _ensure_index(cursor, "question_metadata", "idx_qm_topic_id", "topic_id", dialect="mysql")
+            conn.commit()
             logger.info("MySQL initialized successfully (applied migrations: %s)", applied)
             return {"status": "ok", "backend": "mysql", "applied_migrations": applied}
         finally:
@@ -268,6 +307,12 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
         conn = _mysql_adapter.get_connection()
         try:
             applied = apply_migrations(conn, dialect="mysql")
+            cursor = conn.cursor()
+            _ensure_column(cursor, "question_metadata", "normalized_text", "TEXT", dialect="mysql")
+            _ensure_column(cursor, "question_metadata", "topic_id", "VARCHAR(100)", dialect="mysql")
+            _ensure_column(cursor, "question_metadata", "learning_objective", "TEXT", dialect="mysql")
+            _ensure_index(cursor, "question_metadata", "idx_qm_topic_id", "topic_id", dialect="mysql")
+            conn.commit()
             logger.info("MySQL initialized successfully (applied migrations: %s)", applied)
             return {"status": "ok", "backend": "mysql", "applied_migrations": applied}
         finally:
@@ -424,6 +469,11 @@ def init_db(db_path: Optional[Path] = None) -> Dict[str, Any]:
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_question_metadata_fingerprint
         ON question_metadata (question_fingerprint)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_qm_topic_id
+        ON question_metadata (topic_id)
     """)
 
     cursor.execute("""
@@ -1217,20 +1267,39 @@ def submit_quiz_atomic(
             except Exception:
                 lo = ""
             top_id = session.get("topic_id", "")
-            cursor.execute("""
-                INSERT INTO question_metadata (
-                    id, attempt_id, student_id, course_code, topic_name,
-                    question_index, question_text, question_fingerprint,
-                    concept, difficulty, question_type, correct_answer, created_at,
-                    normalized_text, topic_id, learning_objective
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                q_id, attempt_id, eff_student_id, session["course_code"],
-                session["topic_name"], idx, q_text, q_fp,
-                q.get("concept", ""), q.get("difficulty", ""),
-                "mcq", q.get("correct_answer", ""), now_iso,
-                q_fp, top_id, lo
-            ))
+            try:
+                cursor.execute("""
+                    INSERT INTO question_metadata (
+                        id, attempt_id, student_id, course_code, topic_name,
+                        question_index, question_text, question_fingerprint,
+                        concept, difficulty, question_type, correct_answer, created_at,
+                        normalized_text, topic_id, learning_objective
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    q_id, attempt_id, eff_student_id, session["course_code"],
+                    session["topic_name"], idx, q_text, q_fp,
+                    q.get("concept", ""), q.get("difficulty", ""),
+                    "mcq", q.get("correct_answer", ""), now_iso,
+                    q_fp, top_id, lo
+                ))
+            except Exception as meta_err:
+                err_str = str(meta_err).lower()
+                if "1054" in err_str or "unknown column" in err_str or "no column named" in err_str or "no such column" in err_str:
+                    logger.error("[MIGRATION_INCOMPLETE_WARNING] question_metadata table is missing novelty columns ('normalized_text', 'topic_id', 'learning_objective'). Please run migration 005. Falling back to 13-column insert so student submission succeeds without crash: %s", meta_err)
+                    cursor.execute("""
+                        INSERT INTO question_metadata (
+                            id, attempt_id, student_id, course_code, topic_name,
+                            question_index, question_text, question_fingerprint,
+                            concept, difficulty, question_type, correct_answer, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        q_id, attempt_id, eff_student_id, session["course_code"],
+                        session["topic_name"], idx, q_text, q_fp,
+                        q.get("concept", ""), q.get("difficulty", ""),
+                        "mcq", q.get("correct_answer", ""), now_iso
+                    ))
+                else:
+                    raise
 
         # Step d: Save granular student answers
         save_student_answers(session_id, attempt_id, eff_student_id, result["details"], conn=conn)
@@ -1720,31 +1789,59 @@ def save_quiz_attempt(
         except Exception:
             lo = ""
         top_id = quiz_data.get("topic_id", "")
-        cursor.execute("""
-            INSERT INTO question_metadata (
-                id, attempt_id, student_id, course_code, topic_name,
-                question_index, question_text, question_fingerprint,
-                concept, difficulty, question_type, correct_answer, created_at,
-                normalized_text, topic_id, learning_objective
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            q_id,
-            attempt_id,
-            student_id,
-            course_code,
-            topic_name,
-            idx,
-            q_text,
-            q_fp,
-            q.get("concept", ""),
-            q.get("difficulty", ""),
-            "mcq",
-            q.get("correct_answer", ""),
-            now,
-            q_fp,
-            top_id,
-            lo
-        ))
+        try:
+            cursor.execute("""
+                INSERT INTO question_metadata (
+                    id, attempt_id, student_id, course_code, topic_name,
+                    question_index, question_text, question_fingerprint,
+                    concept, difficulty, question_type, correct_answer, created_at,
+                    normalized_text, topic_id, learning_objective
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                q_id,
+                attempt_id,
+                student_id,
+                course_code,
+                topic_name,
+                idx,
+                q_text,
+                q_fp,
+                q.get("concept", ""),
+                q.get("difficulty", ""),
+                "mcq",
+                q.get("correct_answer", ""),
+                now,
+                q_fp,
+                top_id,
+                lo
+            ))
+        except Exception as meta_err:
+            err_str = str(meta_err).lower()
+            if "1054" in err_str or "unknown column" in err_str or "no column named" in err_str or "no such column" in err_str:
+                logger.error("[MIGRATION_INCOMPLETE_WARNING] question_metadata table is missing novelty columns ('normalized_text', 'topic_id', 'learning_objective'). Please run migration 005. Falling back to 13-column insert so student submission succeeds without crash: %s", meta_err)
+                cursor.execute("""
+                    INSERT INTO question_metadata (
+                        id, attempt_id, student_id, course_code, topic_name,
+                        question_index, question_text, question_fingerprint,
+                        concept, difficulty, question_type, correct_answer, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    q_id,
+                    attempt_id,
+                    student_id,
+                    course_code,
+                    topic_name,
+                    idx,
+                    q_text,
+                    q_fp,
+                    q.get("concept", ""),
+                    q.get("difficulty", ""),
+                    "mcq",
+                    q.get("correct_answer", ""),
+                    now
+                ))
+            else:
+                raise
 
     # 3. If session_id and details are provided, complete the session and save granular answers
     if session_id:

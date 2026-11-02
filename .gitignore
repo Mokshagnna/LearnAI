@@ -1,6 +1,4 @@
-<<<<<<< HEAD
 LearnAI/
-=======
 # Python
 __pycache__/
 *.py[cod]
@@ -42,4 +40,3 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
->>>>>>> origin/main
