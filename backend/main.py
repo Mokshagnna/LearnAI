@@ -1187,6 +1187,13 @@ def create_quiz(req: QuizRequest, request: Request):
 
     dynamic_concepts: list[str] = []
 
+    # Initialize to empty lists to prevent UnboundLocalError at the competing-topics
+    # section below, which checks req.notes_session_id / req.study_material_id without
+    # the is_notes_grounded guard. When practice_mode == "general_syllabus" these
+    # variables are never assigned inside the conditional blocks.
+    session_topics: list = []
+    mat_topics: list = []
+
     if is_notes_grounded and req.notes_session_id:
 
         sess = get_notes_session(req.notes_session_id)
