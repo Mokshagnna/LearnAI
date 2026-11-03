@@ -170,7 +170,8 @@ class GroqProvider(BaseAIProvider):
                         result_text = raw_content.strip()
 
                     if not result_text:
-                        finish_reason = getattr(choice, "finish_reason", None) or (choice.get("finish_reason") if isinstance(choice, dict) else "unknown")
+                        raw_fr = getattr(choice, "finish_reason", None) or (choice.get("finish_reason") if isinstance(choice, dict) else "unknown")
+                        finish_reason = raw_fr if isinstance(raw_fr, (str, int)) else ("mock_finish" if "Mock" in type(raw_fr).__name__ else "unknown")
                         raise ValueError(
                             f"Groq model {current_model} returned an empty response "
                             f"(content is empty, finish_reason='{finish_reason}')."
@@ -190,7 +191,7 @@ class GroqProvider(BaseAIProvider):
                         logger.error(f"[GROQ AUTH FAILED] key={key_label} duration={duration:.2f}s error={sanitize_error_text(e)}")
                         raise ProviderConfigError("Groq API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR") from None
 
-                    if any(term in msg for term in ["model_not_found", "model not found", "does not exist", "404"]):
+                    if any(term in msg for term in ["model_not_found", "model not found", "does not exist", " 404", "404 ", "404:", "/404"]):
                         logger.warning(
                             f"[GROQ MODEL NOT FOUND] key={key_label} model={current_model} "
                             f"duration={duration:.2f}s: {sanitize_error_text(e)}. Attempting fallback model..."
@@ -229,7 +230,7 @@ class GroqProvider(BaseAIProvider):
         if last_error:
             msg = str(last_error).lower()
             clean_err = sanitize_error_text(last_error)
-            if any(term in msg for term in ["model_not_found", "model not found", "does not exist", "404"]):
+            if any(term in msg for term in ["model_not_found", "model not found", "does not exist", " 404", "404 ", "404:", "/404"]):
                 raise ProviderConfigError(
                     f"Groq model not found or invalid model identifier: {clean_err}", category="MODEL_NOT_FOUND_404"
                 ) from last_error

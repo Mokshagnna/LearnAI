@@ -121,8 +121,8 @@ CRITICAL RULES FOR RELEVANCE AND TOPIC ISOLATION:
    - All option values must be complete, meaningful, and non-empty. Never leave any option blank or with placeholder text.
    - "correct_answer" MUST be the exact uppercase letter corresponding to the correct option: "A", "B", "C", or "D".
    - In the "concept" field, specify the exact syllabus concept or learning objective assessed.
-   - In "explanation", provide a detailed step-by-step educational explanation demonstrating why the correct answer is correct (including math calculations, code execution traces, or concept principles).
-   - In "option_explanations", provide an object with keys "A", "B", "C", and "D" where the correct option explains why it is right, and each incorrect option explains specifically why it is wrong or what common misconception it represents.
+   - In "explanation", provide a clear, concise step-by-step educational explanation (2-3 sentences) demonstrating why the correct answer is correct (including math calculations, code execution traces, or concept principles).
+   - In "option_explanations", provide concise 1-2 sentence explanations for keys "A", "B", "C", and "D" where the correct option explains why it is right, and each incorrect option concisely explains what specific misconception or calculation error it represents.
    - Return ONLY valid JSON matching this exact structure:
 
 {{

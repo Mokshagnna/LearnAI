@@ -679,20 +679,18 @@ class TestAdaptiveGenerationIntegration:
             attempt_id="att_stored_1"
         )
 
-        # When all AI providers are unavailable, stored fallback serves questions
+        # When all AI providers are unavailable, stored fallback is NOT used; raises AIConfigError
+        from services.llm_service import AIConfigError
         with patch("services.llm_service._get_providers", return_value=[]):
             with patch("services.llm_service._load_local_demo_questions", return_value=None):
-                quiz = generate_quiz(
-                    course_code="22AM301",
-                    course_name="Deep Learning",
-                    topic_name="Stored Topic",
-                    syllabus_context="Context",
-                    student_id="stud_fallback_user"
-                )
-
-        assert quiz["is_fallback"] is True
-        assert quiz["provider_used"] == "stored_db"
-        assert len(quiz["questions"]) == 10
+                with pytest.raises(AIConfigError):
+                    generate_quiz(
+                        course_code="22AM301",
+                        course_name="Deep Learning",
+                        topic_name="Stored Topic",
+                        syllabus_context="Context",
+                        student_id="stud_fallback_user"
+                    )
         conn.close()
 
 

@@ -472,23 +472,10 @@ def test_student_data_isolation_on_explanations(client):
     assert hist_resp.status_code == 403
 
 
-def test_all_demo_questions_have_full_option_explanations():
-    """Verify all fallback demo questions in demo_questions.json have rich explanations and option_explanations."""
+def test_curated_demo_questions_permanently_removed():
+    """Verify that demo_questions.json has been removed and curated fallback is disabled."""
     demo_file = Path(__file__).parent / "data" / "demo_questions.json"
-    with open(demo_file, "r", encoding="utf-8") as f:
-        demo_data = json.load(f)
-
-    for topic_key, payload in demo_data.items():
-        questions = payload.get("questions", [])
-        assert len(questions) >= 10
-        for idx, q in enumerate(questions):
-            assert "explanation" in q, f"Question {idx} in {topic_key} missing explanation"
-            assert len(q["explanation"]) > 20, f"Question {idx} explanation too short"
-            assert "option_explanations" in q, f"Question {idx} in {topic_key} missing option_explanations"
-            opt_expl = q["option_explanations"]
-            assert set(opt_expl.keys()) == {"A", "B", "C", "D"}, f"Question {idx} missing options in option_explanations"
-            for letter in ["A", "B", "C", "D"]:
-                assert len(opt_expl[letter]) > 10, f"Question {idx} option {letter} explanation too short"
+    assert not demo_file.exists(), "demo_questions.json must not exist in repository"
 
 
 def test_math_and_programming_explanation_richness():

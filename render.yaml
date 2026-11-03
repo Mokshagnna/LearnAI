@@ -59,8 +59,6 @@ services:
         sync: false
       - key: NVIDIA_FALLBACK_MODEL
         sync: false
-      - key: ENABLE_LOCAL_DEMO_FALLBACK
-        value: "true"
 
       # Reverse proxy & networking for Render cloud environment
       - key: ENVIRONMENT

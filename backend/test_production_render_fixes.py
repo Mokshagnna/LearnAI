@@ -423,69 +423,19 @@ class TestDatabaseMigrationAndCompatibility:
 # =============================================================================
 
 class TestDemoFallbackNovelty:
-    """Verifies that offline demo mode generates fresh questions across retakes and reports exhaustion."""
+    """Verifies that curated demo question fallback has been removed and _load_local_demo_questions returns None."""
 
-    def test_demo_questions_has_20_questions_per_topic(self):
+    def test_demo_questions_has_been_removed(self):
         demo_file = os.path.join(os.path.dirname(__file__), "data", "demo_questions.json")
-        with open(demo_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        for key in ["22AM803::Introduction and Goals of Computer Vision", "22AM301::Loss Function"]:
-            assert len(data[key]["questions"]) >= 20
+        assert not os.path.exists(demo_file)
 
-    def test_demo_fallback_retake_yields_zero_duplicates(self):
-        """Attempt 1 gets questions 1-10; Attempt 2 (retake) gets questions 11-20 with 0 duplicates."""
-        # Attempt 1
-        quiz1 = _load_local_demo_questions(
-            course_code="22AM301",
-            topic_name="Loss Function",
-            expected_count=10,
-            prior_questions=None,
-            excluded_fingerprints=None
-        )
-        assert quiz1 is not None
-        assert len(quiz1["questions"]) == 10
-        q1_texts = [q["question"] for q in quiz1["questions"]]
-
-        # Attempt 2 (Retake) with prior questions from Attempt 1
-        quiz2 = _load_local_demo_questions(
-            course_code="22AM301",
-            topic_name="Loss Function",
-            expected_count=10,
-            prior_questions=quiz1["questions"],
-            excluded_fingerprints={q["question"].strip().lower() for q in quiz1["questions"]}
-        )
-        assert quiz2 is not None
-        assert len(quiz2["questions"]) == 10
-        q2_texts = [q["question"] for q in quiz2["questions"]]
-
-        # Verify completely disjoint sets of questions (0 duplicates)
-        overlap = set(q1_texts).intersection(set(q2_texts))
-        assert len(overlap) == 0
-
-    def test_demo_fallback_exhaustion_reports_pool_exhausted(self):
-        """When 20 questions have already been served, attempt 3 reports pool exhaustion rather than repeating."""
-        quiz1 = _load_local_demo_questions(
+    def test_load_local_demo_questions_returns_none(self):
+        quiz = _load_local_demo_questions(
             course_code="22AM301",
             topic_name="Loss Function",
             expected_count=10
         )
-        quiz2 = _load_local_demo_questions(
-            course_code="22AM301",
-            topic_name="Loss Function",
-            expected_count=10,
-            prior_questions=quiz1["questions"]
-        )
-        all_20_questions = quiz1["questions"] + quiz2["questions"]
-
-        # Attempt 3: All 20 questions are in history
-        quiz3 = _load_local_demo_questions(
-            course_code="22AM301",
-            topic_name="Loss Function",
-            expected_count=10,
-            prior_questions=all_20_questions
-        )
-        # Returns None because pool does not have 10 more unique questions
-        assert quiz3 is None
+        assert quiz is None
 
 
 # =============================================================================

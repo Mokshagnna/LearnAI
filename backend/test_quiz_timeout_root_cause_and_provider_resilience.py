@@ -201,66 +201,26 @@ def test_client_timeout_categorization(monkeypatch):
 # 4. Demo Fallback and Deep Learning Loss Function Tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_local_demo_questions_loss_function():
-    """Verifies that local demo questions file has 10 high-quality questions for 22AM301 Loss Function (both spellings)."""
-    # 1. Test canonical spelling
-    demo_canonical = _load_local_demo_questions("22AM301", "Loss Function", expected_count=10)
-    assert demo_canonical is not None, "Failed to load demo questions for 22AM301 Loss Function"
-    questions = demo_canonical.get("questions", [])
-    assert len(questions) == 10, f"Expected 10 questions, got {len(questions)}"
-
-    # 2. Test syllabus OCR spelling (three 's's)
-    demo_ocr = _load_local_demo_questions("22AM301", "Losss Function", expected_count=10)
-    assert demo_ocr is not None, "Failed to load demo questions for 22AM301 Losss Function"
-    assert len(demo_ocr.get("questions", [])) == 10
-
-    # 3. Verify each question has 4 valid options, correct answer, explanation, and option explanations
-    for idx, q in enumerate(questions):
-        assert "question" in q and len(q["question"]) > 15, f"Q{idx+1} invalid statement"
-        options = q.get("options", {})
-        assert set(options.keys()) == {"A", "B", "C", "D"}, f"Q{idx+1} missing ABCD options"
-        for opt_k, opt_v in options.items():
-            assert opt_v and len(str(opt_v).strip()) > 0, f"Q{idx+1} option {opt_k} is empty"
-        assert q.get("correct_answer") in ("A", "B", "C", "D"), f"Q{idx+1} invalid correct_answer"
-        assert "explanation" in q and len(q["explanation"]) > 20, f"Q{idx+1} missing explanation"
-        opt_expl = q.get("option_explanations", {})
-        assert len(opt_expl) == 4, f"Q{idx+1} missing complete option_explanations"
-        for opt_k in ("A", "B", "C", "D"):
-            assert opt_k in opt_expl and len(str(opt_expl[opt_k]).strip()) > 5
-
-
-def test_topic_isolation_no_false_rejection_for_deep_learning_loss():
-    """Verifies that Deep Learning Loss Function questions pass topic isolation without false competing-topic triggers."""
+def test_no_local_demo_questions_returned_when_unconfigured():
+    """Verifies that _load_local_demo_questions returns None."""
     demo = _load_local_demo_questions("22AM301", "Loss Function", expected_count=10)
-    questions = demo["questions"]
-
-    for idx, q in enumerate(questions):
-        is_rel, reason = is_question_relevant_to_topic(
-            q,
-            topic_name="Loss Function",
-            course_code="22AM301"
-        )
-        assert is_rel is True, f"Question {idx+1} was falsely rejected: {reason} ('{q['question'][:60]}')"
+    assert demo is None
 
 
-def test_end_to_end_quiz_generation_deep_learning_loss(monkeypatch):
-    """Verifies end-to-end quiz generation for 22AM301 Loss Function in offline fallback mode."""
+def test_end_to_end_quiz_generation_no_fallback_when_providers_unconfigured(monkeypatch):
+    """Verifies that generate_quiz raises AIConfigError when all AI providers are unconfigured and does not fall back."""
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setenv("ENABLE_LOCAL_DEMO_FALLBACK", "true")
+    monkeypatch.delenv("ENABLE_LOCAL_DEMO_FALLBACK", raising=False)
 
-    quiz = generate_quiz(
-        course_code="22AM301",
-        course_name="Deep Learning",
-        topic_name="Loss Function",
-        syllabus_context="Deep Learning loss functions: Cross-entropy, MSE, Huber, Hinge, Focal loss",
-        num_questions=10
-    )
-
-    assert quiz is not None
-    assert quiz.get("subject") == "Deep Learning"
-    assert "Loss" in quiz.get("topic", "")
-    assert len(quiz.get("questions", [])) == 10
-    assert quiz.get("is_fallback") is True
-    assert quiz.get("unique_count") == 10
+    from services.llm_service import AIConfigError
+    with pytest.raises(AIConfigError) as exc_info:
+        generate_quiz(
+            course_code="22AM301",
+            course_name="Deep Learning",
+            topic_name="Loss Function",
+            syllabus_context="Deep Learning loss functions: Cross-entropy, MSE, Huber, Hinge, Focal loss",
+            num_questions=10
+        )
+    assert "No AI provider is configured" in str(exc_info.value)

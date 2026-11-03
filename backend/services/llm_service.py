@@ -25,7 +25,6 @@ from services.database import (
     get_concept_performance,
     get_question_fingerprints,
     get_question_concepts,
-    get_stored_questions_for_topic,
     get_question_history_full
 )
 from services.adaptive import (
@@ -59,8 +58,6 @@ if not logger.handlers:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     )
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DEMO_QUESTIONS_FILE = DATA_DIR / "demo_questions.json"
 
 MAX_NOVELTY_REPAIR_ATTEMPTS = int(os.getenv("MAX_NOVELTY_REPAIR_ATTEMPTS", "2"))
 
@@ -136,129 +133,18 @@ def _get_providers() -> List[BaseAIProvider]:
     return ordered
 
 
-def _load_local_demo_questions(
-    course_code: str,
-    topic_name: str,
-    concepts: Optional[List[str]] = None,
-    syllabus_context: Optional[str] = None,
-    competing_topics: Optional[List[Any]] = None,
-    expected_count: int = 10,
-    prior_questions: Optional[List[Dict[str, Any]]] = None,
-    excluded_fingerprints: Optional[set] = None
-) -> Optional[Dict[str, Any]]:
-    """Safe fallback mechanism for college demonstration if local questions already exist."""
-    if not DEMO_QUESTIONS_FILE.is_file():
-        return None
-    try:
-        import json
-        with open(DEMO_QUESTIONS_FILE, "r", encoding="utf-8") as f:
-            demo_data = json.load(f)
 
-        key = f"{course_code}::{topic_name}"
-        data = None
-        if key in demo_data:
-            data = demo_data[key]
-        else:
-            import re
-            norm_key = re.sub(r'[^a-zA-Z0-9]+', '', key).lower().replace('losss', 'loss')
-            for k in demo_data:
-                k_norm = re.sub(r'[^a-zA-Z0-9]+', '', k).lower().replace('losss', 'loss')
-                if k_norm == norm_key:
-                    data = demo_data[k]
-                    break
-        if not data:
-            for item in demo_data.get("quizzes", []):
-                if item.get("course_code") == course_code and item.get("topic") == topic_name:
-                    data = item
-                    break
 
-        if data:
-            raw_questions = data.get("questions", [])
-            from services.novelty import normalise_text, fingerprint, is_question_near_duplicate
-            filtered_questions = []
-            for q in raw_questions:
-                q_text = q.get("question", "")
-                q_fp = fingerprint(q_text)
-                q_norm = normalise_text(q_text)
-                if excluded_fingerprints and (q_fp in excluded_fingerprints or q_norm in excluded_fingerprints):
-                    continue
-                if prior_questions:
-                    is_dup = False
-                    for pq in prior_questions:
-                        dup_flag, _ = is_question_near_duplicate(q, pq, topic_name=topic_name)
-                        if dup_flag:
-                            is_dup = True
-                            break
-                    if is_dup:
-                        continue
-                filtered_questions.append(q)
 
-            if len(filtered_questions) < expected_count:
-                logger.info(
-                    f"[DEMO NOVELTY] Only {len(filtered_questions)} novel demo questions available (needed {expected_count})."
-                )
-                return None
 
-            candidate_data = dict(data)
-            candidate_data["questions"] = filtered_questions[:expected_count]
-
-            validated = validate_quiz_data(
-                candidate_data,
-                candidate_data.get("subject", ""),
-                topic_name,
-                concepts=concepts,
-                syllabus_context=syllabus_context,
-                course_code=course_code,
-                competing_topics=competing_topics,
-                expected_count=expected_count
-            )
-            if len(validated.get("questions", [])) < expected_count:
-                return None
-            validated["questions"] = validated["questions"][:expected_count]
-            validated["is_fallback"] = True
-            validated["fallback_label"] = "Local Demo Question Bank (Offline Mode)"
-            validated["provider_used"] = "demo_fallback"
-            validated["provider"] = "demo_fallback"
-            validated["is_ai_generated"] = False
-            return validated
-    except Exception as e:
-        logger.warning(f"[FALLBACK ERROR] Could not read local demo questions: {e}")
+def _load_stored_quiz_fallback(*args, **kwargs):
+    """Deprecated: Stored quiz fallback has been permanently removed."""
     return None
 
 
-def _load_stored_quiz_fallback(
-    course_code: str,
-    topic_name: str,
-    course_name: str,
-    recommended_difficulty: str,
-    attempt_id: str,
-    attempt_number: int,
-    adaptive_decision: Dict[str, Any],
-    adaptive_explanation: Dict[str, Any],
-    eligible_stored: List[Dict[str, Any]],
-    adaptive_applied: bool = True,
-    expected_count: int = 10
-) -> Optional[Dict[str, Any]]:
-    """Safe fallback to stored validated questions when enabled via ENABLE_STORED_FALLBACK."""
-    if os.getenv("ENABLE_STORED_FALLBACK", "false").lower() not in ("true", "1"):
-        return None
-    if len(eligible_stored) >= expected_count:
-        return {
-            "subject": course_name,
-            "topic": topic_name,
-            "questions": eligible_stored[:expected_count],
-            "is_fallback": True,
-            "fallback_label": "Stored Validated Topic Questions (Offline Mode)",
-            "attempt_id": attempt_id,
-            "attempt_number": attempt_number,
-            "recommended_difficulty": recommended_difficulty,
-            "adaptive_applied": adaptive_applied,
-            "adaptive_explanation": adaptive_explanation,
-            "adaptive_metadata": adaptive_decision,
-            "provider_used": "stored_db"
-        }
+def _load_local_demo_questions(*args, **kwargs):
+    """Deprecated: Curated demo question fallback has been permanently removed."""
     return None
-
 
 def generate_quiz(
     course_code: str,
@@ -376,14 +262,6 @@ def generate_quiz(
         ]
         history_questions_full = get_question_history_full(student_id, course_code, topic_name, conn=conn)
 
-        eligible_stored = get_stored_questions_for_topic(
-            course_code=course_code,
-            topic_name=topic_name,
-            difficulty=None,
-            exclude_fingerprints=all_fingerprints,
-            limit=max(10, num_questions),
-            conn=conn
-        )
     finally:
         if conn:
             try:
@@ -417,27 +295,7 @@ def generate_quiz(
     configured_providers = [p for p in providers if p.is_configured()]
 
     if not configured_providers:
-        stored_fallback = _load_stored_quiz_fallback(
-            course_code=course_code,
-            topic_name=topic_name,
-            course_name=course_name,
-            recommended_difficulty=recommended_difficulty,
-            attempt_id=attempt_id,
-            attempt_number=attempt_number,
-            adaptive_decision=adaptive_decision,
-            adaptive_explanation=adaptive_explanation,
-            eligible_stored=eligible_stored
-        )
-        if stored_fallback:
-            return stored_fallback
-
-        local_quiz = _load_local_demo_questions(
-            course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context, competing_topics=competing_topics
-        )
-        if local_quiz:
-            local_quiz["attempt_id"] = attempt_id
-            return local_quiz
-        raise AIConfigError("No AI provider is configured. Set GROQ_API_KEY, NVIDIA_API_KEY, or GEMINI_API_KEY in .env.")
+        raise AIConfigError("No AI provider is configured. Set GROQ_API_KEY, NVIDIA_API_KEY, or GEMINI_API_KEY in .env.", category="CONFIG_ERROR")
 
     logger.info(
         f"[QUIZ GEN START] attempt_id={attempt_id} course={course_code} topic='{topic_name}' "
@@ -630,22 +488,6 @@ REQUIREMENTS:
                     except Exception as rep_err:
                         logger.warning(f"[REPLENISHMENT FAILED round {rep_attempts}] provider={provider.name}: {rep_err}")
 
-                # If still under num_questions, supplement with eligible stored questions IF they strictly pass topic isolation for topic_name
-                if len(validated_quiz["questions"]) < num_questions and eligible_stored:
-                    from services.novelty import is_question_relevant_to_topic
-                    for sq in eligible_stored:
-                        if len(validated_quiz["questions"]) >= num_questions:
-                            break
-                        is_rel, _ = is_question_relevant_to_topic(
-                            sq,
-                            topic_name=topic_name,
-                            course_code=course_code,
-                            concepts=concepts,
-                            competing_topics=competing_topics,
-                            syllabus_context=syllabus_context
-                        )
-                        if is_rel and not any(is_question_near_duplicate(ex_q, sq)[0] for ex_q in validated_quiz["questions"]):
-                            validated_quiz["questions"].append(sq)
 
                 if len(validated_quiz["questions"]) < num_questions:
                     if allow_partial:
@@ -973,9 +815,18 @@ REQUIREMENTS:
                     and not getattr(pe, "retryable", False)
                     and getattr(pe, "category", "") in ("MALFORMED_REQUEST_400", "MODEL_NOT_FOUND_404", "AUTH_CONFIG_ERROR")
                 ):
-                    local_check = _load_local_demo_questions(course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context)
-                    if not local_check:
-                        raise AIConfigError(clean_pe, category=getattr(pe, "category", "CONFIG_ERROR")) from pe
+                    raise AIConfigError(clean_pe, category=getattr(pe, "category", "CONFIG_ERROR")) from pe
+                break
+            except Exception as e:
+                last_error = e
+                all_provider_errors.append(e)
+                has_next = (p_idx + 1) < num_configured
+                next_provider_name = configured_providers[p_idx + 1].name if has_next else "none"
+                clean_err = sanitize_error_text(str(e))
+                logger.warning(
+                    f"[PROVIDER UNEXPECTED ERROR] provider={provider.name} "
+                    f"proceeding_to_next_provider={has_next} (next={next_provider_name}): {clean_err}"
+                )
                 break
 
     # ── All providers failed ──────────────────────────────────────────────────
@@ -995,65 +846,7 @@ REQUIREMENTS:
         best_quiz["adaptive_metadata"] = adaptive_decision
         return best_quiz
 
-    # Stored questions fallback if enabled and sufficient eligible stored questions exist
-    stored_fallback = _load_stored_quiz_fallback(
-        course_code=course_code,
-        topic_name=topic_name,
-        course_name=course_name,
-        recommended_difficulty=recommended_difficulty,
-        attempt_id=attempt_id,
-        attempt_number=attempt_number,
-        adaptive_decision=adaptive_decision,
-        adaptive_explanation=adaptive_explanation,
-        eligible_stored=eligible_stored,
-        adaptive_applied=adaptive_applied,
-        expected_count=num_questions
-    )
-    if stored_fallback and len(stored_fallback.get("questions", [])) == num_questions:
-        total_duration = time.perf_counter() - start_time
-        logger.warning(
-            f"[STORED FALLBACK] All providers failed. Serving {num_questions} stored validated questions for '{topic_name}' duration={total_duration:.2f}s."
-        )
-        return stored_fallback
-
-    local_quiz = _load_local_demo_questions(
-        course_code, topic_name, concepts=concepts, syllabus_context=syllabus_context,
-        expected_count=num_questions,
-        prior_questions=history_questions_full,
-        excluded_fingerprints=set(all_fingerprints)
-    )
-    if local_quiz and len(local_quiz.get("questions", [])) == num_questions:
-        total_duration = time.perf_counter() - start_time
-        logger.info(
-            f"[QUIZ GEN FALLBACK] Using local demo questions for {course_code} - "
-            f"'{topic_name}' duration={total_duration:.2f}s"
-        )
-        local_quiz["attempt_id"] = attempt_id
-        local_quiz["attempt_number"] = attempt_number
-        local_quiz["recommended_difficulty"] = recommended_difficulty
-        local_quiz["adaptive_applied"] = adaptive_applied
-        local_quiz["adaptive_explanation"] = adaptive_explanation
-        local_quiz["adaptive_metadata"] = adaptive_decision
-        local_quiz["provider_used"] = "demo_fallback"
-        local_quiz["provider"] = "demo_fallback"
-        local_quiz["is_fallback"] = True
-        local_quiz["is_ai_generated"] = False
-        return local_quiz
-
     total_duration = time.perf_counter() - start_time
-
-    # If this is a retake and the offline question bank does not have enough novel questions:
-    if history_questions_full and DEMO_QUESTIONS_FILE.is_file():
-        logger.warning(
-            f"[RETAKE POOL EXHAUSTED] All AI providers failed and local demo question pool "
-            f"has insufficient unique questions for retake attempt={attempt_number} topic='{topic_name}'"
-        )
-        raise AIServiceUnavailableError(
-            "AI service is temporarily unavailable and the offline question bank does not have enough unique questions for a fresh retake on this topic. Please try again shortly when AI providers are reachable.",
-            category="OFFLINE_POOL_EXHAUSTED",
-            retryable=True,
-            status_code=503
-        )
     last_error_category = getattr(last_error, 'category', 'UNKNOWN') if last_error else 'UNKNOWN'
     logger.error(
         f"[QUIZ GEN FAILED] All providers exhausted course={course_code} "

@@ -2139,7 +2139,7 @@ function renderQuizHeader(quizData) {
   if ($("quizAttemptNumber")) {
     const attempt = quizData.attempt_number || 1;
     const diff = (quizData.recommended_difficulty || "mixed").toUpperCase();
-    const fallbackNotice = quizData.is_fallback ? " • [Offline Demo Bank]" : "";
+    const fallbackNotice = "";
     $("quizAttemptNumber").textContent = attempt > 1 ? `Attempt #${attempt} • ${diff}${fallbackNotice}` : `Attempt #1 • ${diff}${fallbackNotice}`;
   }
 }
@@ -2442,11 +2442,7 @@ function showResult(data) {
 
   const retakeBtn = $("retakeBtn");
   if (retakeBtn) {
-    if (currentQuiz && currentQuiz.is_fallback) {
-      retakeBtn.textContent = "Retake Quiz (Offline Mode)";
-    } else {
-      retakeBtn.textContent = "Retake with New AI Questions";
-    }
+    retakeBtn.textContent = "Retake with New AI Questions";
   }
 
   const reviewHtml = (data.details || []).map((d, i) => {
