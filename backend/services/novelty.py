@@ -662,14 +662,12 @@ def is_question_relevant_to_topic(
         if c_concept_match and len(comp_overlap) >= 1 and len(distinctive) == 0:
             return False, f"Question concept '{q_concept_raw}' belongs to competing topic '{c_name}'"
 
-        if len(comp_overlap) >= 2 and len(comp_overlap) > len(distinctive):
-            topic_clean = topic_name.strip().lower()
-            q_text_clean = q_text.lower()
-            if topic_clean in q_text_clean or any(c in q_text_clean for c in target_concepts_lower if len(c) >= 5):
-                if len(comp_overlap) >= 3 and len(comp_overlap) >= 2 * len(distinctive):
-                    return False, f"Question primarily tests competing topic '{c_name}' (matched keywords: {list(comp_overlap)[:4]}) instead of selected topic '{topic_name}'"
-            else:
-                return False, f"Question primarily tests competing topic '{c_name}' (matched keywords: {list(comp_overlap)[:4]}) instead of selected topic '{topic_name}'"
+        # Require 3+ competing-exclusive keywords AND dominant overlap before rejecting.
+        # This prevents narrow/compound topics (e.g. "Adjoint of a Matrix",
+        # "Introduction To Algorithms & Introduction To C") from having too many
+        # legitimate questions falsely rejected due to shared domain vocabulary.
+        if len(comp_overlap) >= 3 and len(comp_overlap) > len(distinctive) and len(comp_overlap) >= 2 * max(1, len(distinctive)):
+            return False, f"Question primarily tests competing topic '{c_name}' (matched keywords: {list(comp_overlap)[:4]}) instead of selected topic '{topic_name}'"
 
     if len(distinctive) >= 1:
         return True, f"Distinctive relevant keywords found: {list(distinctive)[:4]}"

@@ -835,7 +835,7 @@ REQUIREMENTS:
                 break
 
     # ── All providers failed ──────────────────────────────────────────────────
-    if best_quiz is not None and len(best_quiz.get("questions", [])) >= max(1, min(num_questions, 8)):
+    if best_quiz is not None and len(best_quiz.get("questions", [])) >= max(1, int(num_questions * 0.8)):
         total_duration = time.perf_counter() - start_time
         logger.warning(
             f"[NOVELTY FALLBACK] Returning best available quiz across all attempts. "
