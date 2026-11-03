@@ -4,6 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 from services.output_verifier import clean_option_string, verify_and_calibrate_question_options
+from services.academic_verifier import verify_academic_correctness
 
 logger = logging.getLogger("learnai.providers.base")
 
@@ -122,6 +123,13 @@ CRITICAL RULES FOR RELEVANCE AND TOPIC ISOLATION:
    - "correct_answer" MUST be the exact uppercase letter corresponding to the correct option: "A", "B", "C", or "D".
    - In the "concept" field, specify the exact syllabus concept or learning objective assessed.
    - In "explanation", provide a clear, concise step-by-step educational reason (1-2 sentences) demonstrating why the correct answer is correct.
+
+4. ACADEMIC & MATHEMATICAL RIGOR (MANDATORY):
+   - EXACTLY ONE DEFENSIBLE ANSWER: Exactly one option must satisfy the question criteria. When asking to identify an entity or property (e.g., symmetric matrix, diagonal matrix, linear equation, valid loss), NO distractor may inadvertently satisfy that definition (e.g. if asking for a symmetric matrix, no distractor can be symmetric, noting that diagonal scalar matrices like [[5,0],[0,5]] are symmetric).
+   - CALCULATION & ARITHMETIC RIGOR: Every arithmetic step in questions and explanations must be 100% mathematically correct. Verify all basic calculations (e.g. never claim 15 - 4 = 7; never claim 7y = 7 if 15 - 4 = 11).
+   - LINEAR ALGEBRA THEOREMS: Adhere strictly to proven theorems. Idempotent matrices satisfy x(x-1)=0 and are ALWAYS diagonalizable; never state or imply they are defective or non-diagonalizable.
+   - RANK-NULLITY & GEOMETRIC ACCURACY: In systems with n variables and rank r, the dimension of the solution space is n - r free parameters. In 3 variables (x, y, z), a system with rank 1 yields 3 - 1 = 2 free parameters, which geometrically defines a plane, not a line.
+   - DROPOUT CONVENTIONS: When discussing Dropout scaling, distinguish classical dropout (weights multiplied by p at test time) from inverted dropout (activations scaled by 1/p during training; weights unscaled at test time). Never state that weights are multiplied by 1/p at test time.
    - Return ONLY valid JSON matching this exact structure:
 
 {{
@@ -510,6 +518,15 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
     if not is_valid:
         logger.warning(f"[OPTION VALIDATION] Question rejected: {reason}")
         return None
+
+    # Verify academic and mathematical correctness (theorems, single correct answer, arithmetic, dimensions)
+    try:
+        is_acad_valid, acad_reason = verify_academic_correctness(calibrated)
+        if not is_acad_valid:
+            logger.warning(f"[ACADEMIC VALIDATION] Question rejected: {acad_reason}")
+            return None
+    except Exception as e:
+        logger.error(f"[ACADEMIC VALIDATION] Verifier failed with exception: {e}. Preserving candidate.")
 
     return calibrated
 

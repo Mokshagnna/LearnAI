@@ -40,7 +40,8 @@ from services.novelty import (
     extract_concepts_from_history,
     evaluate_quiz_novelty,
     build_exclusion_prompt_block,
-    is_question_near_duplicate
+    is_question_near_duplicate,
+    normalise_text
 )
 from services.logger_utils import sanitize_error_text
 from services.metrics import metrics
@@ -385,7 +386,8 @@ def generate_quiz(
             )
 
             t_p_start = time.perf_counter()
-            target_gen_questions = num_questions + 1 if num_questions == 10 else num_questions
+            is_retake = attempt_number > 1 or bool(all_fingerprints)
+            target_gen_questions = (num_questions + 2 if is_retake else num_questions + 1) if num_questions == 10 else num_questions
             prompt_dist = get_difficulty_distribution(recommended_difficulty, total_questions=target_gen_questions)
             try:
                 base_prompt = get_quiz_prompt(
@@ -527,8 +529,31 @@ REQUIREMENTS:
                     else:
                         raise ValueError(f"Provider {provider.name} generated only {len(validated_quiz['questions'])}/{num_questions} questions strictly isolating '{topic_name}'.")
 
-                # Slice strictly to requested question count
-                validated_quiz["questions"] = validated_quiz["questions"][:num_questions]
+                # Novelty-aware candidate selection: Prioritize novel candidates from buffer BEFORE slicing
+                if (all_fingerprints or all_concepts or history_questions_full) and len(validated_quiz["questions"]) > num_questions:
+                    norm_fps = {normalise_text(fp) for fp in all_fingerprints if normalise_text(fp)}
+                    novel_pool = []
+                    collided_pool = []
+                    for cand_q in validated_quiz["questions"]:
+                        c_fp = normalise_text(cand_q.get("question", ""))
+                        is_collided = c_fp in norm_fps
+                        if not is_collided and history_questions_full:
+                            for h_q in history_questions_full:
+                                near_dup, _ = is_question_near_duplicate(h_q, cand_q, topic_name=topic_name)
+                                if near_dup:
+                                    is_collided = True
+                                    break
+                        if is_collided:
+                            collided_pool.append(cand_q)
+                        else:
+                            novel_pool.append(cand_q)
+
+                    if len(novel_pool) >= num_questions:
+                        validated_quiz["questions"] = novel_pool[:num_questions]
+                    else:
+                        validated_quiz["questions"] = (novel_pool + collided_pool)[:num_questions]
+                else:
+                    validated_quiz["questions"] = validated_quiz["questions"][:num_questions]
 
                 # ── Comprehensive Novelty Evaluation (text + concepts) ─────────
                 novelty_result = evaluate_quiz_novelty(
