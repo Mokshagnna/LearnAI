@@ -357,10 +357,10 @@ def generate_quiz(
                 if reserve_needed > 0 and time_remaining > min_required_time:
                     max_alloc = max(time_remaining - reserve_needed, min_required_time)
                     if provider.name == "groq":
-                        # Groq generates 10 MCQs in ~2.0-3.5s via llama-3.1-8b-instant.
-                        # Ensure Groq is given at least 6.5s to complete over TLS rather than being choked by downstream reserve.
-                        target_groq = float(os.getenv("GROQ_TIMEOUT_SECONDS", "7.5"))
-                        groq_budget = max(time_remaining - 12.0, min(6.5, time_remaining - 2.0))
+                        # Groq generates 10 MCQs in ~5.0-7.5s via Qwen/Llama over internet TLS.
+                        # Ensure Groq is given up to 9.2s to complete within the sub-10s mission target.
+                        target_groq = float(os.getenv("GROQ_TIMEOUT_SECONDS", "9.2"))
+                        groq_budget = max(time_remaining - 8.0, min(8.8, time_remaining - 1.0))
                         provider_timeout = min(target_groq, groq_budget)
                     elif provider.name == "nvidia":
                         provider_timeout = min(16.0, max_alloc)
