@@ -208,6 +208,7 @@ class ProviderQuotaManager:
             return
         self._initialized = True
         self._state_lock = threading.Lock()
+        self._file_lock = threading.Lock()
         # Cooldown store: key = (provider_name, model_id, key_hash) -> dict(cooldown_until, reason, is_daily)
         self._cooldowns: Dict[str, Dict[str, Any]] = {}
 
@@ -242,17 +243,36 @@ class ProviderQuotaManager:
 
     def _persist_state(self):
         """Flushes non-expired cooldowns to persistent storage safely."""
-        try:
-            self._state_file.parent.mkdir(parents=True, exist_ok=True)
-            now = time.time()
-            with self._state_lock:
-                active = {k: v for k, v in self._cooldowns.items() if v.get("cooldown_until", 0) > now}
-            temp_file = self._state_file.with_suffix(".tmp")
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(active, f, indent=2)
-            temp_file.replace(self._state_file)
-        except Exception as e:
-            logger.warning(f"[QUOTA] Failed to persist cooldown state: {e}")
+        with self._file_lock:
+            temp_file = None
+            try:
+                self._state_file.parent.mkdir(parents=True, exist_ok=True)
+                now = time.time()
+                with self._state_lock:
+                    active = {k: v for k, v in self._cooldowns.items() if v.get("cooldown_until", 0) > now}
+                temp_file = self._state_file.with_name(
+                    f"{self._state_file.stem}_{os.getpid()}_{threading.get_ident()}_{time.time_ns()}.tmp"
+                )
+                with open(temp_file, "w", encoding="utf-8") as f:
+                    json.dump(active, f, indent=2)
+                replaced = False
+                for attempt in range(5):
+                    try:
+                        temp_file.replace(self._state_file)
+                        replaced = True
+                        break
+                    except (PermissionError, OSError):
+                        time.sleep(0.01 * (2 ** attempt))
+                if not replaced:
+                    temp_file.replace(self._state_file)
+            except Exception as e:
+                logger.warning(f"[QUOTA] Failed to persist cooldown state: {e}")
+            finally:
+                if temp_file is not None and temp_file.is_file():
+                    try:
+                        temp_file.unlink()
+                    except Exception:
+                        pass
 
     def is_model_available(
         self,

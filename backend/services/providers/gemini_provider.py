@@ -16,6 +16,7 @@ from services.providers.base import (
     extract_json_from_text
 )
 from services.logger_utils import sanitize_error_text
+from services.quota_manager import quota_manager, parse_rate_limit, RateLimitType
 
 logger = logging.getLogger("learnai.providers.gemini")
 
@@ -217,6 +218,13 @@ class GeminiProvider(BaseAIProvider):
                 else:
                     per_call_timeout = max(time_remaining, MIN_GEMINI_DEADLINE_SECONDS)
 
+                is_avail, remaining = quota_manager.is_model_available('gemini', model, key_value)
+                if not is_avail:
+                    logger.info(
+                        f'[GEMINI QUOTA SKIP] model={model} on cooldown ({remaining:.1f}s remaining). Skipping.'
+                    )
+                    continue
+
                 client = self._get_client(per_call_timeout, api_key=key_value)
                 attempts = 2 if time_remaining >= 24.0 else 1
 
@@ -312,6 +320,7 @@ class GeminiProvider(BaseAIProvider):
                                 raise ValueError(f"Gemini model {model} returned malformed JSON: {sanitize_error_text(parse_err)}") from parse_err
 
                         budget_left = timeout_seconds - (time.perf_counter() - start_time)
+                        quota_manager.record_success("gemini", model, key_value)
                         logger.info(
                             f"[GEMINI SUCCESS] key={key_label} model={model} attempt={attempt} "
                             f"duration={duration:.2f}s budget_left={budget_left:.1f}s"
@@ -357,6 +366,18 @@ class GeminiProvider(BaseAIProvider):
 
                         # Retryable transient errors, timeouts, empty responses, or malformed JSON
                         key_had_recoverable_error = True
+
+                        if cat == "RATE_LIMIT_429":
+                            logger.warning(
+                                f"[GEMINI API_ERROR] key={key_label} model={model} attempt={attempt}/{attempts} "
+                                f"duration={duration:.2f}s category={cat}: {sanitize_error_text(e)}"
+                            )
+                            rl_info = parse_rate_limit("gemini", e)
+                            cooldown = quota_manager.record_rate_limit("gemini", model, key_value, rl_info)
+                            logger.info(
+                                f"[GEMINI RATE LIMIT] model={model} key={key_label} type={rl_info.limit_type.value} cooldown={cooldown:.1f}s"
+                            )
+                            break
 
                         if cat in ("DEADLINE_EXCEEDED_504", "CLIENT_TIMEOUT", "REQUEST_TIMEOUT_408") or "deadline" in str(e).lower() or "timeout" in str(e).lower():
                             logger.warning(

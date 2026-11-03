@@ -1011,16 +1011,13 @@ class TestFourProviderCoverageDocumentation:
     def test_shared_quota_manager_architecture_scope(self):
         """
         Architectural assertion:
-        Confirms that GroqProvider and NvidiaProvider explicitly import and query quota_manager,
-        while GeminiProvider and CloudflareProvider handle rate limits via provider-level error mapping.
+        Confirms that all four providers (Groq, Nvidia, Gemini, Cloudflare)
+        explicitly integrate with quota_manager for uniform rate-limiting and fast-skips.
         """
-        import inspect
         from services.providers import groq_provider, nvidia_provider, gemini_provider, cloudflare_provider
 
-        # Groq and NVIDIA integrate QuotaManager
+        # All four providers integrate QuotaManager
         assert "quota_manager" in groq_provider.__dict__
         assert "quota_manager" in nvidia_provider.__dict__
-
-        # Gemini and Cloudflare use independent provider-level HTTP/SDK exception categorization
-        assert "quota_manager" not in gemini_provider.__dict__
-        assert "quota_manager" not in cloudflare_provider.__dict__
+        assert "quota_manager" in gemini_provider.__dict__
+        assert "quota_manager" in cloudflare_provider.__dict__

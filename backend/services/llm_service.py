@@ -46,13 +46,11 @@ from services.novelty import (
 from services.logger_utils import sanitize_error_text
 from services.metrics import metrics
 
-# Ensure backend/.env is reliably loaded regardless of working directory
+from services.env_loader import resolve_and_load_env
+
+# Ensure backend/.env (or LEARNAI_ENV_FILE override) is reliably loaded
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
-_ENV_FILE = _BACKEND_DIR / ".env"
-if _ENV_FILE.is_file():
-    load_dotenv(_ENV_FILE, override=True)
-else:
-    load_dotenv(override=True)
+_ENV_FILE = resolve_and_load_env(_BACKEND_DIR)
 
 logger = logging.getLogger("learnai.orchestrator")
 if not logger.handlers:

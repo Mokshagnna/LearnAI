@@ -42,6 +42,7 @@ from services.providers.base import (
     get_quiz_prompt,
 )
 from services.logger_utils import sanitize_error_text
+from services.quota_manager import quota_manager, parse_rate_limit, RateLimitType
 
 logger = logging.getLogger("learnai.providers.cloudflare")
 
@@ -111,6 +112,16 @@ class CloudflareProvider(BaseAIProvider):
                 "Cloudflare Workers AI is not configured. Set CLOUDFLARE_ACCOUNT_ID "
                 "and CLOUDFLARE_API_TOKEN (or set CLOUDFLARE_ENABLED=false).",
                 category="MISSING_CREDENTIALS",
+            )
+
+        is_avail, remaining = quota_manager.is_model_available('cloudflare', self._model(), self._api_token())
+        if not is_avail:
+            logger.info(
+                f'[CLOUDFLARE QUOTA SKIP] model={self._model()} on cooldown ({remaining:.1f}s remaining). Skipping.'
+            )
+            raise ProviderUnavailableError(
+                f'Cloudflare model \'{self._model()}\' is on cooldown ({remaining:.1f}s remaining).',
+                category='RATE_LIMIT_429',
             )
 
         # Guard: never start a request the remaining deadline cannot honor.
@@ -202,9 +213,15 @@ class CloudflareProvider(BaseAIProvider):
                 category="MODEL_NOT_FOUND_404",
             )
         if status == 429:
+            resp_headers = dict(response.headers) if hasattr(response, 'headers') else None
+            rl_info = parse_rate_limit('cloudflare', Exception(body_text), response_headers=resp_headers)
+            cooldown = quota_manager.record_rate_limit('cloudflare', self._model(), self._api_token(), rl_info)
+            logger.info(
+                f'[CLOUDFLARE RATE LIMIT] model={self._model()} category={rl_info.limit_type.value} cooldown={cooldown:.1f}s'
+            )
             raise ProviderUnavailableError(
-                "Cloudflare Workers AI rate limit reached.",
-                category="RATE_LIMIT_429",
+                'Cloudflare Workers AI rate limit reached.',
+                category='RATE_LIMIT_429',
             )
         if status == 400:
             msg = first_error_message() or body_text
@@ -237,9 +254,15 @@ class CloudflareProvider(BaseAIProvider):
             )
             msg_lower = msg.lower()
             if "rate limit" in msg_lower or "quota" in msg_lower or "429" in body_text:
+                resp_headers = dict(response.headers) if hasattr(response, 'headers') else None
+                rl_info = parse_rate_limit('cloudflare', Exception(body_text), response_headers=resp_headers)
+                cooldown = quota_manager.record_rate_limit('cloudflare', self._model(), self._api_token(), rl_info)
+                logger.info(
+                    f'[CLOUDFLARE RATE LIMIT] model={self._model()} category={rl_info.limit_type.value} cooldown={cooldown:.1f}s'
+                )
                 raise ProviderUnavailableError(
-                    "Cloudflare Workers AI rate limit or quota exceeded.",
-                    category="RATE_LIMIT_429",
+                    'Cloudflare Workers AI rate limit or quota exceeded.',
+                    category='RATE_LIMIT_429',
                 )
             if "unauthorized" in msg_lower or "401" in msg_lower:
                 raise ProviderConfigError(
@@ -270,6 +293,7 @@ class CloudflareProvider(BaseAIProvider):
                 category="EMPTY_RESPONSE",
             )
 
+        quota_manager.record_success('cloudflare', self._model(), self._api_token())
         logger.info(
             "[CLOUDFLARE SUCCESS] model=%s status=200 response_len=%d",
             self._model(),

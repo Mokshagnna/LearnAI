@@ -152,15 +152,9 @@ FRONTEND_DIR = BASE_DIR.parent / "frontend"
 
 
 
-_ENV_FILE = BASE_DIR / ".env"
+from services.env_loader import resolve_and_load_env
 
-if _ENV_FILE.is_file():
-
-    load_dotenv(_ENV_FILE, override=True)
-
-else:
-
-    load_dotenv(override=True)
+_ENV_FILE = resolve_and_load_env(BASE_DIR)
 
 
 
