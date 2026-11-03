@@ -351,7 +351,11 @@ def generate_quiz(
                 if reserve_needed > 0 and time_remaining > min_required_time:
                     max_alloc = max(time_remaining - reserve_needed, min_required_time)
                     if provider.name == "groq":
-                        provider_timeout = min(float(os.getenv("GROQ_TIMEOUT_SECONDS", "8.0")), max_alloc)
+                        # Groq generates 10 MCQs in ~2.0-3.5s via llama-3.1-8b-instant.
+                        # Ensure Groq is given at least 6.5s to complete over TLS rather than being choked by downstream reserve.
+                        target_groq = float(os.getenv("GROQ_TIMEOUT_SECONDS", "7.5"))
+                        groq_budget = max(time_remaining - 12.0, min(6.5, time_remaining - 2.0))
+                        provider_timeout = min(target_groq, groq_budget)
                     elif provider.name == "nvidia":
                         provider_timeout = min(16.0, max_alloc)
                     elif provider.name == "cloudflare":
