@@ -182,9 +182,15 @@ def generate_quiz(
             from services.curriculum_service import curriculum_service
             crs = curriculum_service.get_course(course_code)
             if crs:
+                cur_parent = ""
+                for t in crs.get("topics", []):
+                    if t.get("name") and t["name"].strip().lower() == topic_name.strip().lower():
+                        cur_parent = (t.get("parent_topic") or t.get("parent_section") or "").strip().lower()
+                        break
                 competing_topics = [
                     t["name"] for t in crs.get("topics", [])
                     if t.get("name") and t["name"].strip().lower() != topic_name.strip().lower()
+                    and not (cur_parent and (t.get("parent_topic") or t.get("parent_section") or "").strip().lower() == cur_parent)
                 ]
         except Exception:
             competing_topics = []

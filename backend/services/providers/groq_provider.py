@@ -24,6 +24,7 @@ class GroqProvider(BaseAIProvider):
 
     _client_cache: dict = {}
     _models_cache: dict = {}
+    _unsupported_json_format_models: set = set()
     _client_lock: threading.Lock = threading.Lock()
 
     def get_available_models(self, client: Optional[Any] = None, api_key: Optional[str] = None) -> List[str]:
@@ -168,17 +169,26 @@ class GroqProvider(BaseAIProvider):
                         "max_tokens": max_tokens,
                         "timeout": time_left
                     }
-                    if "json" in prompt.lower():
+                    if "json" in prompt.lower() and current_model not in self._unsupported_json_format_models:
                         create_kwargs["response_format"] = {"type": "json_object"}
 
                     try:
                         chat_completion = client.chat.completions.create(**create_kwargs)
                     except Exception as call_err:
                         err_str = str(call_err).lower()
-                        if "response_format" in err_str and "response_format" in create_kwargs:
+                        is_json_format_err = (
+                            "response_format" in err_str
+                            or "failed to validate json" in err_str
+                            or "validate json" in err_str
+                            or "adjust your prompt" in err_str
+                            or "json_validate_failed" in err_str
+                            or "json object" in err_str
+                        )
+                        if is_json_format_err and "response_format" in create_kwargs:
+                            self._unsupported_json_format_models.add(current_model)
                             logger.warning(
-                                f"[GROQ] response_format parameter not supported by {current_model}: {call_err}. "
-                                "Retrying call without response_format."
+                                f"[GROQ] response_format parameter failed for {current_model}: {call_err}. "
+                                "Retrying call immediately without response_format."
                             )
                             create_kwargs.pop("response_format", None)
                             chat_completion = client.chat.completions.create(**create_kwargs)

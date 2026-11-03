@@ -520,6 +520,56 @@ class TestGroqGptOssReasoningAndCascade:
             call_kwargs = mock_client.chat.completions.create.call_args[1]
             assert call_kwargs["max_tokens"] == 1500
 
+    def test_gpt_oss_json_validation_400_retry_without_response_format(self, monkeypatch):
+        """When Groq returns 400 'Failed to validate JSON', retries immediately without response_format and succeeds."""
+        monkeypatch.setenv("GROQ_API_KEY", "test_groq_key_1")
+        monkeypatch.setenv("GROQ_MODEL", "openai/gpt-oss-20b")
+        monkeypatch.delenv("GROQ_FALLBACK_MODEL", raising=False)
+
+        provider = GroqProvider()
+        provider._unsupported_json_format_models.clear()
+
+        with patch.object(provider, "_get_client") as mock_client_factory:
+            mock_client = MagicMock()
+            mock_client_factory.return_value = mock_client
+
+            mock_choice = MagicMock()
+            mock_choice.message.content = _make_dummy_quiz_json("Loss Function")
+            mock_resp = MagicMock(choices=[mock_choice])
+
+            mock_client.chat.completions.create.side_effect = [
+                Exception("Error code: 400 - {'error': {'message': \"Failed to validate JSON. Please adjust your prompt. See 'failed_generation' for more details.\"}}"),
+                mock_resp
+            ]
+
+            result = provider.generate_quiz_raw("22AM301", "Deep Learning", "Loss Function", "Context", 15.0)
+            assert result is not None
+
+            assert mock_client.chat.completions.create.call_count == 2
+            first_call_kwargs = mock_client.chat.completions.create.call_args_list[0][1]
+            second_call_kwargs = mock_client.chat.completions.create.call_args_list[1][1]
+
+            assert first_call_kwargs["response_format"] == {"type": "json_object"}
+            assert "response_format" not in second_call_kwargs
+            assert "openai/gpt-oss-20b" in provider._unsupported_json_format_models
+
+    def test_sibling_topics_sharing_parent_topic_not_marked_as_competing(self):
+        """Topics sharing the same parent_topic (e.g. Matrices) are not marked as competing topics."""
+        from services.curriculum_service import curriculum_service
+        crs = curriculum_service.get_course("22MT103")
+        topic = crs["topics"][0]
+        topic_parent = (topic.get("parent_topic") or topic.get("parent_section") or "").strip().lower()
+        comp = [
+            t.get("name") for t in crs.get("topics", [])
+            if t.get("name") and t.get("name") != topic["name"]
+            and not (topic_parent and (t.get("parent_topic") or t.get("parent_section") or "").strip().lower() == topic_parent)
+        ]
+        assert "Adjoint of a Matrix" not in comp
+        assert "Inverse of a Matrix" not in comp
+        assert "Rank of a Matrix" not in comp
+        assert "Applications of Matrices" in comp
+        assert "First-Order Differential Equations" in comp
+
     def test_gpt_oss_reasoning_not_used_as_quiz_answer_when_content_empty(self, monkeypatch):
         """When message.content is None/empty, message.reasoning must NOT be used as answers, even if containing JSON."""
         monkeypatch.setenv("GROQ_API_KEY", "test_groq_key_1")

@@ -624,9 +624,18 @@ def is_question_relevant_to_topic(
                         kw_counts[kw] += 1
                 course_wide_kws = {kw for kw, cnt in kw_counts.items() if cnt >= 2} | course_kws
 
+                cur_parent = ""
+                for t in crs.get("topics", []):
+                    if t.get("name") and t["name"].strip().lower() == topic_name.strip().lower():
+                        cur_parent = (t.get("parent_topic") or t.get("parent_section") or "").strip().lower()
+                        break
+
                 target_clean = re.sub(r'[^a-z0-9]', '', topic_name.lower()).replace('losss', 'loss')
                 for ct in crs.get("topics", []):
                     ct_name = ct.get("name", "").strip()
+                    ct_parent = (ct.get("parent_topic") or ct.get("parent_section") or "").strip().lower()
+                    if cur_parent and ct_parent and cur_parent == ct_parent:
+                        continue
                     ct_clean = re.sub(r'[^a-z0-9]', '', ct_name.lower()).replace('losss', 'loss')
                     if ct_name and ct_name.lower() not in seen_competing_names:
                         if ct_clean == target_clean or (len(target_clean) >= 4 and target_clean in ct_clean) or (len(ct_clean) >= 4 and ct_clean in target_clean):

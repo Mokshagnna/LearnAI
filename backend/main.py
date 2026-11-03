@@ -1414,11 +1414,13 @@ def create_quiz(req: QuizRequest, request: Request):
 
 
 
+    topic_parent = (topic.get("parent_topic") or topic.get("parent_section") or "").strip().lower()
     course_competing_topics = [
 
         t.get("name") for t in course.get("topics", [])
 
         if t.get("name") and t.get("name") != topic["name"]
+        and not (topic_parent and (t.get("parent_topic") or t.get("parent_section") or "").strip().lower() == topic_parent)
 
     ]
 
