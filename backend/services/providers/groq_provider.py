@@ -4,7 +4,7 @@ import random
 import logging
 import threading
 import json
-from typing import Optional, List
+from typing import Optional, List, Any
 from services.providers.base import (
     BaseAIProvider,
     ProviderUnavailableError,
@@ -23,7 +23,33 @@ class GroqProvider(BaseAIProvider):
     """Groq AI Provider for ultra-fast fallback and primary inference."""
 
     _client_cache: dict = {}
+    _models_cache: dict = {}
     _client_lock: threading.Lock = threading.Lock()
+
+    def get_available_models(self, client: Optional[Any] = None, api_key: Optional[str] = None) -> List[str]:
+        target_key = api_key or os.getenv("GROQ_API_KEY", "")
+        if not target_key and not client:
+            return []
+        with self._client_lock:
+            if target_key:
+                cached = self._models_cache.get(target_key)
+                if cached and (time.time() - cached[0] < 3600):
+                    return cached[1]
+        try:
+            target_client = client if client is not None else self._get_client(5.0, api_key=target_key)
+            if not hasattr(target_client, "models") or not hasattr(target_client.models, "list"):
+                return []
+            resp = target_client.models.list(timeout=4.0)
+            data = getattr(resp, "data", [])
+            model_ids = [getattr(m, "id", "") for m in data if getattr(m, "id", "")]
+            if model_ids and target_key:
+                with self._client_lock:
+                    self._models_cache[target_key] = (time.time(), model_ids)
+                logger.info(f"[GROQ DISCOVERY] Discovered {len(model_ids)} active models on Groq account: {model_ids[:5]}...")
+            return model_ids
+        except Exception as e:
+            logger.warning(f"[GROQ DISCOVERY] Failed to query active models: {e}")
+            return []
 
     def __init__(self):
         self._name = "groq"
@@ -93,13 +119,13 @@ class GroqProvider(BaseAIProvider):
                 fallback_model, DEFAULT_GROQ_FALLBACK
             )
 
-        candidate_models = [configured_model]
-        if fallback_model and fallback_model not in candidate_models:
-            candidate_models.append(fallback_model)
+        raw_candidates = [configured_model]
+        if fallback_model and fallback_model not in raw_candidates:
+            raw_candidates.append(fallback_model)
 
-        for active_model in [DEFAULT_GROQ_MODEL, DEFAULT_GROQ_FALLBACK]:
-            if active_model not in candidate_models and active_model not in KNOWN_INVALID_GROQ_MODELS:
-                candidate_models.append(active_model)
+        for active_model in [DEFAULT_GROQ_MODEL, DEFAULT_GROQ_FALLBACK, "openai/gpt-oss-20b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile"]:
+            if active_model not in raw_candidates and active_model not in KNOWN_INVALID_GROQ_MODELS:
+                raw_candidates.append(active_model)
 
         last_error = None
         overall_start = time.perf_counter()
@@ -112,6 +138,19 @@ class GroqProvider(BaseAIProvider):
             client = self._get_client(time_left_for_key, api_key=key_value)
             key_error = None
             key_had_auth_error = False
+
+            # Dynamic model discovery: prune candidates not supported by this API key
+            available = self.get_available_models(client=client, api_key=key_value)
+            if available:
+                candidate_models = [m for m in raw_candidates if m in available]
+                if not candidate_models:
+                    text_models = [
+                        m for m in available
+                        if not any(x in m.lower() for x in ["whisper", "guard", "orpheus", "vision", "safeguard"])
+                    ]
+                    candidate_models = text_models[:3] if text_models else raw_candidates
+            else:
+                candidate_models = raw_candidates
 
             for m_idx, current_model in enumerate(candidate_models):
                 time_left = timeout_seconds - (time.perf_counter() - overall_start)

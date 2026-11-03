@@ -487,6 +487,9 @@ def health_check(detailed: bool = False):
         response["configured_providers"] = configured
 
         response["metrics"] = metrics.get_summary()
+        groq_p = next((p for p in providers if p.name == "groq"), None)
+        if groq_p and hasattr(groq_p, "get_available_models"):
+            response["groq_available_models"] = groq_p.get_available_models()
 
 
 
