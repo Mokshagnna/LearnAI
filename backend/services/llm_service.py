@@ -385,16 +385,18 @@ def generate_quiz(
             )
 
             t_p_start = time.perf_counter()
+            target_gen_questions = num_questions + 2 if num_questions == 10 else num_questions
+            prompt_dist = get_difficulty_distribution(recommended_difficulty, total_questions=target_gen_questions)
             try:
                 base_prompt = get_quiz_prompt(
                     course_code=course_code,
                     course_name=course_name,
                     topic_name=topic_name,
                     syllabus_context=syllabus_context,
-                    difficulty_dist=difficulty_dist,
+                    difficulty_dist=prompt_dist,
                     concepts=concepts,
                     disallowed_topics=disallowed_topics,
-                    num_questions=num_questions
+                    num_questions=target_gen_questions
                 )
                 extra_parts = []
                 if novelty_block:
@@ -479,6 +481,7 @@ REQUIREMENTS:
   ]
 }}"""
                         t_rep_start = time.perf_counter()
+                        rep_max_tokens = 4000 if "gpt-oss" in getattr(provider, "name", "") else max(1500, 180 * ask_count + 200)
                         raw_rep = provider.generate_quiz_raw(
                             course_code=course_code,
                             course_name=course_name,
@@ -486,7 +489,7 @@ REQUIREMENTS:
                             syllabus_context=syllabus_context,
                             timeout_seconds=min(time_left, 12.0) if provider.name == "gemini" else min(time_left * 0.8, 8.0),
                             custom_prompt=rep_full_prompt,
-                            max_tokens=min(1200, 180 * ask_count + 100)
+                            max_tokens=rep_max_tokens
                         )
                         rep_data = extract_json_from_text(raw_rep)
                         rep_validated = validate_quiz_data(

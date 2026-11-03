@@ -548,6 +548,8 @@ def is_question_relevant_to_topic(
 
     if len(target_keywords) < 3:
         words = set(target_norm.split())
+        target_clean_norm = normalise_text(re.sub(r'[^a-z0-9\s]', ' ', topic_name.lower()).replace('losss', 'loss'))
+        words.update(target_clean_norm.split())
         target_keywords = {w for w in words if w not in COMMON_STOPWORDS and len(w) >= 2}
 
     # Target concepts set for direct concept matching
