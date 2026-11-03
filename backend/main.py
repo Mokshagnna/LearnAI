@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from starlette.middleware.gzip import GZipMiddleware
 
 from services.notes_extractor import (
 
@@ -269,9 +270,57 @@ app.add_middleware(
 
     allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
 
-    allow_headers=["*"],
+    allow_headers=["*",],
 
 )
+
+# GZip compression for compressible responses (HTML, CSS, JS, JSON).
+# Render free tier does not apply platform-level compression (confirmed: no
+# content-encoding header on production responses). minimum_size avoids
+# compressing tiny responses where the overhead outweighs the benefit.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# Cache-Control middleware.
+# - API endpoints (/api/*) and health checks: never cache — they return
+#   personalized, dynamic, or user-specific data (quiz responses, sessions,
+#   submissions, dashboard data).
+# - Static assets (/css/*, /js/*, /vendor/*): immutable 1-year cache on 2xx
+#   only (versioned filenames/query params make them safe to cache for a year).
+#   Error responses on static paths (e.g. 404 for a missing file) must never
+#   receive an immutable header — that would lock a broken state into the cache.
+# - SPA shell (/): no-cache so users always get the latest shell.
+# - Any other path returning 4xx/5xx: no-store to prevent intermediaries from
+#   caching transient error responses.
+@app.middleware("http")
+async def cache_control_middleware(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    status = response.status_code
+
+    if path.startswith("/api/") or path in ("/health", "/api/health"):
+        # Always prevent caching of API and health responses.
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    elif path.startswith("/css/") or path.startswith("/js/") or path.startswith("/vendor/"):
+        if status < 400:
+            # Successful delivery of a versioned static asset — safe to cache immutably.
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            # 4xx/5xx on a static path must not be cached (e.g. 404 for a missing file).
+            response.headers["Cache-Control"] = "no-store"
+    elif path == "/":
+        if status < 400:
+            response.headers["Cache-Control"] = "no-cache"
+        else:
+            response.headers["Cache-Control"] = "no-store"
+    elif status >= 400:
+        # Any other path returning an error: prevent caching by intermediaries.
+        response.headers["Cache-Control"] = "no-store"
+
+    return response
+
 
 # Database-backed quiz_sessions table is the sole authoritative session store (Stage C)
 

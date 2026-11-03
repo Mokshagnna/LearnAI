@@ -11,7 +11,7 @@
 <title>LearnAI</title>
 
 <link rel="stylesheet" href="vendor/katex/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css'">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=2.4.0">
 <script>
   try {
     var _tok = localStorage.getItem('learnai_auth_token');
@@ -516,6 +516,20 @@
     <div id="loadingTopicLabel" class="loading-topic-label">—</div>
 
     <p class="loading-hint">This may take a few moments...</p>
+
+    <!-- Skeleton screens: give the user a visual preview of the quiz layout
+         while the AI generates questions. Hidden when real content arrives. -->
+    <div id="loadingSkeleton" class="loading-skeleton" aria-hidden="true">
+      <div class="skeleton-row skeleton-progress"></div>
+      <div class="skeleton-row skeleton-concept"></div>
+      <div class="skeleton-row skeleton-question"></div>
+      <div class="skeleton-options">
+        <div class="skeleton-option"></div>
+        <div class="skeleton-option"></div>
+        <div class="skeleton-option"></div>
+        <div class="skeleton-option"></div>
+      </div>
+    </div>
 
     <div class="loading-actions">
 

@@ -584,6 +584,62 @@ button.secondary:hover:not(:disabled) {
 }
 
 /* ==========================================================================
+   Skeleton Screens (Loading Placeholders)
+   ========================================================================== */
+
+.loading-skeleton {
+  margin: var(--space-6) 0 var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.skeleton-row {
+  height: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-subtle) 0%,
+    var(--color-border) 50%,
+    var(--color-surface-subtle) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-progress {
+  width: 60%;
+}
+
+.skeleton-concept {
+  width: 40%;
+}
+
+.skeleton-question {
+  width: 100%;
+  height: var(--space-6);
+}
+
+.skeleton-options {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.skeleton-option {
+  height: 48px;
+  border-radius: var(--radius-md);
+}
+
+@keyframes skeleton-pulse {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ==========================================================================
    Active Quiz Screen
    ========================================================================== */
 

@@ -1986,6 +1986,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     // ── Setup Loading Screen (Calm, Minimal, Academic) ──
     if (spinner) spinner.style.display = "block";
     if ($("loadingErrorBox")) $("loadingErrorBox").classList.add("hidden");
+    if ($("loadingSkeleton")) $("loadingSkeleton").classList.remove("hidden");
 
     // Populate course and topic label (small, secondary)
     const courseObj = curriculum.find(c => c.code === courseCode);
@@ -2064,6 +2065,9 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
       throw new Error("One or more questions contained incomplete or blank answer options. Please click Retry.");
     }
 
+    // Hide skeleton before real content is rendered
+    if ($("loadingSkeleton")) $("loadingSkeleton").classList.add("hidden");
+
     // ── Success: Initialize Clean Quiz State ──
     currentQuiz = data;
     if (data.topic_id) activeTopicId = data.topic_id;
@@ -2082,6 +2086,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
 
     // Stay on loading section with clean, human-readable error with Retry & Cancel
     if (spinner) spinner.style.display = "none";
+    if ($("loadingSkeleton")) $("loadingSkeleton").classList.add("hidden");
 
     let friendlyMsg = "Quiz generation is temporarily unavailable. Please try again shortly.";
     if (e.name === "AbortError") {

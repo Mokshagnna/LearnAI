@@ -16,6 +16,7 @@ from services.providers.base import (
     validate_quiz_data,
     get_quiz_prompt
 )
+from services.providers.cloudflare_provider import CloudflareProvider
 from services.providers.gemini_provider import GeminiProvider
 from services.providers.groq_provider import GroqProvider
 from services.providers.nvidia_provider import NvidiaProvider
@@ -112,6 +113,7 @@ def _get_providers() -> List[BaseAIProvider]:
             "gemini": GeminiProvider(),
             "groq": GroqProvider(),
             "nvidia": NvidiaProvider(),
+            "cloudflare": CloudflareProvider(),
         }
     provider_map = _CACHED_PROVIDERS
 
@@ -295,7 +297,11 @@ def generate_quiz(
     configured_providers = [p for p in providers if p.is_configured()]
 
     if not configured_providers:
-        raise AIConfigError("No AI provider is configured. Set GROQ_API_KEY, NVIDIA_API_KEY, or GEMINI_API_KEY in .env.", category="CONFIG_ERROR")
+        raise AIConfigError(
+            "No AI provider is configured. Set GROQ_API_KEY, NVIDIA_API_KEY, "
+            "GEMINI_API_KEY, or CLOUDFLARE_API_TOKEN (with CLOUDFLARE_ACCOUNT_ID) in .env.",
+            category="CONFIG_ERROR",
+        )
 
     logger.info(
         f"[QUIZ GEN START] attempt_id={attempt_id} course={course_code} topic='{topic_name}' "
@@ -335,13 +341,23 @@ def generate_quiz(
             else:
                 # Multi-provider mode: reserve budget for subsequent configured providers
                 remaining_providers = configured_providers[p_idx + 1:]
-                reserve_needed = sum(10.0 if p.name == "gemini" else (12.0 if p.name == "nvidia" else 5.0) for p in remaining_providers)
+                reserve_needed = sum(
+                    10.0 if p.name == "gemini"
+                    else (12.0 if p.name == "nvidia"
+                    else (8.0 if p.name == "cloudflare" else 5.0))
+                    for p in remaining_providers
+                )
                 if reserve_needed > 0 and time_remaining > min_required_time:
                     max_alloc = max(time_remaining - reserve_needed, min_required_time)
                     if provider.name == "groq":
                         provider_timeout = min(12.0, max_alloc)
                     elif provider.name == "nvidia":
                         provider_timeout = min(16.0, max_alloc)
+                    elif provider.name == "cloudflare":
+                        provider_timeout = min(
+                            float(os.getenv("CLOUDFLARE_TIMEOUT_SECONDS", "20.0")),
+                            max_alloc,
+                        )
                     else:
                         provider_timeout = min(provider_timeout_budget, max_alloc)
                 else:
@@ -875,7 +891,7 @@ REQUIREMENTS:
     # Diagnostic response when sole provider fails
     if num_configured == 1:
         sole_name = configured_providers[0].name.capitalize()
-        all_possible = ["Groq", "NVIDIA", "Gemini"]
+        all_possible = ["Groq", "NVIDIA", "Gemini", "Cloudflare"]
         unconfigured = [p for p in all_possible if p.lower() != configured_providers[0].name.lower()]
         unconfigured_str = "/".join(unconfigured)
 
