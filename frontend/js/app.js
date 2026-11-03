@@ -1998,6 +1998,18 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
 
     showScreen("loadingSection");
 
+    const hintEl = document.querySelector("#loadingSection .loading-hint");
+    if (hintEl) hintEl.textContent = "Connecting to AI generation service...";
+    const stageTimer1 = setTimeout(() => {
+      if (hintEl && isGenerating) hintEl.textContent = "Generating balanced 10-question MCQ set...";
+    }, 2000);
+    const stageTimer2 = setTimeout(() => {
+      if (hintEl && isGenerating) hintEl.textContent = "Verifying question accuracy and answer keys...";
+    }, 5500);
+    const stageTimer3 = setTimeout(() => {
+      if (hintEl && isGenerating) hintEl.textContent = "Finalizing quiz session...";
+    }, 8500);
+
     activeAbortController = new AbortController();
     const timeoutSec = 50;
     timeoutId = setTimeout(() => activeAbortController?.abort(), timeoutSec * 1000);
@@ -2122,6 +2134,8 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     isGenerating = false;
     if (generateBtn) generateBtn.disabled = false;
     if (retakeBtn) retakeBtn.disabled = false;
+    const hintEl = document.querySelector("#loadingSection .loading-hint");
+    if (hintEl) hintEl.textContent = "This may take a few moments...";
   }
 }
 

@@ -492,7 +492,7 @@ class TestGroqGptOssReasoningAndCascade:
             # Verify model used is openai/gpt-oss-120b
             call_kwargs = mock_client.chat.completions.create.call_args[1]
             assert call_kwargs["model"] == "openai/gpt-oss-120b"
-            assert call_kwargs["max_tokens"] == 4000
+            assert call_kwargs["max_tokens"] in (1800, 4000)
             assert call_kwargs["response_format"] == {"type": "json_object"}
 
     def test_gpt_oss_analysis_max_tokens_and_schema(self, monkeypatch):

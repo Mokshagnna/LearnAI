@@ -54,7 +54,7 @@ class GroqProvider(BaseAIProvider):
                     raise ProviderConfigError("groq python package is not installed.", category="DEPENDENCY_MISSING") from e
             return client
 
-    def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 4000) -> str:
+    def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 1800) -> str:
         primary_key = os.getenv("GROQ_API_KEY", "")
         secondary_key = os.getenv("GROQ_SECONDARY_API_KEY") or os.getenv("GROQ_BACKUP_API_KEY", "")
 
@@ -98,7 +98,7 @@ class GroqProvider(BaseAIProvider):
         if fallback_model and fallback_model not in candidate_models:
             candidate_models.append(fallback_model)
 
-        for active_model in [DEFAULT_GROQ_MODEL, DEFAULT_GROQ_FALLBACK, "openai/gpt-oss-120b", "openai/gpt-oss-20b"]:
+        for active_model in [DEFAULT_GROQ_MODEL, DEFAULT_GROQ_FALLBACK]:
             if active_model not in candidate_models and active_model not in KNOWN_INVALID_GROQ_MODELS:
                 candidate_models.append(active_model)
 
@@ -254,7 +254,7 @@ class GroqProvider(BaseAIProvider):
         syllabus_context: str,
         timeout_seconds: float,
         custom_prompt: Optional[str] = None,
-        max_tokens: int = 4000,
+        max_tokens: int = 1800,
         **kwargs
     ) -> str:
         if custom_prompt:

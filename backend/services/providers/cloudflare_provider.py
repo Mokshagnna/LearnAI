@@ -124,7 +124,7 @@ class CloudflareProvider(BaseAIProvider):
         payload = {
             "prompt": prompt,
             # Cloudflare text-generation models accept max_tokens; pass it through.
-            "max_tokens": 4000,
+            "max_tokens": 1800,
         }
 
         request_timeout = httpx.Timeout(

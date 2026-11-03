@@ -350,7 +350,7 @@ def generate_quiz(
                 if reserve_needed > 0 and time_remaining > min_required_time:
                     max_alloc = max(time_remaining - reserve_needed, min_required_time)
                     if provider.name == "groq":
-                        provider_timeout = min(12.0, max_alloc)
+                        provider_timeout = min(float(os.getenv("GROQ_TIMEOUT_SECONDS", "8.0")), max_alloc)
                     elif provider.name == "nvidia":
                         provider_timeout = min(16.0, max_alloc)
                     elif provider.name == "cloudflare":
@@ -452,8 +452,7 @@ REQUIREMENTS:
 - Each question must have 4 distinct options (A, B, C, D) with non-empty text.
 - Valid correct_answer letter (A, B, C, or D).
 - Specify the tested concept in the 'concept' field.
-- Detailed step-by-step 'explanation' for why the correct answer is correct.
-- 'option_explanations' object with A, B, C, D explaining why each distractor is incorrect.
+- Concise step-by-step 'explanation' for why the correct answer is correct.
 - Return ONLY valid JSON:
 {{
   "questions": [
@@ -463,13 +462,7 @@ REQUIREMENTS:
       "correct_answer": "A",
       "difficulty": "Medium",
       "concept": "{concepts[0] if concepts else topic_name}",
-      "explanation": "Detailed explanation showing step-by-step calculations, rules, or code trace.",
-      "option_explanations": {{
-        "A": "Correct: Satisfies the rule.",
-        "B": "Incorrect: Error or misconception.",
-        "C": "Incorrect: Unrelated or faulty calculation.",
-        "D": "Incorrect: Flawed premise."
-      }}
+      "explanation": "Concise step-by-step reason why A is correct."
     }}
   ]
 }}"""
@@ -586,8 +579,7 @@ REQUIREMENTS:
 - Each question must have 4 distinct options (A, B, C, D) with non-empty text.
 - Valid correct_answer letter (A, B, C, or D).
 - Specify the tested concept in the 'concept' field.
-- Detailed step-by-step 'explanation' for why the correct answer is correct.
-- 'option_explanations' object with A, B, C, D explaining why each distractor is incorrect.
+- Concise step-by-step 'explanation' for why the correct answer is correct.
 - Return ONLY valid JSON:
 {{
   "questions": [
@@ -597,13 +589,7 @@ REQUIREMENTS:
       "correct_answer": "A",
       "difficulty": "{missing_difficulties[0] if missing_difficulties else 'Medium'}",
       "concept": "{concepts[0] if concepts else topic_name}",
-      "explanation": "Detailed explanation showing step-by-step calculations, rules, or code trace.",
-      "option_explanations": {{
-        "A": "Correct: Satisfies the rule.",
-        "B": "Incorrect: Error or misconception.",
-        "C": "Incorrect: Unrelated or faulty calculation.",
-        "D": "Incorrect: Flawed premise."
-      }}
+      "explanation": "Concise step-by-step reason why A is correct."
     }}
   ]
 }}"""
