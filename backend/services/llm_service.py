@@ -358,9 +358,9 @@ def generate_quiz(
                     max_alloc = max(time_remaining - reserve_needed, min_required_time)
                     if provider.name == "groq":
                         # Groq generates 10 MCQs in ~5.0-7.5s via Qwen/Llama over internet TLS.
-                        # Ensure Groq is given up to 9.2s to complete within the sub-10s mission target.
-                        target_groq = float(os.getenv("GROQ_TIMEOUT_SECONDS", "9.2"))
-                        groq_budget = max(time_remaining - 8.0, min(8.8, time_remaining - 1.0))
+                        # Ensure Groq is given up to 11.0s to complete within the sub-10s mission target.
+                        target_groq = float(os.getenv("GROQ_TIMEOUT_SECONDS", "11.0"))
+                        groq_budget = max(time_remaining - 8.0, min(10.5, time_remaining - 1.0))
                         provider_timeout = min(target_groq, groq_budget)
                     elif provider.name == "nvidia":
                         provider_timeout = min(16.0, max_alloc)
@@ -385,7 +385,7 @@ def generate_quiz(
             )
 
             t_p_start = time.perf_counter()
-            target_gen_questions = num_questions + 2 if num_questions == 10 else num_questions
+            target_gen_questions = num_questions + 1 if num_questions == 10 else num_questions
             prompt_dist = get_difficulty_distribution(recommended_difficulty, total_questions=target_gen_questions)
             try:
                 base_prompt = get_quiz_prompt(
