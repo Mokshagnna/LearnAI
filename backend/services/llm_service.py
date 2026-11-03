@@ -338,7 +338,12 @@ def generate_quiz(
                 reserve_needed = sum(10.0 if p.name == "gemini" else (12.0 if p.name == "nvidia" else 5.0) for p in remaining_providers)
                 if reserve_needed > 0 and time_remaining > min_required_time:
                     max_alloc = max(time_remaining - reserve_needed, min_required_time)
-                    provider_timeout = min(provider_timeout_budget, max_alloc)
+                    if provider.name == "groq":
+                        provider_timeout = min(12.0, max_alloc)
+                    elif provider.name == "nvidia":
+                        provider_timeout = min(16.0, max_alloc)
+                    else:
+                        provider_timeout = min(provider_timeout_budget, max_alloc)
                 else:
                     provider_timeout = min(provider_timeout_budget, time_remaining)
 
@@ -830,7 +835,7 @@ REQUIREMENTS:
                 break
 
     # ── All providers failed ──────────────────────────────────────────────────
-    if best_quiz is not None and len(best_quiz.get("questions", [])) == num_questions:
+    if best_quiz is not None and len(best_quiz.get("questions", [])) >= max(1, min(num_questions, 8)):
         total_duration = time.perf_counter() - start_time
         logger.warning(
             f"[NOVELTY FALLBACK] Returning best available quiz across all attempts. "

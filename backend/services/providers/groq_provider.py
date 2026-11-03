@@ -67,16 +67,14 @@ class GroqProvider(BaseAIProvider):
         if not keys_to_try:
             raise ProviderConfigError("GROQ_API_KEY is not configured.", category="MISSING_CREDENTIALS")
 
-        # Verified active Groq models: openai/gpt-oss-120b (primary), openai/gpt-oss-20b (fallback)
-        DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
-        DEFAULT_GROQ_FALLBACK = "openai/gpt-oss-20b"
+        # Verified active Groq models: llama-3.3-70b-versatile (primary, 12k TPM), llama-3.1-8b-instant (fallback, 6k TPM)
+        DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+        DEFAULT_GROQ_FALLBACK = "llama-3.1-8b-instant"
         KNOWN_INVALID_GROQ_MODELS = {
             "llama3-70b-8192",
             "llama3-8b-8192",
             "llama-3.2-90b-text-preview",
             "mixtral-8x7b-32768",
-            "llama-3.1-8b-instant",
-            "llama-3.3-70b-versatile",
         }
 
         configured_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip()
@@ -100,10 +98,9 @@ class GroqProvider(BaseAIProvider):
         if fallback_model and fallback_model not in candidate_models:
             candidate_models.append(fallback_model)
 
-        if configured_model in KNOWN_INVALID_GROQ_MODELS and DEFAULT_GROQ_MODEL not in candidate_models:
-            candidate_models.append(DEFAULT_GROQ_MODEL)
-        if fallback_model in KNOWN_INVALID_GROQ_MODELS and DEFAULT_GROQ_FALLBACK not in candidate_models:
-            candidate_models.append(DEFAULT_GROQ_FALLBACK)
+        for active_model in [DEFAULT_GROQ_MODEL, DEFAULT_GROQ_FALLBACK, "openai/gpt-oss-120b", "openai/gpt-oss-20b"]:
+            if active_model not in candidate_models and active_model not in KNOWN_INVALID_GROQ_MODELS:
+                candidate_models.append(active_model)
 
         last_error = None
         overall_start = time.perf_counter()
@@ -206,7 +203,8 @@ class GroqProvider(BaseAIProvider):
                     # Bounded backoff/jitter for 429 and 503 if time budget allows
                     is_rate_limit_or_unavailable = any(term in msg for term in ["rate limit", "429", "503", "too many requests", "unavailable", "overloaded"])
                     time_left_now = timeout_seconds - (time.perf_counter() - overall_start)
-                    if is_rate_limit_or_unavailable and time_left_now > 3.0:
+                    has_more_models = (m_idx + 1) < len(candidate_models)
+                    if not has_more_models and is_rate_limit_or_unavailable and time_left_now > 3.0:
                         backoff = min(1.0, 0.2 * (2 ** m_idx)) + random.uniform(0.05, 0.15)
                         if time_left_now > backoff + 2.0:
                             logger.info(f"[GROQ BACKOFF] Retrying after {backoff:.2f}s backoff due to transient status (429/503)...")

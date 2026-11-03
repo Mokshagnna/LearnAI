@@ -470,7 +470,7 @@ class TestGroqGptOssReasoningAndCascade:
 
     def test_gpt_oss_120b_normal_response_and_json_format_kwargs(self, monkeypatch):
         monkeypatch.setenv("GROQ_API_KEY", "test_groq_key_1")
-        monkeypatch.delenv("GROQ_MODEL", raising=False)
+        monkeypatch.setenv("GROQ_MODEL", "openai/gpt-oss-120b")
         monkeypatch.delenv("GROQ_FALLBACK_MODEL", raising=False)
 
         provider = GroqProvider()
@@ -616,28 +616,26 @@ class TestGroqGptOssReasoningAndCascade:
             mock_client = MagicMock()
             mock_client_factory.return_value = mock_client
 
-            # Both 120B and 20B fail with rate limit
+            # All models fail with rate limit
             mock_client.chat.completions.create.side_effect = Exception("429 Rate limit exceeded")
 
             with pytest.raises(ProviderUnavailableError):
                 provider.generate_quiz_raw("22AM301", "Deep Learning", "Loss Function", "Context", 15.0)
 
-            # Exactly 2 calls made: 120B then 20B
             calls = mock_client.chat.completions.create.call_args_list
-            assert len(calls) == 2
-            assert calls[0][1]["model"] == "openai/gpt-oss-120b"
-            assert calls[1][1]["model"] == "openai/gpt-oss-20b"
-
-            # Verify no legacy models were ever called
             called_models = [c[1]["model"] for c in calls]
-            assert "llama-3.1-8b-instant" not in called_models
+            assert "llama-3.3-70b-versatile" in called_models
+            assert "llama-3.1-8b-instant" in called_models
+
+            # Verify no decommissioned legacy models were ever called
             assert "mixtral-8x7b-32768" not in called_models
-            assert "llama-3.3-70b-versatile" not in called_models
+            assert "llama3-70b-8192" not in called_models
+            assert "llama3-8b-8192" not in called_models
 
     def test_groq_deprecated_model_warning_and_active_model_inclusion(self, monkeypatch, caplog):
         """When a deprecated model is configured in env, a warning is logged and active default is included."""
         monkeypatch.setenv("GROQ_API_KEY", "test_groq_key_1")
-        monkeypatch.setenv("GROQ_MODEL", "llama-3.1-8b-instant")
+        monkeypatch.setenv("GROQ_MODEL", "llama3-70b-8192")
         monkeypatch.setenv("GROQ_FALLBACK_MODEL", "mixtral-8x7b-32768")
 
         provider = GroqProvider()
@@ -646,11 +644,11 @@ class TestGroqGptOssReasoningAndCascade:
             mock_client = MagicMock()
             mock_client_factory.return_value = mock_client
 
-            # First two calls (deprecated) return 404, third call (openai/gpt-oss-120b) succeeds
+            # First two calls (deprecated) return 404, third call (llama-3.3-70b-versatile) succeeds
             mock_resp = MagicMock()
             mock_resp.choices = [MagicMock(message=MagicMock(content=_make_dummy_quiz_json("Loss Function")))]
             mock_client.chat.completions.create.side_effect = [
-                Exception("404 Model llama-3.1-8b-instant does not exist"),
+                Exception("404 Model llama3-70b-8192 does not exist"),
                 Exception("404 Model mixtral-8x7b-32768 does not exist"),
                 mock_resp
             ]
@@ -662,7 +660,7 @@ class TestGroqGptOssReasoningAndCascade:
             assert res is not None
             assert any("[GROQ CONFIG WARNING]" in record.message for record in caplog.records)
             called_models = [c[1]["model"] for c in mock_client.chat.completions.create.call_args_list]
-            assert "openai/gpt-oss-120b" in called_models
+            assert "llama-3.3-70b-versatile" in called_models
 
     def test_gemini_afc_and_response_parsing(self, monkeypatch):
         """Verifies Gemini handles responses and AFC correctly without crashing."""
