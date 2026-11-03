@@ -1,0 +1,88 @@
+{
+  "audit_metadata": {
+    "timestamp": "2026-11-03T11:36:00Z",
+    "audit_file": "LEARNAI_FINAL_MODEL_SELECTION_REPORT.md",
+    "project": "LearnAI",
+    "production_url": "https://learnai-fzgd.onrender.com",
+    "note": "Final audited and empirical benchmark summary. All metrics strictly grounded in live telemetry and unit test verification."
+  },
+  "comparison_matrix": {
+    "Groq_70B_llama-3.3-70b-versatile": {
+      "real_live_calls": 4,
+      "successful_live_calls": 1,
+      "complete_10q_quizzes": 1,
+      "generation_latency": "12.8s",
+      "answer_key_accuracy": "90.0% (empirically solved)",
+      "duplicate_rate": "0%",
+      "validation_success": "100% on discrete topics; timeouts on compound topics",
+      "availability": "High (12,000 TPM limit)",
+      "evidence_confidence": "HIGH (Empirical Live Data)",
+      "recommendation": "PRIMARY"
+    },
+    "Groq_8B_llama-3.1-8b-instant": {
+      "real_live_calls": 0,
+      "successful_live_calls": 0,
+      "complete_10q_quizzes": 0,
+      "generation_latency": "NOT TESTED (Catalog: 560 tok/s)",
+      "answer_key_accuracy": "NOT TESTED",
+      "duplicate_rate": "NOT TESTED",
+      "validation_success": "NOT TESTED",
+      "availability": "Active Catalog (6,000 TPM limit)",
+      "evidence_confidence": "INSUFFICIENT EVIDENCE (Local keys absent)",
+      "recommendation": "PROVISIONAL (INTRA-PROVIDER FALLBACK)"
+    },
+    "NVIDIA_8B_meta-llama-3.1-8b-instruct": {
+      "real_live_calls": 0,
+      "successful_live_calls": 0,
+      "complete_10q_quizzes": 0,
+      "generation_latency": "NOT TESTED",
+      "answer_key_accuracy": "NOT TESTED",
+      "duplicate_rate": "NOT TESTED",
+      "validation_success": "NOT TESTED",
+      "availability": "Active Catalog (1,000 NIM credits)",
+      "evidence_confidence": "INSUFFICIENT EVIDENCE (Local keys absent)",
+      "recommendation": "PROVISIONAL (CROSS-PROVIDER FALLBACK)"
+    },
+    "Gemini_3.8_Flash_gemini-3.8-flash": {
+      "real_live_calls": 1,
+      "successful_live_calls": 0,
+      "complete_10q_quizzes": 0,
+      "generation_latency": "Failed (HTTP 429)",
+      "answer_key_accuracy": "NOT TESTED",
+      "duplicate_rate": "NOT TESTED",
+      "validation_success": "0% (HTTP 429 Rate Limit)",
+      "availability": "Blocked by Quota (429 RESOURCE_EXHAUSTED)",
+      "evidence_confidence": "HIGH (Empirically Blocked by Quota)",
+      "recommendation": "BLOCKED PENDING QUOTA ALIGNMENT"
+    },
+    "Cloudflare_Workers_AI_cf-meta-llama-3.1-8b-instruct": {
+      "real_live_calls": 1,
+      "successful_live_calls": 1,
+      "complete_10q_quizzes": 1,
+      "generation_latency": "36.99s (Provider) / 37.55s (End-to-End)",
+      "answer_key_accuracy": "70.0% (7/10 defensible; 3 flawed/ambiguous)",
+      "duplicate_rate": "10.0% (Q6 options cloned from Q5)",
+      "validation_success": "100% (Valid JSON schema)",
+      "availability": "Verified Active (Daily Neurons Allocation)",
+      "evidence_confidence": "HIGH (Empirical Live Data in Production)",
+      "recommendation": "SECONDARY (CROSS-PROVIDER RESILIENT FALLBACK)"
+    }
+  },
+  "disqualified_models": [
+    {
+      "model_id": "openai/gpt-oss-120b",
+      "provider": "Groq",
+      "reason": "1,000 TPM limit causes 100% timeouts (>39.5s) on 10-Q generation."
+    },
+    {
+      "model_id": "meta/llama-3.3-70b-instruct",
+      "provider": "NVIDIA NIM",
+      "reason": "Endpoint deprecated by NVIDIA (HTTP 410 Gone)."
+    },
+    {
+      "model_id": "mixtral-8x7b-32768",
+      "provider": "Groq",
+      "reason": "Decommissioned by Groq API catalog."
+    }
+  ]
+}

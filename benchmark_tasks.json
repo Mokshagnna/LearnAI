@@ -1,0 +1,272 @@
+[
+  {
+    "task_id": "TASK-01",
+    "course_code": "22TP103",
+    "course_name": "Programming In C",
+    "topic_name": "Introduction To Algorithms & Introduction To C",
+    "difficulty": "Easy",
+    "num_questions": 10,
+    "syllabus_context": "Algorithms, Flowcharts, Structure of C program, Compilation and execution, Identifiers, Keywords, Basic data types."
+  },
+  {
+    "task_id": "TASK-02",
+    "course_code": "22TP103",
+    "course_name": "Programming In C",
+    "topic_name": "Data Types And Operators",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Arithmetic, Relational, Logical, Bitwise, Assignment operators, Operator precedence and associativity, Type conversion."
+  },
+  {
+    "task_id": "TASK-03",
+    "course_code": "22TP103",
+    "course_name": "Programming In C",
+    "topic_name": "Control Statements",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "if, if-else, nested if, switch-case, for loop, while loop, do-while loop, break, continue, goto."
+  },
+  {
+    "task_id": "TASK-04",
+    "course_code": "22TP103",
+    "course_name": "Programming In C",
+    "topic_name": "User-Defined Functions & Pointers",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Function declaration, definition, call, Parameter passing (call by value vs reference), Recursion, Pointer arithmetic, Pointers and arrays, Pointers to functions."
+  },
+  {
+    "task_id": "TASK-05",
+    "course_code": "22TP103",
+    "course_name": "Programming In C",
+    "topic_name": "Structures",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Structure definition, Declaration, Initialization, Accessing members, Nested structures, Array of structures, Structures and pointers, typedef."
+  },
+  {
+    "task_id": "TASK-06",
+    "course_code": "22CS104",
+    "course_name": "Python Programming",
+    "topic_name": "Operators And Expressions & Control Structures",
+    "difficulty": "Easy",
+    "num_questions": 10,
+    "syllabus_context": "Arithmetic, comparison, logical, identity, membership operators, if-elif-else, while loop, for loop with range, break, continue."
+  },
+  {
+    "task_id": "TASK-07",
+    "course_code": "22CS104",
+    "course_name": "Python Programming",
+    "topic_name": "Data Structures & Functions",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Lists, Tuples, Dictionaries, Sets, List comprehensions, Built-in methods, Function definitions, *args, **kwargs, Lambda functions."
+  },
+  {
+    "task_id": "TASK-08",
+    "course_code": "22CS104",
+    "course_name": "Python Programming",
+    "topic_name": "Standard Modules & Packages & File Processing",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Import statement, math, random, sys, os modules, File open, read, write, with statement, Exceptions (try-except-finally)."
+  },
+  {
+    "task_id": "TASK-09",
+    "course_code": "22CS104",
+    "course_name": "Python Programming",
+    "topic_name": "Data Structures & Functions",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Dictionary comprehensions, Nested collections, Closures, Decorators, Generators, yield expressions, Recursion, Memoization."
+  },
+  {
+    "task_id": "TASK-10",
+    "course_code": "22CS104",
+    "course_name": "Python Programming",
+    "topic_name": "Standard Modules & Packages & File Processing",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Custom exceptions, Context managers, Serialization with json and pickle, Binary file processing, iterators and itertools."
+  },
+  {
+    "task_id": "TASK-11",
+    "course_code": "22TP202",
+    "course_name": "Data Structures Using Python",
+    "topic_name": "Sorting & Searching",
+    "difficulty": "Easy",
+    "num_questions": 10,
+    "syllabus_context": "Linear search, Binary search, Bubble sort, Selection sort, Insertion sort, Time and space complexity analysis."
+  },
+  {
+    "task_id": "TASK-12",
+    "course_code": "22TP202",
+    "course_name": "Data Structures Using Python",
+    "topic_name": "Linked List & List, Representation Of Linked List, Operations Of Linked List",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Singly linked lists, Doubly linked lists, Circular linked lists, Insertion, Deletion, Traversal, Reversal operations."
+  },
+  {
+    "task_id": "TASK-13",
+    "course_code": "22TP202",
+    "course_name": "Data Structures Using Python",
+    "topic_name": "Trees",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Binary trees, Binary search trees (BST), Tree traversals (Inorder, Preorder, Postorder, Level order), BST insertion, deletion."
+  },
+  {
+    "task_id": "TASK-14",
+    "course_code": "22TP202",
+    "course_name": "Data Structures Using Python",
+    "topic_name": "Graphs & Hashing",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Graph representations (Adjacency matrix vs list), BFS, DFS, Shortest path (Dijkstra), Hash tables, Hash functions, Collision resolution (Chaining, Open addressing)."
+  },
+  {
+    "task_id": "TASK-15",
+    "course_code": "22TP202",
+    "course_name": "Data Structures Using Python",
+    "topic_name": "Trees",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "AVL trees, Rotations, Balance factor, Red-Black tree properties, B-trees, Priority queues and Binary Heaps (Min/Max heap)."
+  },
+  {
+    "task_id": "TASK-16",
+    "course_code": "22CS201",
+    "course_name": "Database Management Systems",
+    "topic_name": "Databases And Database Users & Database System Concepts And Architecture",
+    "difficulty": "Easy",
+    "num_questions": 10,
+    "syllabus_context": "Database approach vs File systems, DBMS characteristics, Three-schema architecture, Data independence (Logical vs Physical), DDL, DML."
+  },
+  {
+    "task_id": "TASK-17",
+    "course_code": "22CS201",
+    "course_name": "Database Management Systems",
+    "topic_name": "Conceptual Data Modeling And Database Design",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Entity-Relationship (ER) model, Entity sets, Attributes, Relationships, Cardinality ratios, Weak entity sets, ER-to-Relational mapping."
+  },
+  {
+    "task_id": "TASK-18",
+    "course_code": "22CS201",
+    "course_name": "Database Management Systems",
+    "topic_name": "Sql",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "SELECT, WHERE, GROUP BY, HAVING, ORDER BY, Aggregate functions (COUNT, SUM, AVG), INNER JOIN, LEFT JOIN, Subqueries."
+  },
+  {
+    "task_id": "TASK-19",
+    "course_code": "22CS201",
+    "course_name": "Database Management Systems",
+    "topic_name": "Normalization & Complex Queries, Triggers, Views & Basics Of Functional Dependencies And Normalization For Relational Databases",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Functional dependencies, 1NF, 2NF, 3NF, BCNF, Multivalued dependencies, Lossless-join decomposition, Dependency preservation."
+  },
+  {
+    "task_id": "TASK-20",
+    "course_code": "22CS201",
+    "course_name": "Database Management Systems",
+    "topic_name": "Transaction Processing & Introduction To Transaction Processing Concepts And Theory & Concurrency Control Techniques",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "ACID properties, Serializability (Conflict vs View), Two-Phase Locking (2PL), Deadlock detection and prevention, Timestamp ordering."
+  },
+  {
+    "task_id": "TASK-21",
+    "course_code": "22CS204",
+    "course_name": "Computer Networks",
+    "topic_name": "Introduction To Computer Networks And Internet",
+    "difficulty": "Easy",
+    "num_questions": 10,
+    "syllabus_context": "Network edge, core, Packet switching vs Circuit switching, Delay, loss, throughput, Protocol layers (OSI 7-layer vs TCP/IP 4-layer)."
+  },
+  {
+    "task_id": "TASK-22",
+    "course_code": "22CS204",
+    "course_name": "Computer Networks",
+    "topic_name": "Application Layer & Transport Layer",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "HTTP, DNS, SMTP, Socket programming, Multiplexing, UDP vs TCP, Reliable data transfer principles, TCP 3-way handshake."
+  },
+  {
+    "task_id": "TASK-23",
+    "course_code": "22CS204",
+    "course_name": "Computer Networks",
+    "topic_name": "Network Layer",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Forwarding vs Routing, IPv4 addressing, Subnetting, CIDR, NAT, ICMP, DHCP, Routing algorithms (Link-State vs Distance-Vector)."
+  },
+  {
+    "task_id": "TASK-24",
+    "course_code": "22CS204",
+    "course_name": "Computer Networks",
+    "topic_name": "The Link Layer And Local Area Networks",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Error detection (Parity, Checksum, CRC), Multiple access protocols (CSMA/CD, CSMA/CA), MAC addressing, ARP, Ethernet, VLANs."
+  },
+  {
+    "task_id": "TASK-25",
+    "course_code": "22CS204",
+    "course_name": "Computer Networks",
+    "topic_name": "Application Layer & Transport Layer",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "TCP Congestion Control (Slow start, Congestion avoidance, Fast retransmit/recovery), Flow control (sliding window), ECN, QUIC."
+  },
+  {
+    "task_id": "TASK-26",
+    "course_code": "22CS207",
+    "course_name": "Operating Systems",
+    "topic_name": "Introduction To Operating System",
+    "difficulty": "Easy",
+    "num_questions": 10,
+    "syllabus_context": "OS functions, Dual-mode operation (User vs Kernel mode), System calls, Process concept, PCB, Process states, Context switching."
+  },
+  {
+    "task_id": "TASK-27",
+    "course_code": "22CS207",
+    "course_name": "Operating Systems",
+    "topic_name": "Process Synchronization & Deadlocks",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Critical-section problem, Peterson algorithm, Semaphores, Mutex locks, Deadlock conditions, Resource-allocation graphs."
+  },
+  {
+    "task_id": "TASK-28",
+    "course_code": "22CS207",
+    "course_name": "Operating Systems",
+    "topic_name": "Memory Management & Virtual Memory Management",
+    "difficulty": "Medium",
+    "num_questions": 10,
+    "syllabus_context": "Contiguous memory allocation, Paging, Page tables, Segmentation, Virtual memory, Demand paging, Page fault handling."
+  },
+  {
+    "task_id": "TASK-29",
+    "course_code": "22CS207",
+    "course_name": "Operating Systems",
+    "topic_name": "Secondary Storage Structure",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Disk structure, Disk scheduling algorithms (FCFS, SSTF, SCAN, C-SCAN, LOOK), Disk management, Swap-space management, RAID levels."
+  },
+  {
+    "task_id": "TASK-30",
+    "course_code": "22CS207",
+    "course_name": "Operating Systems",
+    "topic_name": "Process Synchronization & Deadlocks",
+    "difficulty": "Hard",
+    "num_questions": 10,
+    "syllabus_context": "Bankers algorithm for deadlock avoidance, Deadlock detection and recovery, Classic synchronization problems (Dining Philosophers, Readers-Writers)."
+  }
+]
