@@ -12,8 +12,10 @@ from services.providers.base import (
     ProviderError,
     get_quiz_prompt,
     get_analysis_prompt,
-    extract_json_from_text
+    extract_json_from_text,
+    calculate_max_output_tokens
 )
+from services.quota_manager import quota_manager, parse_rate_limit, RateLimitType
 from services.logger_utils import sanitize_error_text
 
 logger = logging.getLogger("learnai.providers.groq")
@@ -165,10 +167,25 @@ class GroqProvider(BaseAIProvider):
                 time_left = timeout_seconds - (time.perf_counter() - overall_start)
                 if time_left < 2.0:
                     break
+
+                is_avail, remaining = quota_manager.is_model_available("groq", current_model, key_value)
+                if not is_avail:
+                    logger.info(
+                        f"[GROQ QUOTA SKIP] model={current_model} on cooldown ({remaining:.1f}s remaining). Skipping."
+                    )
+                    continue
+
                 call_start = time.perf_counter()
                 try:
                     logger.info(f"[GROQ START] key={key_label} model={current_model} timeout={time_left:.1f}s")
-                    call_max_tokens = max(max_tokens, 4000) if ("gpt-oss" in current_model.lower() and max_tokens > 1500) else max_tokens
+                    if max_tokens and max_tokens <= 1500:
+                        call_max_tokens = max_tokens
+                    elif "gpt-oss" in current_model.lower():
+                        call_max_tokens = 4000
+                    else:
+                        call_max_tokens = calculate_max_output_tokens(current_model, question_count=11)
+                        if max_tokens and max_tokens > call_max_tokens:
+                            call_max_tokens = max_tokens
                     create_kwargs = {
                         "model": current_model,
                         "messages": [
@@ -231,6 +248,12 @@ class GroqProvider(BaseAIProvider):
                             f"(content is empty, finish_reason='{finish_reason}')."
                         )
 
+                    raw_fr = getattr(choice, "finish_reason", None) or (choice.get("finish_reason") if isinstance(choice, dict) else "unknown")
+                    if raw_fr == "length":
+                        logger.warning(
+                            f"[GROQ TRUNCATION WARNING] model={current_model} hit finish_reason='length'. Response may be partial."
+                        )
+                    quota_manager.record_success("groq", current_model, key_value)
                     logger.info(f"[GROQ SUCCESS] key={key_label} model={current_model} duration={duration:.2f}s")
                     return result_text
 
@@ -251,6 +274,14 @@ class GroqProvider(BaseAIProvider):
                             f"duration={duration:.2f}s: {sanitize_error_text(e)}. Attempting fallback model..."
                         )
                         continue
+
+                    if any(term in msg for term in ["rate limit", "429", "too many requests"]):
+                        rl_info = parse_rate_limit("groq", e, getattr(e, "response", None))
+                        cooldown = quota_manager.record_rate_limit("groq", current_model, key_value, rl_info)
+                        logger.warning(
+                            f"[GROQ RATE LIMIT] model={current_model} type={rl_info.limit_type.value} "
+                            f"daily={rl_info.is_daily_exhaustion} cooldown={cooldown:.1f}s: {sanitize_error_text(e)}"
+                        )
 
                     logger.warning(
                         f"[GROQ MODEL FALLBACK] key={key_label} model={current_model} "

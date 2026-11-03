@@ -7,6 +7,7 @@ during quiz retakes.
 """
 import re
 import logging
+from enum import Enum
 from typing import List, Tuple, Dict, Any, Set, Optional
 
 logger = logging.getLogger("learnai.novelty")
@@ -364,17 +365,151 @@ def are_options_duplicate(opts1: Any, opts2: Any) -> Tuple[bool, float]:
     return (overlap >= 0.75, overlap)
 
 
+# ── Cognitive Operation & Numerical Structure Extraction ─────────────────────
+
+class CognitiveOperation(str, Enum):
+    CALCULATION = "CALCULATION"
+    DEFINITION_RECALL = "DEFINITION_RECALL"
+    THEORETICAL_PROPERTY = "THEORETICAL_PROPERTY"
+    COMPARISON_CONTRAST = "COMPARISON_CONTRAST"
+    APPLICATION_SCENARIO = "APPLICATION_SCENARIO"
+    PROCESS_MECHANISM = "PROCESS_MECHANISM"
+    GENERAL = "GENERAL"
+
+
+def extract_cognitive_operation(text: str) -> CognitiveOperation:
+    """Identifies the cognitive operation and reasoning skill required by the question."""
+    t = text.lower()
+
+    # 1. Comparison & Contrast
+    comp_patterns = [
+        r'\b(?:difference between|differ from|differs from|compared to|unlike|in contrast|versus|vs\b)',
+        r'\b(?:trade-?off|advantages? over|disadvantages? compared to)\b',
+        r'\bwhich is preferred\b'
+    ]
+    if any(re.search(p, t) for p in comp_patterns):
+        return CognitiveOperation.COMPARISON_CONTRAST
+
+    # 2. Application Scenario
+    app_patterns = [
+        r'\b(?:when applied to|in an application where|suppose an? (?:image|dataset|vehicle|system))\b',
+        r'\b(?:practical scenario|practical application|real-world|in practice)\b'
+    ]
+    if any(re.search(p, t) for p in app_patterns):
+        return CognitiveOperation.APPLICATION_SCENARIO
+
+    # 3. Process & Mechanism
+    proc_patterns = [
+        r'\b(?:how does .* (?:work|operate|function|update|fire|propagate|compute|derive))\b',
+        r'\b(?:step in|procedure for|algorithm for|mechanism by which|sequence of steps)\b',
+        r'\b(?:backpropagation computes|gradient descent updates)\b'
+    ]
+    if any(re.search(p, t) for p in proc_patterns):
+        return CognitiveOperation.PROCESS_MECHANISM
+
+    # 4. Theoretical Property & Condition
+    prop_patterns = [
+        r'\b(?:(?:what|which)\s+(?:is\s+the\s+)?(?:necessary|sufficient)\s+condition|condition\s+for|necessary\s+and\s+sufficient|under\s+what\s+condition)\b',
+        r'\b(?:which property holds|is invertible if|is diagonalizable if|linearly separable if|orthogonal matrix if)\b',
+        r'\b(?:which statement is (?:true|false|correct|incorrect) (?:regarding|about))\b',
+        r'\b(?:theorem|geometric meaning|mathematical proof)\b'
+    ]
+    if any(re.search(p, t) for p in prop_patterns):
+        return CognitiveOperation.THEORETICAL_PROPERTY
+
+    # 5. Definition & Recall
+    def_patterns = [
+        r'\b(?:what is (?:the|a)?\s*(?:primary|fundamental|core|basic)?\s*(?:definition|meaning|purpose|role|function))\b',
+        r'\b(?:definition of|defined as|defined by|meaning of|what is meant by)\b',
+        r'\b(?:who introduced|what does .* stand for|which term refers to|what is the name of)\b'
+    ]
+    if any(re.search(p, t) for p in def_patterns):
+        return CognitiveOperation.DEFINITION_RECALL
+
+    # 6. Calculation & Numerical Problem Solving
+    calc_patterns = [
+        r'\b(?:calculate|find the value|evaluate the|solve for|what is the value)\b',
+        r'^\s*(?:compute|evaluate)\b',
+        r'\b(?:determinant of|trace of|eigenvalues? of|rank of|inverse of)\b.*(?:matrix|\[)',
+        r'\[\s*\[.*?\]\s*\]',
+        r'\b(?:output if|output when|result when|yields)\b.*(?:input|values?|weight)'
+    ]
+    if any(re.search(p, t) for p in calc_patterns):
+        return CognitiveOperation.CALCULATION
+
+    return CognitiveOperation.GENERAL
+
+
+def extract_numerical_parameters(text: str) -> List[float]:
+    """Extracts ordered list of numerical values from question statement."""
+    matches = re.findall(r'(?<![a-zA-Z_])[-+]?(?:\d+\.\d+|\d+/\d+|\d+)(?![a-zA-Z_])', text)
+    nums = []
+    for m in matches:
+        try:
+            if "/" in m:
+                num, denom = m.split("/")
+                if float(denom) != 0:
+                    nums.append(float(num) / float(denom))
+            else:
+                nums.append(float(m))
+        except (ValueError, ZeroDivisionError):
+            pass
+    return nums
+
+
+def get_numerical_template(text: str) -> str:
+    """Replaces numerical literals with <num> to compare problem structure."""
+    if not text:
+        return ""
+    t = re.sub(r'(?<![a-zA-Z_])[-+]?(?:\d+\.\d+|\d+/\d+|\d+)(?![a-zA-Z_])', '<num>', text.lower())
+    t = re.sub(r'[^\w\s<>]', ' ', t)
+    return re.sub(r'\s+', ' ', t).strip()
+
+
+def are_numerical_problems_identical_structure(t1: str, t2: str) -> Tuple[bool, str]:
+    """
+    Detects if two questions have identical problem templates with merely changed numbers
+    (e.g. 'find the determinant of the 2x2 matrix [[2, 1], [4, 3]]' vs '... [[5, 2], [3, 1]]').
+    """
+    tmpl1 = get_numerical_template(t1).lower()
+    tmpl2 = get_numerical_template(t2).lower()
+    if "<num>" not in tmpl1 or "<num>" not in tmpl2:
+        return False, ""
+
+    tokens1 = set(tmpl1.split())
+    tokens2 = set(tmpl2.split())
+    if not tokens1 or not tokens2:
+        return False, ""
+
+    inter = len(tokens1 & tokens2)
+    union = len(tokens1 | tokens2)
+    ratio = inter / union if union else 0.0
+
+    if tmpl1 == tmpl2 or ratio >= 0.82:
+        nums1 = extract_numerical_parameters(t1)
+        nums2 = extract_numerical_parameters(t2)
+        if nums1 != nums2:
+            return True, f"Identical problem template ({ratio:.0%} match) with varied numerical values"
+        else:
+            return True, f"Identical numerical calculation problem ({ratio:.0%} template match)"
+    return False, ""
+
+
 def is_question_near_duplicate(q1: Dict[str, Any], q2: Dict[str, Any], topic_name: str = "") -> Tuple[bool, str]:
     """
-    Determines if q2 is an exact, near-duplicate, or equivalent learning objective duplicate of q1.
+    Determines if q2 is an exact, near-duplicate, numerical template duplicate,
+    or equivalent learning objective duplicate of q1.
     Checks:
       1. Exact wording match (Level 1)
       2. Artificial variation patterns: '(Application Variation)', 'Variation'
-      3. High textual / phrasing similarity (Level 2)
-      4. Canonical alias & synonym similarity (Level 2)
-      5. Option set permutation with shared question topic
-      6. Same correct answer text with moderate question overlap
-      7. Equivalent learning objective (Level 3): tests identical target entity and cognitive facet
+      3. Domain Facet and Operator Isolation Safeguards (mutually exclusive concepts)
+      4. Cognitive Operation and Reasoning Skill Divergence
+      5. Numerical Parameter Variation of Same Problem Template
+      6. Option set permutation with shared question topic
+      7. Same correct answer text with moderate question overlap
+      8. Canonical alias & synonym similarity (Level 2)
+      9. High textual / phrasing similarity (Level 2)
+      10. Equivalent learning objective (Level 3): tests identical target entity and cognitive facet
     """
     t1 = str(q1.get("question", "")).strip()
     t2 = str(q2.get("question", "")).strip()
@@ -395,11 +530,11 @@ def is_question_near_duplicate(q1: Dict[str, Any], q2: Dict[str, Any], topic_nam
         if base1 == base2 or (base1 and base2 and calculate_question_similarity(base1, base2) >= 0.70):
             return True, f"Artificial variation of existing question: '{t2[:60]}...'"
 
-    # Safeguard against false positive collisions on distinct technical concepts
-    # When questions test mutually exclusive domain facets or operators,
-    # they are NOT duplicates even if they share high template/stem similarity:
+    # 3. Safeguard against false positive collisions on distinct technical concepts
     can_tokens1 = extract_canonical_tokens(f"{t1} {q1.get('concept', '')}", topic_name=topic_name)
     can_tokens2 = extract_canonical_tokens(f"{t2} {q2.get('concept', '')}", topic_name=topic_name)
+    t1_lower = f"{t1.lower()} {str(q1.get('concept', '')).lower()}"
+    t2_lower = f"{t2.lower()} {str(q2.get('concept', '')).lower()}"
 
     # A. Distinct logic gates (AND vs OR vs NOT vs XOR vs NAND vs NOR vs XNOR)
     gates = {"and_gate", "or_gate", "not_gate", "xor_gate", "nand_gate", "nor_gate", "xnor_gate"}
@@ -429,22 +564,52 @@ def is_question_near_duplicate(q1: Dict[str, Any], q2: Dict[str, Any], topic_nam
     if bt1 and bt2 and bt1 != bt2:
         return False, ""
 
-    # 3. Canonical alias & synonym similarity (Level 2)
-    can_sim = calculate_canonical_similarity(t1, t2, topic_name=topic_name)
-    if can_sim >= 0.55:
-        return True, f"Near-duplicate wording / paraphrasing ({can_sim:.2f}) with question: '{t1[:60]}...'"
+    # E. Distinct mathematical linear algebra operations (determinant vs trace vs rank vs inverse vs eigenvalues)
+    math_facets = {
+        "determinant": {"determinant", "det"},
+        "trace": {"trace"},
+        "eigenvalues": {"eigenvalue", "eigenvalues", "eigenvector", "eigenvectors", "characteristic_equation"},
+        "rank_nullity": {"rank", "nullity", "nullspace"},
+        "inverse": {"invertible", "inverse", "inversion", "singular", "non_singular"},
+        "orthogonality": {"orthogonal", "orthonormal"},
+        "symmetry": {"symmetric", "skew_symmetric"}
+    }
+    m1 = {f for f, words in math_facets.items() if any(re.search(rf'\b{re.escape(w)}\b', t1_lower) for w in words)}
+    m2 = {f for f, words in math_facets.items() if any(re.search(rf'\b{re.escape(w)}\b', t2_lower) for w in words)}
+    if m1 and m2 and m1.isdisjoint(m2):
+        return False, ""
 
-    # 4. High textual / phrasing similarity (Level 2)
-    sim = calculate_question_similarity(t1, t2)
-    if sim >= 0.50:
-        return True, f"High phrasing similarity ({sim:.2f}) with question: '{t1[:60]}...'"
+    # F. Distinct image filtering and enhancement operations
+    vision_facets = {
+        "median_filter": {"median", "median_filter", "salt_and_pepper"},
+        "mean_filter": {"mean_filter", "box_filter", "smoothing_filter"},
+        "gaussian_filter": {"gaussian", "sigma"},
+        "histogram_proc": {"histogram", "equalization", "cdf"},
+        "edge_detect": {"sobel", "laplacian", "canny"}
+    }
+    v1 = {f for f, words in vision_facets.items() if any(re.search(rf'\b{re.escape(w)}\b', t1_lower) for w in words)}
+    v2 = {f for f, words in vision_facets.items() if any(re.search(rf'\b{re.escape(w)}\b', t2_lower) for w in words)}
+    if v1 and v2 and v1.isdisjoint(v2):
+        return False, ""
 
-    # 5. Option set duplication (permuted options)
+    # 4. Cognitive Operation and Reasoning Skill Extraction
+    op1 = extract_cognitive_operation(t1)
+    op2 = extract_cognitive_operation(t2)
+
+    # 5. Numerical Parameter Variation of Same Problem Template (Requirement 5)
+    is_num_dup, num_msg = are_numerical_problems_identical_structure(t1, t2)
+    if is_num_dup and (op1 == op2 or op1 == CognitiveOperation.CALCULATION or op2 == CognitiveOperation.CALCULATION):
+        return True, f"Numerical template duplicate: {num_msg}"
+
+    # 6. Option set duplication (permuted options)
     opts_dup, opt_ratio = are_options_duplicate(q1.get("options"), q2.get("options"))
+    sim = calculate_question_similarity(t1, t2)
+    can_sim = calculate_canonical_similarity(t1, t2, topic_name=topic_name)
+
     if opts_dup and (sim >= 0.28 or can_sim >= 0.28):
         return True, f"Identical answer option set ({opt_ratio:.0%} match) with question: '{t1[:60]}...'"
 
-    # 6. Same correct answer text with moderate question overlap
+    # 7. Same correct answer text with moderate question overlap
     c1 = str(q1.get("correct_answer", "")).upper()
     c2 = str(q2.get("correct_answer", "")).upper()
     ans_val1 = normalise_text(str(q1.get("options", {}).get(c1, "")))
@@ -452,11 +617,24 @@ def is_question_near_duplicate(q1: Dict[str, Any], q2: Dict[str, Any], topic_nam
     if ans_val1 and ans_val2 and ans_val1 == ans_val2 and len(ans_val1.split()) >= 2 and (sim >= 0.38 or can_sim >= 0.38):
         return True, f"Tests identical target answer fact ('{ans_val1[:40]}') with similar stem ({max(sim, can_sim):.2f})"
 
-    # 7. Equivalent learning objective (Level 3): same target entity and cognitive facet with semantic overlap
+    # 8. Cognitive Operation Divergence:
+    # A numerical calculation problem is fundamentally distinct from a definition/recall/property question
+    if op1 != op2 and (op1 == CognitiveOperation.CALCULATION or op2 == CognitiveOperation.CALCULATION) and max(sim, can_sim) < 0.75:
+        return False, ""
+
+    # 9. Canonical alias & synonym similarity (Level 2)
+    if can_sim >= 0.65:
+        return True, f"Near-duplicate wording / paraphrasing ({can_sim:.2f}) with question: '{t1[:60]}...'"
+
+    # 10. High textual / phrasing similarity (Level 2)
+    if sim >= 0.55:
+        return True, f"High phrasing similarity ({sim:.2f}) with question: '{t1[:60]}...'"
+
+    # 11. Equivalent learning objective (Level 3): same target entity and cognitive facet with semantic overlap
     lo1 = extract_learning_objective(t1, str(q1.get("concept", "")), topic_name=topic_name)
     lo2 = extract_learning_objective(t2, str(q2.get("concept", "")), topic_name=topic_name)
     if lo1 and lo2 and not lo1.endswith(":concept_general") and not lo1.startswith("general_topic:") and lo1 == lo2:
-        if can_sim >= 0.25 or sim >= 0.25:
+        if can_sim >= 0.28 or sim >= 0.28:
             return True, f"Tests equivalent learning objective ('{lo1}') with question: '{t1[:60]}...'"
 
     return False, ""
@@ -884,14 +1062,25 @@ def evaluate_quiz_novelty(
                     break
 
         # Level 3 fallback: Concept tracking against history concepts
-        if not is_dup and history_concepts:
+        # Requirement 6: Syllabus concept tags are NOT independently sufficient evidence of duplication.
+        # Only flag if there is demonstrated semantic overlap with a historical question under that concept.
+        if not is_dup and history_concepts and history_fingerprints:
             for hist_concept in history_concepts:
                 c_sim = calculate_concept_similarity(q_concept, hist_concept)
-                if c_sim >= 0.85:  # Very high concept match on concise tags
-                    concept_dups.append(idx)
-                    reasons.append(f"[Level 3 Concept Overlap] Q{idx + 1} tests already-covered concept: '{hist_concept}'")
-                    is_dup = True
-                    break
+                if c_sim >= 0.85:
+                    for hist_fp in history_fingerprints:
+                        s = calculate_question_similarity(q_text, hist_fp)
+                        cs = calculate_canonical_similarity(q_text, hist_fp, topic_name=topic_name)
+                        if max(s, cs) >= 0.48:
+                            concept_dups.append(idx)
+                            reasons.append(
+                                f"[Level 3 Concept Overlap] Q{idx + 1} repeats concept '{hist_concept}' "
+                                f"with similar formulation to previous question: '{hist_fp[:50]}...'"
+                            )
+                            is_dup = True
+                            break
+                    if is_dup:
+                        break
 
     all_flagged = sorted(list(set(text_dups + concept_dups)))
     is_fully_novel = len(all_flagged) == 0

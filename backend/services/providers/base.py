@@ -1,3 +1,4 @@
+import os
 import json
 import re
 import logging
@@ -174,6 +175,39 @@ Return only valid JSON using this structure:
   "recommendation": "What the student should practice next"
 }}
 """
+
+
+def calculate_max_output_tokens(model_name: str, question_count: int = 10) -> int:
+    """
+    Calculates dynamic output token budget respecting model-specific completion limits.
+    Configurable via BASE_QUESTION_TOKEN_BUDGET (default 210) and QUESTION_TOKEN_BUFFER (default 300).
+    Never exceeds verified model max completion limits.
+    """
+    m_lower = (model_name or "").lower()
+
+    # Model-specific verified completion limits
+    if "gpt-oss-20b" in m_lower:
+        model_limit = 4096
+    elif "@cf/" in m_lower or "cloudflare" in m_lower:
+        model_limit = 3000
+    elif any(x in m_lower for x in ["llama-3.1-8b", "llama-3.3-70b", "llama-3", "qwen"]):
+        model_limit = 8192
+    elif "gemini" in m_lower:
+        model_limit = 8192
+    else:
+        model_limit = 4096
+
+    base_budget = int(os.getenv("BASE_QUESTION_TOKEN_BUDGET", "210"))
+    buffer = int(os.getenv("QUESTION_TOKEN_BUFFER", "300"))
+    explicit_max = os.getenv("MAX_GEN_TOKENS")
+    if explicit_max:
+        try:
+            return min(model_limit, int(explicit_max))
+        except ValueError:
+            pass
+
+    needed = base_budget * max(1, question_count) + buffer
+    return min(model_limit, max(1800, needed))
 
 
 def extract_json_from_text(text: str) -> Any:
@@ -397,7 +431,7 @@ def is_contradictory_explanation(letter: str, correct_ans: str, explanation_text
     return False
 
 
-def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optional[Dict[str, Any]]:
+def validate_single_question(raw_q: Any, topic_name: str = "General", return_details: bool = False) -> Any:
     """
     Validates a single multiple-choice question strictly:
       - Non-empty question text
@@ -406,8 +440,11 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
       - Correct answer maps to one of the options
       - Calibrates and verifies programming output accuracy (printf, scanf, Python print)
     Returns cleaned and validated question dict, or None if malformed.
+    If return_details is True, returns Tuple[Optional[Dict], Optional[str], Optional[str]]
     """
     if not isinstance(raw_q, dict):
+        if return_details:
+            return None, "Question candidate is not a JSON object", "SCHEMA"
         return None
 
     q_text = str(
@@ -420,11 +457,15 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
     ).strip()
 
     if not q_text or q_text.lower() in {"null", "none", "n/a", "question", "question text"}:
+        if return_details:
+            return None, "Question text is missing or placeholder", "SCHEMA"
         return None
 
     raw_options = raw_q.get("options") or raw_q.get("choices") or raw_q.get("answers")
     options = extract_normalized_options(raw_options)
     if not options:
+        if return_details:
+            return None, "Options are missing, fewer than 4 choices, or malformed", "OPTIONS"
         return None
 
     raw_ans = (
@@ -435,6 +476,8 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
     )
     correct_ans = normalize_correct_answer(raw_ans, options)
     if not correct_ans:
+        if return_details:
+            return None, "Correct answer letter is missing or does not map to options", "OPTIONS"
         return None
 
     concept = str(raw_q.get("concept") or raw_q.get("topic") or topic_name).strip() or topic_name
@@ -517,6 +560,8 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
     is_valid, calibrated, reason = verify_and_calibrate_question_options(candidate)
     if not is_valid:
         logger.warning(f"[OPTION VALIDATION] Question rejected: {reason}")
+        if return_details:
+            return None, f"Option calibration failed: {reason}", "OPTIONS"
         return None
 
     # Verify academic and mathematical correctness (theorems, single correct answer, arithmetic, dimensions)
@@ -524,10 +569,14 @@ def validate_single_question(raw_q: Any, topic_name: str = "General") -> Optiona
         is_acad_valid, acad_reason = verify_academic_correctness(calibrated)
         if not is_acad_valid:
             logger.warning(f"[ACADEMIC VALIDATION] Question rejected: {acad_reason}")
+            if return_details:
+                return None, f"Academic verifier rejected question: {acad_reason}", "ACADEMIC"
             return None
     except Exception as e:
         logger.error(f"[ACADEMIC VALIDATION] Verifier failed with exception: {e}. Preserving candidate.")
 
+    if return_details:
+        return calibrated, None, None
     return calibrated
 
 
@@ -578,10 +627,12 @@ def validate_quiz_data(
         raise ValueError(f"Expected at least {min_questions} questions, got {count}.")
 
     valid_questions: List[Dict[str, Any]] = []
+    rejection_reasons: List[Dict[str, Any]] = []
 
     for raw_q in questions:
-        validated_q = validate_single_question(raw_q, topic_name=topic_name)
+        validated_q, fail_reason, fail_cat = validate_single_question(raw_q, topic_name=topic_name, return_details=True)
         if not validated_q:
+            rejection_reasons.append({"question": raw_q, "reason": fail_reason, "category": fail_cat})
             continue
 
         # 1. Check topic relevance and isolation BEFORE normalizing concept tag
@@ -596,6 +647,7 @@ def validate_quiz_data(
         )
         if not is_relevant:
             logger.warning(f"[TOPIC ISOLATION FILTER] Skipped off-topic question: {rel_reason} ('{validated_q['question'][:50]}...')")
+            rejection_reasons.append({"question": validated_q, "reason": rel_reason, "category": "TOPIC_ISOLATION"})
             continue
 
         # 2. Normalize concept tag to genuine syllabus concept only for validated questions
@@ -638,12 +690,16 @@ def validate_quiz_data(
             q["difficulty"] = expected_difficulties[index]
 
     max_slice = expected_count if (expected_count and expected_count > 0) else (sum(difficulty_dist.values()) if difficulty_dist else 10)
+    for d_reason in dedup_res.get("duplicate_reasons", []):
+        rejection_reasons.append({"question": None, "reason": d_reason, "category": "DUPLICATE_INTERNAL"})
+
     return {
         "subject": course_name,
         "topic": topic_name,
         "questions": unique_questions[:max_slice],
         "unique_count": min(len(unique_questions), max_slice),
-        "has_duplicates": dedup_res["has_duplicates"]
+        "has_duplicates": dedup_res["has_duplicates"],
+        "rejection_reasons": rejection_reasons
     }
 
 

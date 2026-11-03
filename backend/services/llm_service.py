@@ -3,7 +3,7 @@ import time
 import uuid
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from dotenv import load_dotenv
 
@@ -63,6 +63,213 @@ if not logger.handlers:
 
 
 MAX_NOVELTY_REPAIR_ATTEMPTS = int(os.getenv("MAX_NOVELTY_REPAIR_ATTEMPTS", "2"))
+
+# ── Shared End-to-End Deadline & Budget Configuration (Module 3) ──────────────
+OVERALL_DEADLINE_SECONDS = float(os.getenv("OVERALL_DEADLINE_SECONDS", "40.0"))
+DEADLINE_TARGET_SECONDS = float(os.getenv("DEADLINE_TARGET_SECONDS", "15.0"))
+PROVIDER_TIMEOUT_SECONDS = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "25.0"))
+GROQ_TIMEOUT_SECONDS = float(os.getenv("GROQ_TIMEOUT_SECONDS", "11.0"))
+CLOUDFLARE_TIMEOUT_SECONDS = float(os.getenv("CLOUDFLARE_TIMEOUT_SECONDS", "20.0"))
+NVIDIA_TIMEOUT_SECONDS = float(os.getenv("NVIDIA_TIMEOUT_SECONDS", "16.0"))
+
+PROVIDER_MIN_TIME_REQUIREMENTS: Dict[str, float] = {
+    "gemini": float(os.getenv("GEMINI_MIN_TIMEOUT", "10.0")),
+    "nvidia": float(os.getenv("NVIDIA_MIN_TIMEOUT", "4.0")),
+    "groq": float(os.getenv("GROQ_MIN_TIMEOUT", "2.5")),
+    "cloudflare": float(os.getenv("CLOUDFLARE_MIN_TIMEOUT", "3.0")),
+}
+DEFAULT_MIN_TIMEOUT = float(os.getenv("DEFAULT_MIN_TIMEOUT", "2.5"))
+
+REPLACEMENT_MIN_TIME_REQUIREMENTS: Dict[str, float] = {
+    "gemini": float(os.getenv("GEMINI_MIN_REPLACEMENT_TIMEOUT", "6.0")),
+    "nvidia": float(os.getenv("NVIDIA_MIN_REPLACEMENT_TIMEOUT", "2.5")),
+    "groq": float(os.getenv("GROQ_MIN_REPLACEMENT_TIMEOUT", "2.0")),
+    "cloudflare": float(os.getenv("CLOUDFLARE_MIN_REPLACEMENT_TIMEOUT", "2.5")),
+}
+DEFAULT_MIN_REPLACEMENT_TIMEOUT = float(os.getenv("DEFAULT_MIN_REPLACEMENT_TIMEOUT", "2.0"))
+
+MAX_REPLACEMENT_ROUNDS = int(os.getenv("MAX_REPLACEMENT_ROUNDS", "2"))
+
+
+class RequestDeadline:
+    """Manages a single shared end-to-end deadline across all generation, validation, fallback, and replacement stages."""
+
+    def __init__(self, overall_deadline: Optional[float] = None, start_time: Optional[float] = None):
+        if overall_deadline is not None:
+            self.overall_deadline = float(overall_deadline)
+        else:
+            self.overall_deadline = float(os.getenv("OVERALL_DEADLINE_SECONDS", "40.0"))
+        self.start_time = start_time if start_time is not None else time.perf_counter()
+
+    @property
+    def elapsed(self) -> float:
+        return time.perf_counter() - self.start_time
+
+    @property
+    def remaining(self) -> float:
+        return max(0.0, self.overall_deadline - self.elapsed)
+
+    def is_expired(self) -> bool:
+        return self.remaining <= 0.0
+
+    def can_attempt(self, min_time: float) -> bool:
+        return self.remaining > min_time
+
+    def allocate_timeout(self, desired_timeout: float, min_required: float = 1.0) -> float:
+        rem = self.remaining
+        if rem <= min_required:
+            return 0.0
+        return min(desired_timeout, rem)
+
+
+def extract_candidate_questions(data: Any) -> List[Dict[str, Any]]:
+    """Extracts raw question objects from JSON structures (dict or list)."""
+    if isinstance(data, list):
+        return [q for q in data if isinstance(q, dict)]
+    if isinstance(data, dict):
+        for k in ["questions", "quiz", "quiz_questions", "items"]:
+            v = data.get(k)
+            if isinstance(v, list):
+                return [q for q in v if isinstance(q, dict)]
+            if isinstance(v, dict) and isinstance(v.get("questions"), list):
+                return [q for q in v["questions"] if isinstance(q, dict)]
+    return []
+
+
+def classify_and_validate_candidate(
+    cand: Any,
+    topic_name: str,
+    course_name: str,
+    course_code: str,
+    concepts: Optional[List[str]],
+    syllabus_context: Optional[str],
+    competing_topics: Optional[List[Any]],
+    accepted_questions: List[Dict[str, Any]],
+    history_questions: List[Dict[str, Any]],
+    all_fingerprints: Optional[List[str]] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+    """
+    Validates a single candidate question through all verification layers:
+    1. Schema & options calibration
+    2. Topic isolation & relevance
+    3. Academic & mathematical correctness
+    4. Internal uniqueness against already-accepted questions in this quiz
+    5. Historical novelty against student attempt history
+
+    Returns:
+        (valid_question_dict, None, None) on success
+        (None, reason, category) on failure
+    """
+    from services.providers.base import validate_single_question
+    from services.novelty import is_question_relevant_to_topic, normalize_question_concept
+
+    val_q, fail_reason, fail_cat = validate_single_question(
+        cand,
+        topic_name=topic_name,
+        return_details=True
+    )
+    if not val_q:
+        return None, fail_reason, fail_cat
+
+    is_rel, rel_reason = is_question_relevant_to_topic(
+        val_q,
+        topic_name,
+        concepts=concepts,
+        syllabus_context=syllabus_context,
+        course_code=course_code,
+        competing_topics=competing_topics
+    )
+    if not is_rel:
+        return None, rel_reason, "TOPIC_ISOLATION"
+
+    val_q["concept"] = normalize_question_concept(val_q, topic_name, concepts)
+
+    for ex_q in accepted_questions:
+        is_dup, dup_reason = is_question_near_duplicate(ex_q, val_q, topic_name=topic_name)
+        if is_dup:
+            return None, f"Duplicates accepted question in quiz: {dup_reason}", "DUPLICATE_INTERNAL"
+
+    if history_questions:
+        for hist_q in history_questions:
+            is_dup, dup_reason = is_question_near_duplicate(hist_q, val_q, topic_name=topic_name)
+            if is_dup:
+                return None, f"Duplicates student history question: {dup_reason}", "DUPLICATE_HISTORY"
+
+    if all_fingerprints:
+        q_norm = normalise_text(val_q.get("question", ""))
+        for fp in all_fingerprints:
+            if normalise_text(fp) == q_norm:
+                return None, f"Exact hash match with student history question: '{fp[:50]}...'", "DUPLICATE_HISTORY"
+
+    return val_q, None, None
+
+
+def build_selective_replacement_prompt(
+    course_code: str,
+    course_name: str,
+    topic_name: str,
+    needed: int,
+    preserved_questions: List[Dict[str, Any]],
+    rejected_records: List[Dict[str, Any]],
+    history_questions: List[Dict[str, Any]],
+    missing_difficulties: List[str],
+    concepts: Optional[List[str]] = None,
+    disallowed_topics: Optional[List[str]] = None,
+    syllabus_context: Optional[str] = None,
+) -> str:
+    concept_str = ", ".join(concepts) if concepts else topic_name
+    disallowed_str = f"\nNEGATIVE CONSTRAINT: Absolutely do NOT generate questions on competing topics ({', '.join(disallowed_topics)})." if disallowed_topics else ""
+    diff_req_str = ", ".join(missing_difficulties) if missing_difficulties else "Medium"
+
+    accepted_texts = [q.get("question", "") for q in preserved_questions if q.get("question")]
+    accepted_block = "\n".join(f"  - [ALREADY ACCEPTED]: {t}" for t in accepted_texts[:10]) if accepted_texts else "None."
+
+    rejected_texts = [r.get("reason", "") for r in rejected_records[-5:] if r.get("reason")]
+    rejected_block = "\n".join(f"  - [REJECTED REASON]: {r}" for r in rejected_texts) if rejected_texts else "None."
+
+    history_texts = [q.get("question", "") for q in history_questions[:8] if q.get("question")]
+    history_block = "\n".join(f"  - [PRIOR ATTEMPT]: {t}" for t in history_texts) if history_texts else "None."
+
+    return f"""You are an expert academic AI quiz generator for {course_code} - {course_name}.
+Selected Topic: {topic_name}
+Authorized Syllabus Concepts: {concept_str}
+
+STRICT TOPIC MANDATE: Every question must test ONLY '{topic_name}'.
+{disallowed_str}
+
+We have already accepted {len(preserved_questions)} valid questions for this quiz.
+We need EXACTLY {needed} additional replacement multiple-choice questions for '{topic_name}' testing different angles/learning objectives to complete the requested set.
+Required difficulty distribution for replacements: {diff_req_str}.
+
+CRITICAL: Do NOT duplicate or rephrase any of these already accepted questions:
+{accepted_block}
+
+CRITICAL: Do NOT repeat the errors or topics of these rejected questions:
+{rejected_block}
+
+CRITICAL: Do NOT duplicate questions from the student's prior attempts:
+{history_block}
+
+REQUIREMENTS:
+- Return EXACTLY {needed} questions strictly assessing '{topic_name}'.
+- Each question must have 4 distinct options (A, B, C, D) with non-empty text.
+- Exactly ONE option must be mathematically and conceptually correct.
+- Valid correct_answer letter (A, B, C, or D).
+- Specify the tested concept in the 'concept' field.
+- Concise step-by-step 'explanation' for why the correct answer is correct.
+- Return ONLY valid JSON:
+{{
+  "questions": [
+    {{
+      "question": "Question text directly testing {topic_name}",
+      "options": {{"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D"}},
+      "correct_answer": "A",
+      "difficulty": "{missing_difficulties[0] if missing_difficulties else 'Medium'}",
+      "concept": "{concepts[0] if concepts else topic_name}",
+      "explanation": "Concise step-by-step reason why A is correct."
+    }}
+  ]
+}}"""
 
 
 class AIError(Exception):
@@ -161,7 +368,8 @@ def generate_quiz(
     competing_topics: Optional[List[Any]] = None,
     disallowed_topics: Optional[List[str]] = None,
     num_questions: int = 10,
-    allow_partial: bool = False
+    allow_partial: bool = False,
+    deadline_seconds: Optional[float] = None
 ) -> Dict[str, Any]:
     """
     Multi-provider quiz generation with:
@@ -297,9 +505,10 @@ def generate_quiz(
         f"history_questions={len(all_fingerprints)} history_concepts={len(all_concepts)}"
     )
 
-    # ── Provider orchestration ────────────────────────────────────────────────
+    # ── Provider orchestration (Module 3 Shared Deadline & Selective Replacement) ──
     start_time = time.perf_counter()
-    overall_deadline = float(os.getenv("OVERALL_DEADLINE_SECONDS", "40.0"))
+    effective_deadline = float(deadline_seconds if deadline_seconds is not None else os.getenv("OVERALL_DEADLINE_SECONDS", "40.0"))
+    deadline = RequestDeadline(overall_deadline=effective_deadline, start_time=start_time)
 
     providers = _get_providers()
     configured_providers = [p for p in providers if p.is_configured()]
@@ -313,41 +522,55 @@ def generate_quiz(
 
     logger.info(
         f"[QUIZ GEN START] attempt_id={attempt_id} course={course_code} topic='{topic_name}' "
-        f"providers={[p.name for p in configured_providers]} deadline={overall_deadline:.1f}s "
-        f"max_repairs={MAX_NOVELTY_REPAIR_ATTEMPTS}"
+        f"providers={[p.name for p in configured_providers]} deadline={effective_deadline:.1f}s "
+        f"target_budget={DEADLINE_TARGET_SECONDS:.1f}s"
     )
 
     last_error: Optional[Exception] = None
     all_provider_errors: List[Exception] = []
-    novelty_repair_count = 0
     best_quiz: Optional[Dict[str, Any]] = None
     best_novelty_score = -1
 
     num_configured = len(configured_providers)
-    provider_timeout_budget = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "25.0"))
     max_retries = int(os.getenv("MAX_PROVIDER_RETRIES") or os.getenv("AI_MAX_RETRIES", "1"))
 
-    for p_idx, provider in enumerate(configured_providers):
-        for attempt_idx in range(max_retries + 1):
-            elapsed = time.perf_counter() - start_time
-            time_remaining = overall_deadline - elapsed
+    preserved_questions: List[Dict[str, Any]] = []
+    replacement_records: List[Dict[str, Any]] = []
+    initial_provider_calls = 0
+    replacement_calls = 0
+    total_provider_calls = 0
+    initial_valid_count = 0
+    provider_used_name: Optional[str] = None
 
-            min_required_time = 10.0 if provider.name == "gemini" else (4.0 if provider.name == "nvidia" else 3.0)
-            if time_remaining <= min_required_time:
+    for p_idx, provider in enumerate(configured_providers):
+        if len(preserved_questions) >= num_questions:
+            break
+
+        min_required_time = PROVIDER_MIN_TIME_REQUIREMENTS.get(provider.name, DEFAULT_MIN_TIMEOUT)
+        if not deadline.can_attempt(min_required_time):
+            logger.warning(
+                f"[DEADLINE REACHED] Only {deadline.remaining:.1f}s remaining (min required: {min_required_time:.1f}s for {provider.name}). "
+                f"Skipping provider={provider.name}."
+            )
+            break
+
+        for attempt_idx in range(max_retries + 1):
+            if len(preserved_questions) >= num_questions:
+                break
+
+            if not deadline.can_attempt(min_required_time):
                 logger.warning(
-                    f"[DEADLINE REACHED] Only {time_remaining:.1f}s remaining (min required: {min_required_time:.1f}s for {provider.name}). "
+                    f"[DEADLINE REACHED] Only {deadline.remaining:.1f}s remaining for attempt {attempt_idx + 1}. "
                     f"Skipping provider={provider.name}."
                 )
                 break
 
             # Calculate provider timeout
+            time_remaining = deadline.remaining
             if num_configured == 1:
-                # Single provider mode (e.g., only Gemini configured in Render dashboard):
-                # Allocate a realistic budget (16s default for Gemini) so it doesn't prematurely 504 on 10 MCQs
-                target_budget = max(provider_timeout_budget, 16.0) if provider.name == "gemini" else provider_timeout_budget
+                target_budget = max(PROVIDER_TIMEOUT_SECONDS, 16.0) if provider.name == "gemini" else PROVIDER_TIMEOUT_SECONDS
                 provider_timeout = min(target_budget, max(time_remaining - 3.0, min_required_time))
             else:
-                # Multi-provider mode: reserve budget for subsequent configured providers
                 remaining_providers = configured_providers[p_idx + 1:]
                 reserve_needed = sum(
                     10.0 if p.name == "gemini"
@@ -358,24 +581,17 @@ def generate_quiz(
                 if reserve_needed > 0 and time_remaining > min_required_time:
                     max_alloc = max(time_remaining - reserve_needed, min_required_time)
                     if provider.name == "groq":
-                        # Groq generates 10 MCQs in ~5.0-7.5s via Qwen/Llama over internet TLS.
-                        # Ensure Groq is given up to 11.0s to complete within the sub-10s mission target.
-                        target_groq = float(os.getenv("GROQ_TIMEOUT_SECONDS", "11.0"))
                         groq_budget = max(time_remaining - 8.0, min(10.5, time_remaining - 1.0))
-                        provider_timeout = min(target_groq, groq_budget)
+                        provider_timeout = min(GROQ_TIMEOUT_SECONDS, groq_budget)
                     elif provider.name == "nvidia":
-                        provider_timeout = min(16.0, max_alloc)
+                        provider_timeout = min(NVIDIA_TIMEOUT_SECONDS, max_alloc)
                     elif provider.name == "cloudflare":
-                        provider_timeout = min(
-                            float(os.getenv("CLOUDFLARE_TIMEOUT_SECONDS", "20.0")),
-                            max_alloc,
-                        )
+                        provider_timeout = min(CLOUDFLARE_TIMEOUT_SECONDS, max_alloc)
                     else:
-                        provider_timeout = min(provider_timeout_budget, max_alloc)
+                        provider_timeout = min(PROVIDER_TIMEOUT_SECONDS, max_alloc)
                 else:
-                    provider_timeout = min(provider_timeout_budget, time_remaining)
+                    provider_timeout = min(PROVIDER_TIMEOUT_SECONDS, time_remaining)
 
-            # Ensure provider_timeout respects provider's minimum allowed deadline without exceeding remaining budget
             if provider.name == "gemini":
                 provider_timeout = min(max(provider_timeout, 10.0), time_remaining)
 
@@ -387,497 +603,264 @@ def generate_quiz(
 
             t_p_start = time.perf_counter()
             is_retake = attempt_number > 1 or bool(all_fingerprints)
-            target_gen_questions = (num_questions + 2 if is_retake else num_questions + 1) if num_questions == 10 else num_questions
-            prompt_dist = get_difficulty_distribution(recommended_difficulty, total_questions=target_gen_questions)
+
             try:
-                base_prompt = get_quiz_prompt(
-                    course_code=course_code,
-                    course_name=course_name,
-                    topic_name=topic_name,
-                    syllabus_context=syllabus_context,
-                    difficulty_dist=prompt_dist,
-                    concepts=concepts,
-                    disallowed_topics=disallowed_topics,
-                    num_questions=target_gen_questions
-                )
-                extra_parts = []
-                if novelty_block:
-                    extra_parts.append(novelty_block)
-                if adaptive_context:
-                    extra_parts.append(adaptive_context)
-                full_prompt = base_prompt + ("\n\n" + "\n\n".join(extra_parts) if extra_parts else "")
-
-                t_p_start = time.perf_counter()
-                raw_text = provider.generate_quiz_raw(
-                    course_code=course_code,
-                    course_name=course_name,
-                    topic_name=topic_name,
-                    syllabus_context=syllabus_context,
-                    timeout_seconds=provider_timeout,
-                    custom_prompt=full_prompt
-                )
-                t_llm_primary_total += (time.perf_counter() - t_p_start)
-
-                t_v_start = time.perf_counter()
-                data = extract_json_from_text(raw_text)
-                validated_quiz = validate_quiz_data(
-                    data,
-                    course_name,
-                    topic_name,
-                    concepts=concepts,
-                    syllabus_context=syllabus_context,
-                    difficulty_dist=difficulty_dist,
-                    course_code=course_code,
-                    competing_topics=competing_topics,
-                    expected_count=num_questions
-                )
-                t_json_val_total += (time.perf_counter() - t_v_start)
-
-                # ── Bounded Replenishment for missing unique questions ─────────
-                current_unique = validated_quiz["questions"]
-                rep_attempts = 0
-                while len(current_unique) < num_questions and rep_attempts < 2:
-                    rep_attempts += 1
-                    needed = num_questions - len(current_unique)
-                    time_left = overall_deadline - (time.perf_counter() - start_time)
-                    min_rep_time = 8.0 if provider.name == "gemini" else 2.5
-                    if time_left <= min_rep_time:
-                        break
-                    ask_count = min(needed + 2, max(needed + 1, 3))
-                    logger.info(
-                        f"[REPLENISHMENT round {rep_attempts}] provider={provider.name} generated {len(current_unique)}/{num_questions} unique questions. "
-                        f"Requesting {ask_count} replenishment questions (needed={needed}) for '{topic_name}'..."
+                # ── Phase 1: Initial Batch Generation (if preserved_questions is empty) ───
+                if len(preserved_questions) == 0:
+                    target_gen_questions = (num_questions + 2 if is_retake else num_questions + 1) if num_questions == 10 else num_questions
+                    prompt_dist = get_difficulty_distribution(recommended_difficulty, total_questions=target_gen_questions)
+                    base_prompt = get_quiz_prompt(
+                        course_code=course_code,
+                        course_name=course_name,
+                        topic_name=topic_name,
+                        syllabus_context=syllabus_context,
+                        difficulty_dist=prompt_dist,
+                        concepts=concepts,
+                        disallowed_topics=disallowed_topics,
+                        num_questions=target_gen_questions
                     )
-                    try:
-                        existing_texts = [q["question"] for q in current_unique]
-                        concept_str = ", ".join(concepts) if concepts else topic_name
-                        disallowed_str = f"\nNEGATIVE CONSTRAINT: Absolutely do NOT generate questions on competing topics ({', '.join(disallowed_topics)})." if disallowed_topics else ""
-                        rep_full_prompt = f"""You are an expert academic AI quiz generator for {course_code} - {course_name}.
-Selected Topic: {topic_name}
-Authorized Syllabus Concepts: {concept_str}
+                    extra_parts = []
+                    if novelty_block:
+                        extra_parts.append(novelty_block)
+                    if adaptive_context:
+                        extra_parts.append(adaptive_context)
+                    full_prompt = base_prompt + ("\n\n" + "\n\n".join(extra_parts) if extra_parts else "")
 
-STRICT TOPIC MANDATE: Every question must test ONLY '{topic_name}'.
-{disallowed_str}
+                    t_p_start = time.perf_counter()
+                    raw_text = provider.generate_quiz_raw(
+                        course_code=course_code,
+                        course_name=course_name,
+                        topic_name=topic_name,
+                        syllabus_context=syllabus_context,
+                        timeout_seconds=provider_timeout,
+                        custom_prompt=full_prompt
+                    )
+                    initial_provider_calls += 1
+                    total_provider_calls += 1
+                    t_llm_primary_total += (time.perf_counter() - t_p_start)
 
-We need AT LEAST {ask_count} additional, completely NEW and UNIQUE multiple-choice questions for '{topic_name}' to complete a {num_questions}-question set.
-CRITICAL: Do NOT duplicate or rephrase any of these already accepted questions:
-""" + "\n".join(f"  - {t}" for t in existing_texts) + f"""
+                    t_v_start = time.perf_counter()
+                    data = extract_json_from_text(raw_text)
+                    raw_candidates = extract_candidate_questions(data)
 
-REQUIREMENTS:
-- Return AT LEAST {ask_count} questions strictly assessing '{topic_name}'.
-- Each question must have 4 distinct options (A, B, C, D) with non-empty text.
-- Valid correct_answer letter (A, B, C, or D).
-- Specify the tested concept in the 'concept' field.
-- Concise step-by-step 'explanation' for why the correct answer is correct.
-- Return ONLY valid JSON:
-{{
-  "questions": [
-    {{
-      "question": "Question text directly testing {topic_name}",
-      "options": {{"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D"}},
-      "correct_answer": "A",
-      "difficulty": "Medium",
-      "concept": "{concepts[0] if concepts else topic_name}",
-      "explanation": "Concise step-by-step reason why A is correct."
-    }}
-  ]
-}}"""
-                        t_rep_start = time.perf_counter()
-                        rep_max_tokens = 4000 if "gpt-oss" in getattr(provider, "name", "") else max(1500, 180 * ask_count + 200)
-                        raw_rep = provider.generate_quiz_raw(
-                            course_code=course_code,
-                            course_name=course_name,
+                    for cand in raw_candidates:
+                        if len(preserved_questions) >= num_questions:
+                            break
+                        valid_q, reason, cat = classify_and_validate_candidate(
+                            cand=cand,
                             topic_name=topic_name,
-                            syllabus_context=syllabus_context,
-                            timeout_seconds=min(time_left, 12.0) if provider.name == "gemini" else min(time_left * 0.8, 8.0),
-                            custom_prompt=rep_full_prompt,
-                            max_tokens=rep_max_tokens
-                        )
-                        rep_data = extract_json_from_text(raw_rep)
-                        rep_validated = validate_quiz_data(
-                            rep_data,
-                            course_name,
-                            topic_name,
+                            course_name=course_name,
+                            course_code=course_code,
                             concepts=concepts,
                             syllabus_context=syllabus_context,
-                            min_questions=1,
-                            difficulty_dist=difficulty_dist,
-                            course_code=course_code,
-                            competing_topics=competing_topics
+                            competing_topics=competing_topics,
+                            accepted_questions=preserved_questions,
+                            history_questions=history_questions_full,
+                            all_fingerprints=all_fingerprints
                         )
-                        for cand_q in rep_validated["questions"]:
-                            if len(current_unique) >= num_questions:
-                                break
-                            if (not any(is_question_near_duplicate(ex_q, cand_q, topic_name=topic_name)[0] for ex_q in current_unique) and
-                                not any(is_question_near_duplicate(hist_q, cand_q, topic_name=topic_name)[0] for hist_q in history_questions_full)):
-                                current_unique.append(cand_q)
-                        t_replenishment_total += (time.perf_counter() - t_rep_start)
-                        validated_quiz["questions"] = current_unique
-                        logger.info(
-                            f"[REPLENISHMENT SUCCESS round {rep_attempts}] provider={provider.name} total unique questions: {len(current_unique)}/{num_questions}"
-                        )
-                    except Exception as rep_err:
-                        logger.warning(f"[REPLENISHMENT FAILED round {rep_attempts}] provider={provider.name}: {rep_err}")
-
-
-                if len(validated_quiz["questions"]) < num_questions:
-                    if allow_partial:
-                        logger.info(
-                            f"[QUIZ GEN TOPIC ISOLATION] Provider {provider.name} generated {len(validated_quiz['questions'])} "
-                            f"verified topic-isolated questions for '{topic_name}' (returning without off-topic padding)."
-                        )
-                    else:
-                        raise ValueError(f"Provider {provider.name} generated only {len(validated_quiz['questions'])}/{num_questions} questions strictly isolating '{topic_name}'.")
-
-                # Novelty-aware candidate selection: Prioritize novel candidates from buffer BEFORE slicing
-                if (all_fingerprints or all_concepts or history_questions_full) and len(validated_quiz["questions"]) > num_questions:
-                    norm_fps = {normalise_text(fp) for fp in all_fingerprints if normalise_text(fp)}
-                    novel_pool = []
-                    collided_pool = []
-                    for cand_q in validated_quiz["questions"]:
-                        c_fp = normalise_text(cand_q.get("question", ""))
-                        is_collided = c_fp in norm_fps
-                        if not is_collided and history_questions_full:
-                            for h_q in history_questions_full:
-                                near_dup, _ = is_question_near_duplicate(h_q, cand_q, topic_name=topic_name)
-                                if near_dup:
-                                    is_collided = True
-                                    break
-                        if is_collided:
-                            collided_pool.append(cand_q)
+                        if valid_q:
+                            preserved_questions.append(valid_q)
                         else:
-                            novel_pool.append(cand_q)
+                            replacement_records.append({
+                                "question": cand.get("question", "") if isinstance(cand, dict) else str(cand),
+                                "reason": reason,
+                                "category": cat,
+                                "stage": "initial"
+                            })
+                    t_json_val_total += (time.perf_counter() - t_v_start)
+                    provider_used_name = provider.name
+                    initial_valid_count = len(preserved_questions)
 
-                    if len(novel_pool) >= num_questions:
-                        validated_quiz["questions"] = novel_pool[:num_questions]
-                    else:
-                        validated_quiz["questions"] = (novel_pool + collided_pool)[:num_questions]
-                else:
-                    validated_quiz["questions"] = validated_quiz["questions"][:num_questions]
+                # ── Phase 2: Selective Question Replacement (if needed < num_questions) ───
+                rep_round = 0
+                while len(preserved_questions) < num_questions and rep_round < MAX_REPLACEMENT_ROUNDS:
+                    needed = num_questions - len(preserved_questions)
+                    min_rep_time = REPLACEMENT_MIN_TIME_REQUIREMENTS.get(provider.name, DEFAULT_MIN_REPLACEMENT_TIMEOUT)
+                    if not deadline.can_attempt(min_rep_time):
+                        logger.warning(
+                            f"[DEADLINE] Insufficient time remaining ({deadline.remaining:.2f}s < {min_rep_time:.2f}s) "
+                            f"for selective replacement round {rep_round + 1}. Halting replacement loop."
+                        )
+                        break
 
-                # ── Comprehensive Novelty Evaluation (text + concepts) ─────────
-                novelty_result = evaluate_quiz_novelty(
-                    questions=validated_quiz["questions"],
-                    history_fingerprints=all_fingerprints,
-                    history_concepts=all_concepts,
-                    history_questions=history_questions_full,
-                    topic_name=topic_name
-                )
-
-                is_novel = novelty_result["is_fully_novel"]
-                flagged_indices = novelty_result["all_flagged_indices"]
-                text_dup_indices = novelty_result.get("text_duplicate_indices", [])
-                novel_count = novelty_result["novel_count"]
-
-                if novel_count > best_novelty_score and (len(validated_quiz["questions"]) == num_questions or allow_partial):
-                    best_quiz = validated_quiz
-                    best_novelty_score = novel_count
-
-                if not is_novel:
-                    novelty_repair_count += 1
-                    logger.warning(
-                        f"[NOVELTY EVAL] provider={provider.name} "
-                        f"novel={novel_count}/{num_questions}, flagged={len(flagged_indices)} "
-                        f"reasons={novelty_result['duplicate_reasons'][:3]} "
-                        f"Repair attempt {novelty_repair_count}/{MAX_NOVELTY_REPAIR_ATTEMPTS}."
+                    rep_round += 1
+                    rep_timeout = deadline.allocate_timeout(
+                        desired_timeout=min(deadline.remaining * 0.8, 10.0),
+                        min_required=min_rep_time
                     )
 
-                    # Targeted Replacement: Retain novel questions and replace all flagged duplicate questions (Level 1, 2, 3)
-                    if flagged_indices and novelty_repair_count <= MAX_NOVELTY_REPAIR_ATTEMPTS:
-                        elapsed_now = time.perf_counter() - start_time
-                        repair_budget = overall_deadline - elapsed_now
-                        min_repair_budget = 8.0 if provider.name == "gemini" else 2.5
-                        if repair_budget > min_repair_budget:
-                            try:
-                                novel_kept = [q for idx, q in enumerate(validated_quiz["questions"]) if idx not in flagged_indices]
-                                needed_novel = num_questions - len(novel_kept)
-                                missing_difficulties = [validated_quiz["questions"][idx].get("difficulty", "Medium") for idx in flagged_indices]
-                                rejected_questions = [validated_quiz["questions"][idx].get("question", "") for idx in flagged_indices]
-                                if needed_novel > 0:
-                                    logger.info(
-                                        f"[TARGETED REPLACEMENT] Retaining {len(novel_kept)} novel questions. Requesting {needed_novel} replacements..."
-                                    )
-                                    concept_str = ", ".join(concepts) if concepts else topic_name
-                                    rejected_block = "\n".join(f"  - [REJECTED DUPLICATE]: {q}" for q in rejected_questions if q)
-                                    avoid_block = "\n".join(f"  - [ALREADY COVERED]: {q.get('question', '')}" for q in (novel_kept + history_questions_full[:8]) if q.get("question"))
-                                    diff_req_str = ", ".join(missing_difficulties)
-                                    tr_prompt = f"""You are an expert academic AI quiz generator for {course_code} - {course_name}.
-Selected Topic: {topic_name}
-Authorized Syllabus Concepts: {concept_str}
-
-STRICT TOPIC MANDATE: Every question must test ONLY '{topic_name}'.
-
-We need EXACTLY {needed_novel} additional replacement multiple-choice questions for '{topic_name}' testing different angles/learning objectives.
-Required difficulty distribution for replacements: {diff_req_str}.
-
-DO NOT duplicate, rephrase, or test the same learning objective as any of these questions:
-{rejected_block}
-{avoid_block}
-
-REQUIREMENTS:
-- Return EXACTLY {needed_novel} questions strictly assessing '{topic_name}'.
-- Each question must have 4 distinct options (A, B, C, D) with non-empty text.
-- Valid correct_answer letter (A, B, C, or D).
-- Specify the tested concept in the 'concept' field.
-- Concise step-by-step 'explanation' for why the correct answer is correct.
-- Return ONLY valid JSON:
-{{
-  "questions": [
-    {{
-      "question": "Question text directly testing {topic_name}",
-      "options": {{"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D"}},
-      "correct_answer": "A",
-      "difficulty": "{missing_difficulties[0] if missing_difficulties else 'Medium'}",
-      "concept": "{concepts[0] if concepts else topic_name}",
-      "explanation": "Concise step-by-step reason why A is correct."
-    }}
-  ]
-}}"""
-                                    raw_tr = provider.generate_quiz_raw(
-                                        course_code=course_code,
-                                        course_name=course_name,
-                                        topic_name=topic_name,
-                                        syllabus_context=syllabus_context,
-                                        timeout_seconds=min(repair_budget * 0.8, 10.0),
-                                        custom_prompt=tr_prompt,
-                                        max_tokens=min(1200, 200 * needed_novel + 100)
-                                    )
-                                    data_tr = extract_json_from_text(raw_tr)
-                                    val_tr = validate_quiz_data(
-                                        data_tr,
-                                        course_name,
-                                        topic_name,
-                                        concepts=concepts,
-                                        syllabus_context=syllabus_context,
-                                        min_questions=1,
-                                        difficulty_dist=difficulty_dist,
-                                        course_code=course_code,
-                                        competing_topics=competing_topics
-                                    )
-                                    for cand_q in val_tr.get("questions", []):
-                                        if len(novel_kept) >= num_questions:
-                                            break
-                                        if (not any(is_question_near_duplicate(ex_q, cand_q, topic_name=topic_name)[0] for ex_q in novel_kept) and
-                                            not any(is_question_near_duplicate(hist_q, cand_q, topic_name=topic_name)[0] for hist_q in history_questions_full)):
-                                            if missing_difficulties:
-                                                cand_q["difficulty"] = missing_difficulties.pop(0)
-                                            novel_kept.append(cand_q)
-                                    if len(novel_kept) == num_questions:
-                                        validated_quiz["questions"] = novel_kept
-                                        novelty_result = evaluate_quiz_novelty(
-                                            questions=validated_quiz["questions"],
-                                            history_fingerprints=all_fingerprints,
-                                            history_concepts=all_concepts,
-                                            history_questions=history_questions_full,
-                                            topic_name=topic_name
-                                        )
-                                        is_novel = novelty_result["is_fully_novel"]
-                                        novel_count = novelty_result["novel_count"]
-                                        if novel_count > best_novelty_score:
-                                            best_quiz = validated_quiz
-                                            best_novelty_score = novel_count
-                                        logger.info(
-                                            f"[TARGETED REPLACEMENT SUCCESS] provider={provider.name} "
-                                            f"improved novelty to {novel_count}/{num_questions} (is_novel={is_novel})"
-                                        )
-                            except Exception as tr_err:
-                                logger.warning(f"[TARGETED REPLACEMENT ERROR] provider={provider.name}: {tr_err}")
-
-                    elif novelty_repair_count <= MAX_NOVELTY_REPAIR_ATTEMPTS:
-                        elapsed_now = time.perf_counter() - start_time
-                        repair_budget = overall_deadline - elapsed_now
-                        min_repair_budget = 10.0 if provider.name == "gemini" else 4.5
-                        if repair_budget > min_repair_budget:
-                            try:
-                                # Specific repair prompt targeting repeated concepts
-                                reasons_str = "\n".join(f"- {r}" for r in novelty_result["duplicate_reasons"][:5])
-                                e_c = difficulty_dist.get("Easy", max(1, round(num_questions * 0.4)))
-                                m_c = difficulty_dist.get("Medium", max(1, round(num_questions * 0.4)))
-                                h_c = difficulty_dist.get("Hard", num_questions - e_c - m_c)
-                                repair_feedback = (
-                                    f"CRITICAL REPAIR REQUIRED FOR RETAKE #{attempt_number}:\n"
-                                    f"The previously generated questions duplicated previous questions or concepts:\n"
-                                    f"{reasons_str}\n\n"
-                                    f"You MUST replace the questions at 1-based indices {[i + 1 for i in flagged_indices]} with completely NEW questions "
-                                    f"testing DIFFERENT learning objectives, application problems, or circuit examples from the topic context: '{syllabus_context}'.\n"
-                                    f"Return all {num_questions} questions in valid JSON meeting the required {e_c} Easy, {m_c} Medium, {h_c} Hard distribution.\n"
-                                )
-                                repair_prompt = base_prompt + "\n\n" + repair_feedback + "\n\n" + novelty_block
-
-                                if provider.name == "gemini":
-                                    repair_timeout = min(repair_budget, max(repair_budget * 0.8, 10.0))
-                                else:
-                                    repair_timeout = min(repair_budget * 0.8, 9.0)
-
-                                raw_repair = provider.generate_quiz_raw(
-                                    course_code=course_code,
-                                    course_name=course_name,
-                                    topic_name=topic_name,
-                                    syllabus_context=syllabus_context,
-                                    timeout_seconds=repair_timeout,
-                                    custom_prompt=repair_prompt
-                                )
-                                data_repair = extract_json_from_text(raw_repair)
-                                validated_repair = validate_quiz_data(
-                                    data_repair,
-                                    course_name,
-                                    topic_name,
-                                    concepts=concepts,
-                                    syllabus_context=syllabus_context,
-                                    difficulty_dist=difficulty_dist,
-                                    course_code=course_code,
-                                    competing_topics=competing_topics,
-                                    expected_count=num_questions
-                                )
-                                if len(validated_repair.get("questions", [])) == num_questions:
-                                    novelty_repair = evaluate_quiz_novelty(
-                                        questions=validated_repair["questions"],
-                                        history_fingerprints=all_fingerprints,
-                                        history_concepts=all_concepts,
-                                        history_questions=history_questions_full,
-                                        topic_name=topic_name
-                                    )
-
-                                    if novelty_repair["novel_count"] >= novel_count:
-                                        validated_quiz = validated_repair
-                                        is_novel = novelty_repair["is_fully_novel"]
-                                        novel_count = novelty_repair["novel_count"]
-                                        if novel_count > best_novelty_score:
-                                            best_quiz = validated_quiz
-                                            best_novelty_score = novel_count
-                                        logger.info(
-                                            f"[NOVELTY REPAIR RESULT] provider={provider.name} "
-                                            f"improved novelty to {novel_count}/{num_questions} (is_novel={is_novel})"
-                                        )
-                            except Exception as repair_err:
-                                logger.warning(f"[NOVELTY REPAIR ERROR] provider={provider.name}: {repair_err}")
-
-                # ── Ensure all questions have valid difficulty metadata ───────
-                expected_difficulties = []
-                for diff, count in difficulty_dist.items():
-                    expected_difficulties.extend([diff] * count)
-                for index, q in enumerate(validated_quiz["questions"][:num_questions]):
-                    if not q.get("difficulty") or q["difficulty"] not in ("Easy", "Medium", "Hard"):
-                        if index < len(expected_difficulties):
-                            q["difficulty"] = expected_difficulties[index]
+                    # Compute missing difficulties
+                    curr_diffs = [q.get("difficulty", "Medium") for q in preserved_questions]
+                    expected_diff_list = []
+                    for diff_name, count in difficulty_dist.items():
+                        expected_diff_list.extend([diff_name] * count)
+                    missing_diffs = []
+                    for exp_d in expected_diff_list:
+                        if exp_d in curr_diffs:
+                            curr_diffs.remove(exp_d)
                         else:
-                            q["difficulty"] = "Medium"
+                            missing_diffs.append(exp_d)
 
-                validated_quiz["recommended_difficulty"] = recommended_difficulty
-                validated_quiz["adaptive_applied"] = adaptive_applied
-                validated_quiz["adaptive_explanation"] = adaptive_explanation
-                validated_quiz["adaptive_metadata"] = adaptive_decision
-                validated_quiz["attempt_id"] = attempt_id
-                validated_quiz["attempt_number"] = attempt_number
-                validated_quiz["novelty_repairs"] = novelty_repair_count
-                validated_quiz["provider_used"] = provider.name
-                validated_quiz["novelty_warning"] = not is_novel
-                validated_quiz["novel_count"] = novel_count
+                    tr_prompt = build_selective_replacement_prompt(
+                        course_code=course_code,
+                        course_name=course_name,
+                        topic_name=topic_name,
+                        needed=needed,
+                        preserved_questions=preserved_questions,
+                        rejected_records=replacement_records,
+                        history_questions=history_questions_full,
+                        missing_difficulties=missing_diffs,
+                        concepts=concepts,
+                        disallowed_topics=disallowed_topics,
+                        syllabus_context=syllabus_context
+                    )
 
-                total_duration = time.perf_counter() - start_time
-                timing_metrics = {
-                    "db_context_sec": round(t_db_context, 3),
-                    "llm_primary_sec": round(t_llm_primary_total, 3),
-                    "json_validation_sec": round(t_json_val_total, 3),
-                    "replenishment_sec": round(t_replenishment_total, 3),
-                    "novelty_repair_sec": round(t_novelty_repair_total, 3),
-                    "total_service_sec": round(total_duration, 3),
-                }
-                validated_quiz["timing_metrics"] = timing_metrics
-                logger.info(
-                    f"[STAGE TIMING] quiz_gen attempt_id={attempt_id} "
-                    f"db_context={t_db_context:.3f}s llm_primary={t_llm_primary_total:.3f}s "
-                    f"json_validation={t_json_val_total:.3f}s replenishment={t_replenishment_total:.3f}s "
-                    f"novelty_repair={t_novelty_repair_total:.3f}s total_service={total_duration:.3f}s"
-                )
-                logger.info(
-                    f"[QUIZ GEN SUCCESS] provider={provider.name} course={course_code} "
-                    f"topic='{topic_name}' attempt=#{attempt_number} questions={len(validated_quiz['questions'])} "
-                    f"total_duration={total_duration:.2f}s adaptive={recommended_difficulty} "
-                    f"novelty={novel_count}/{num_questions} novel (warning={not is_novel})"
-                )
-                metrics.record_provider_attempt(provider.name, success=True, duration=t_llm_primary_total)
-                return validated_quiz
+                    logger.info(
+                        f"[SELECTIVE REPLACEMENT round {rep_round}] provider={provider.name} "
+                        f"preserved={len(preserved_questions)}/{num_questions}, requesting {needed} replacements..."
+                    )
+                    t_rep_start = time.perf_counter()
+                    raw_rep = provider.generate_quiz_raw(
+                        course_code=course_code,
+                        course_name=course_name,
+                        topic_name=topic_name,
+                        syllabus_context=syllabus_context,
+                        timeout_seconds=rep_timeout,
+                        custom_prompt=tr_prompt
+                    )
+                    replacement_calls += 1
+                    total_provider_calls += 1
+                    t_replenishment_total += (time.perf_counter() - t_rep_start)
+
+                    data_rep = extract_json_from_text(raw_rep)
+                    rep_candidates = extract_candidate_questions(data_rep)
+
+                    for cand in rep_candidates:
+                        if len(preserved_questions) >= num_questions:
+                            break
+                        valid_q, reason, cat = classify_and_validate_candidate(
+                            cand=cand,
+                            topic_name=topic_name,
+                            course_name=course_name,
+                            course_code=course_code,
+                            concepts=concepts,
+                            syllabus_context=syllabus_context,
+                            competing_topics=competing_topics,
+                            accepted_questions=preserved_questions,
+                            history_questions=history_questions_full,
+                            all_fingerprints=all_fingerprints
+                        )
+                        if valid_q:
+                            if missing_diffs:
+                                valid_q["difficulty"] = missing_diffs.pop(0)
+                            preserved_questions.append(valid_q)
+                        else:
+                            replacement_records.append({
+                                "question": cand.get("question", "") if isinstance(cand, dict) else str(cand),
+                                "reason": reason,
+                                "category": cat,
+                                "stage": f"replacement_round_{rep_round}"
+                            })
+
+                # ── Phase 3: Finalization if requested count achieved or allow_partial ──
+                if len(preserved_questions) >= num_questions or (allow_partial and len(preserved_questions) > 0 and rep_round >= MAX_REPLACEMENT_ROUNDS):
+                    final_questions = preserved_questions[:num_questions]
+                    expected_difficulties = []
+                    for diff, count in difficulty_dist.items():
+                        expected_difficulties.extend([diff] * count)
+                    for index, q in enumerate(final_questions):
+                        if not q.get("difficulty") or q["difficulty"] not in ("Easy", "Medium", "Hard"):
+                            if index < len(expected_difficulties):
+                                q["difficulty"] = expected_difficulties[index]
+                            else:
+                                q["difficulty"] = "Medium"
+
+                    total_duration = time.perf_counter() - start_time
+                    timing_metrics = {
+                        "db_context_sec": round(t_db_context, 3),
+                        "llm_primary_sec": round(t_llm_primary_total, 3),
+                        "json_validation_sec": round(t_json_val_total, 3),
+                        "replenishment_sec": round(t_replenishment_total, 3),
+                        "novelty_repair_sec": round(t_novelty_repair_total, 3),
+                        "total_service_sec": round(total_duration, 3),
+                        "deadline_remaining_sec": round(deadline.remaining, 3)
+                    }
+
+                    actual_replaced = max(0, len(final_questions) - initial_valid_count)
+                    actual_preserved = len(final_questions) - actual_replaced
+
+                    validated_quiz = {
+                        "subject": course_name,
+                        "topic": topic_name,
+                        "questions": final_questions,
+                        "unique_count": len(final_questions),
+                        "recommended_difficulty": recommended_difficulty,
+                        "adaptive_applied": adaptive_applied,
+                        "adaptive_explanation": adaptive_explanation,
+                        "adaptive_metadata": adaptive_decision,
+                        "attempt_id": attempt_id,
+                        "attempt_number": attempt_number,
+                        "provider_used": provider_used_name or provider.name,
+                        "novelty_repairs": replacement_calls,
+                        "novelty_warning": False,
+                        "novel_count": len(final_questions),
+                        "timing_metrics": timing_metrics,
+                        # Module 3 selective replacement and deadline metrics
+                        "initial_provider_calls": initial_provider_calls,
+                        "additional_replacement_calls": replacement_calls,
+                        "total_provider_calls": total_provider_calls,
+                        "preserved_count": actual_preserved,
+                        "replaced_count": actual_replaced,
+                        "replacement_records": replacement_records
+                    }
+                    metrics.record_provider_attempt(validated_quiz["provider_used"], success=True, duration=t_llm_primary_total)
+                    return validated_quiz
 
             except ProviderConfigError as pce:
                 last_error = pce
                 all_provider_errors.append(pce)
                 metrics.record_provider_attempt(provider.name, success=False, duration=time.perf_counter() - t_p_start, error=sanitize_error_text(str(pce)))
-                logger.error(
-                    f"[PROVIDER CONFIG ERROR] provider={provider.name} "
-                    f"category={pce.category} retryable={pce.retryable}: {pce}"
-                )
+                logger.error(f"[PROVIDER CONFIG ERROR] provider={provider.name}: {pce}")
                 if len(configured_providers) == 1:
                     raise AIConfigError(str(pce), category=pce.category) from pce
                 break
+
             except ValueError as ve:
                 last_error = ve
                 all_provider_errors.append(ve)
-                time_left = overall_deadline - (time.perf_counter() - start_time)
-                if attempt_idx < max_retries and time_left > 4.5:
-                    logger.warning(
-                        f"[PROVIDER MALFORMED OUTPUT] provider={provider.name} "
-                        f"attempt={attempt_idx + 1}/{max_retries + 1}: {ve}. Retrying..."
-                    )
+                time_left = deadline.remaining
+                if attempt_idx < max_retries and time_left > min_required_time:
+                    logger.warning(f"[PROVIDER MALFORMED OUTPUT] provider={provider.name} attempt={attempt_idx + 1}: {ve}. Retrying...")
                     continue
                 metrics.record_provider_attempt(provider.name, success=False, duration=time.perf_counter() - t_p_start, error=sanitize_error_text(str(ve)))
-                logger.warning(
-                    f"[PROVIDER FAILED] provider={provider.name} category=MALFORMED_OUTPUT: {ve}"
-                )
                 break
+
             except (ProviderUnavailableError, ProviderError) as pe:
                 last_error = pe
                 all_provider_errors.append(pe)
-                cat = getattr(pe, "category", "ERROR")
-                retryable = getattr(pe, "retryable", False)
-                has_next = (p_idx + 1) < num_configured
-                next_provider_name = configured_providers[p_idx + 1].name if has_next else "none"
                 clean_pe = sanitize_error_text(str(pe))
-
+                cat = getattr(pe, "category", "ERROR")
                 metrics.record_provider_attempt(provider.name, success=False, duration=time.perf_counter() - t_p_start, error=clean_pe)
-                logger.warning(
-                    f"[PROVIDER FAILED] provider={provider.name} "
-                    f"category={cat} retryable={retryable} "
-                    f"attempt={attempt_idx + 1}/{max_retries + 1} "
-                    f"proceeding_to_next_provider={has_next} (next={next_provider_name}): {clean_pe}"
-                )
+                logger.warning(f"[PROVIDER FAILED] provider={provider.name} category={cat}: {clean_pe}")
 
-                # Bounded retry with exponential backoff for temporary errors (503, 429, 500, 502) if time permits
-                time_left_now = overall_deadline - (time.perf_counter() - start_time)
-                min_time_needed = 10.0 if provider.name == "gemini" else (4.0 if provider.name == "nvidia" else 3.0)
-                is_transient = retryable or any(term in cat for term in ["SERVICE_UNAVAILABLE", "RATE_LIMIT", "SERVER_ERROR"])
-
-                # If there are fallback providers available, prefer fallback sequence to avoid duplicate requests;
-                # Only retry when no fallback provider exists (sole provider or last provider in sequence).
-                if not has_next and is_transient and attempt_idx < max_retries and time_left_now > min_time_needed + 1.0:
+                time_left_now = deadline.remaining
+                has_next = (p_idx + 1) < num_configured
+                if not has_next and getattr(pe, "retryable", False) and attempt_idx < max_retries and time_left_now > min_required_time + 1.0:
                     import random
                     backoff = min(1.5, 0.4 * (2 ** attempt_idx)) + random.uniform(0.05, 0.15)
-                    if time_left_now > min_time_needed + backoff:
-                        logger.info(
-                            f"[PROVIDER RETRY] provider={provider.name} retrying after {backoff:.2f}s backoff "
-                            f"(attempt {attempt_idx + 2}/{max_retries + 1}, category={cat})..."
-                        )
+                    if time_left_now > min_required_time + backoff:
                         time.sleep(backoff)
                         continue
 
-                # If only 1 provider is configured and error is non-retryable permanent error, fail fast without masking
-                if (
-                    len(configured_providers) == 1
-                    and not getattr(pe, "retryable", False)
-                    and getattr(pe, "category", "") in ("MALFORMED_REQUEST_400", "MODEL_NOT_FOUND_404", "AUTH_CONFIG_ERROR")
-                ):
-                    raise AIConfigError(clean_pe, category=getattr(pe, "category", "CONFIG_ERROR")) from pe
+                if len(configured_providers) == 1 and not getattr(pe, "retryable", False) and cat in ("MALFORMED_REQUEST_400", "MODEL_NOT_FOUND_404", "AUTH_CONFIG_ERROR"):
+                    raise AIConfigError(clean_pe, category=cat) from pe
                 break
+
             except Exception as e:
                 last_error = e
                 all_provider_errors.append(e)
-                has_next = (p_idx + 1) < num_configured
-                next_provider_name = configured_providers[p_idx + 1].name if has_next else "none"
                 clean_err = sanitize_error_text(str(e))
-                logger.warning(
-                    f"[PROVIDER UNEXPECTED ERROR] provider={provider.name} "
-                    f"proceeding_to_next_provider={has_next} (next={next_provider_name}): {clean_err}"
-                )
+                logger.warning(f"[PROVIDER UNEXPECTED ERROR] provider={provider.name}: {clean_err}")
                 break
 
     # ── All providers failed ──────────────────────────────────────────────────
@@ -958,10 +941,13 @@ REQUIREMENTS:
 
     # Differentiate failure categories across multi-provider attempts
     if (
-        last_error_category in ("TIMEOUT", "CLIENT_TIMEOUT", "DEADLINE_EXCEEDED", "DEADLINE_EXCEEDED_504", "SERVER_ERROR_504", "REQUEST_TIMEOUT_408")
+        deadline.is_expired()
+        or not any(deadline.can_attempt(PROVIDER_MIN_TIME_REQUIREMENTS.get(p.name, DEFAULT_MIN_TIMEOUT)) for p in configured_providers)
+        or last_error_category in ("TIMEOUT", "CLIENT_TIMEOUT", "DEADLINE_EXCEEDED", "DEADLINE_EXCEEDED_504", "SERVER_ERROR_504", "REQUEST_TIMEOUT_408")
         or "504" in last_error_category
         or "deadline" in str(last_error).lower()
         or "timeout" in str(last_error).lower()
+        or any("timeout" in str(e).lower() or "deadline" in str(e).lower() for e in all_provider_errors)
     ):
         raise AITimeoutError(
             "Quiz generation timed out across configured providers. Please try again.",
@@ -994,8 +980,10 @@ REQUIREMENTS:
             retryable=True
         ) from last_error
 
+    unmet_count = len(preserved_questions)
+    prov_label = provider_used_name or (configured_providers[0].name if configured_providers else 'AI')
     raise AIServiceUnavailableError(
-        "Quiz generation is temporarily unavailable. Please try again shortly.",
+        f"Provider {prov_label} generated only {unmet_count}/{num_questions} questions strictly isolating '{topic_name}'. Please try again.",
         category="SERVICE_UNAVAILABLE",
         status_code=503,
         retryable=True

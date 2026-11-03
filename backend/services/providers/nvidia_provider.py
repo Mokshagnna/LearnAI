@@ -10,8 +10,10 @@ from services.providers.base import (
     ProviderConfigError,
     ProviderError,
     get_quiz_prompt,
-    get_analysis_prompt
+    get_analysis_prompt,
+    calculate_max_output_tokens
 )
+from services.quota_manager import quota_manager, parse_rate_limit, RateLimitType
 from services.logger_utils import sanitize_error_text
 
 logger = logging.getLogger("learnai.providers.nvidia")
@@ -204,6 +206,13 @@ class NvidiaProvider(BaseAIProvider):
                     logger.warning(f"[NVIDIA] Budget exhausted ({time_left:.1f}s left). Skipping model={current_model}.")
                     break
 
+                is_avail, remaining = quota_manager.is_model_available("nvidia", current_model, key_value)
+                if not is_avail:
+                    logger.info(
+                        f"[NVIDIA QUOTA SKIP] model={current_model} on cooldown ({remaining:.1f}s remaining). Skipping."
+                    )
+                    continue
+
                 call_start = time.perf_counter()
                 logger.info(f"[NVIDIA START] key={key_label} model={current_model} timeout={time_left:.1f}s")
 
@@ -218,7 +227,7 @@ class NvidiaProvider(BaseAIProvider):
                             {"role": "user", "content": prompt}
                         ],
                         temperature=0.4,
-                        max_tokens=1800,
+                        max_tokens=calculate_max_output_tokens(current_model, 11),
                         timeout=time_left
                     )
                     duration = time.perf_counter() - call_start
@@ -227,6 +236,11 @@ class NvidiaProvider(BaseAIProvider):
                         raise ValueError(f"NVIDIA model {current_model} returned an empty response.")
 
                     result_text = completion.choices[0].message.content.strip()
+
+                    if hasattr(completion.choices[0], "finish_reason") and completion.choices[0].finish_reason == "length":
+                        logger.warning(f"[NVIDIA TRUNCATION DETECTED] model={current_model} finish_reason='length'. Response may be incomplete.")
+
+                    quota_manager.record_success("nvidia", current_model, key_value)
                     logger.info(f"[NVIDIA SUCCESS] key={key_label} model={current_model} duration={duration:.2f}s len={len(result_text)}")
                     return result_text
 
@@ -269,6 +283,14 @@ class NvidiaProvider(BaseAIProvider):
                         raise ProviderError(f"NVIDIA error ({cat}): {clean_err}", category=cat) from None
 
                     # 4. Retryable error (rate-limit, temporary service, timeout, connection)
+                    if cat == "RATE_LIMIT_429" or "rate limit" in str(e).lower() or "429" in str(e):
+                        rl_info = parse_rate_limit("nvidia", e, getattr(e, "response", None))
+                        cooldown = quota_manager.record_rate_limit("nvidia", current_model, key_value, rl_info)
+                        logger.warning(
+                            f"[NVIDIA RATE LIMIT] model={current_model} type={rl_info.limit_type.value} "
+                            f"daily={rl_info.is_daily_exhaustion} cooldown={cooldown:.1f}s: {sanitize_error_text(e)}"
+                        )
+
                     logger.warning(
                         f"[NVIDIA MODEL FALLBACK] key={key_label} model={current_model} "
                         f"failed with retryable error (duration={duration:.2f}s, category={cat}): {sanitize_error_text(e)}. "
