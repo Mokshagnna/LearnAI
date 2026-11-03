@@ -124,7 +124,15 @@ class GroqProvider(BaseAIProvider):
         if fallback_model and fallback_model not in raw_candidates:
             raw_candidates.append(fallback_model)
 
-        for active_model in [DEFAULT_GROQ_MODEL, DEFAULT_GROQ_FALLBACK, "openai/gpt-oss-20b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile"]:
+        for active_model in [
+            DEFAULT_GROQ_MODEL,
+            DEFAULT_GROQ_FALLBACK,
+            "qwen/qwen3.8-27b",
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+            "allam-2-7b",
+            "llama-3.3-70b-versatile"
+        ]:
             if active_model not in raw_candidates and active_model not in KNOWN_INVALID_GROQ_MODELS:
                 raw_candidates.append(active_model)
 
@@ -160,13 +168,14 @@ class GroqProvider(BaseAIProvider):
                 call_start = time.perf_counter()
                 try:
                     logger.info(f"[GROQ START] key={key_label} model={current_model} timeout={time_left:.1f}s")
+                    call_max_tokens = max(max_tokens, 4000) if ("gpt-oss" in current_model.lower() and max_tokens > 1500) else max_tokens
                     create_kwargs = {
                         "model": current_model,
                         "messages": [
                             {"role": "user", "content": prompt}
                         ],
                         "temperature": 0.3,
-                        "max_tokens": max_tokens,
+                        "max_tokens": call_max_tokens,
                         "timeout": time_left
                     }
                     if "json" in prompt.lower() and current_model not in self._unsupported_json_format_models:
