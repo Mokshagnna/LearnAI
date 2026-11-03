@@ -67,16 +67,15 @@ class GroqProvider(BaseAIProvider):
         if not keys_to_try:
             raise ProviderConfigError("GROQ_API_KEY is not configured.", category="MISSING_CREDENTIALS")
 
-        # Verified active Groq models: llama-3.3-70b-versatile (primary, 12k TPM), llama-3.1-8b-instant (fallback, 6k TPM)
-        DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
-        DEFAULT_GROQ_FALLBACK = "llama-3.1-8b-instant"
+        # Verified active Groq models: llama-3.1-8b-instant (primary ultra-fast, 560 tok/s), llama-3.3-70b-versatile (fallback, 12k TPM)
+        DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+        DEFAULT_GROQ_FALLBACK = "llama-3.3-70b-versatile"
         KNOWN_INVALID_GROQ_MODELS = {
             "llama3-70b-8192",
             "llama3-8b-8192",
             "llama-3.2-90b-text-preview",
             "mixtral-8x7b-32768",
         }
-
         configured_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip()
         fallback_model = (os.getenv("GROQ_FALLBACK_MODEL") or DEFAULT_GROQ_FALLBACK).strip()
 
@@ -107,7 +106,7 @@ class GroqProvider(BaseAIProvider):
 
         for key_value, key_label in keys_to_try:
             time_left_for_key = timeout_seconds - (time.perf_counter() - overall_start)
-            if time_left_for_key < 2.5:
+            if time_left_for_key < 2.0:
                 logger.warning(f"[GROQ] Budget exhausted ({time_left_for_key:.1f}s left). Cannot try key={key_label}.")
                 break
             client = self._get_client(time_left_for_key, api_key=key_value)
@@ -116,7 +115,7 @@ class GroqProvider(BaseAIProvider):
 
             for m_idx, current_model in enumerate(candidate_models):
                 time_left = timeout_seconds - (time.perf_counter() - overall_start)
-                if time_left < 2.5:
+                if time_left < 2.0:
                     break
                 call_start = time.perf_counter()
                 try:

@@ -660,7 +660,7 @@ class TestGroqGptOssReasoningAndCascade:
             assert res is not None
             assert any("[GROQ CONFIG WARNING]" in record.message for record in caplog.records)
             called_models = [c[1]["model"] for c in mock_client.chat.completions.create.call_args_list]
-            assert "llama-3.3-70b-versatile" in called_models
+            assert "llama-3.1-8b-instant" in called_models
 
     def test_gemini_afc_and_response_parsing(self, monkeypatch):
         """Verifies Gemini handles responses and AFC correctly without crashing."""

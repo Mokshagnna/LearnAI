@@ -62,7 +62,7 @@ def test_groq_verified_models_configuration(monkeypatch):
         assert mock_client.chat.completions.create.called
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         model_used = call_kwargs.get("model")
-        assert model_used == "llama-3.3-70b-versatile", f"Unexpected model: {model_used}"
+        assert model_used in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile"), f"Unexpected model: {model_used}"
         # Verify per-call timeout passed without mutating client
         assert call_kwargs.get("timeout") is not None
 

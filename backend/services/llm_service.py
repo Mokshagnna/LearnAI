@@ -43,6 +43,7 @@ from services.novelty import (
     is_question_near_duplicate
 )
 from services.logger_utils import sanitize_error_text
+from services.metrics import metrics
 
 # Ensure backend/.env is reliably loaded regardless of working directory
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -373,6 +374,7 @@ def generate_quiz(
                 f"fallback_count={p_idx}"
             )
 
+            t_p_start = time.perf_counter()
             try:
                 base_prompt = get_quiz_prompt(
                     course_code=course_code,
@@ -756,11 +758,13 @@ REQUIREMENTS:
                     f"total_duration={total_duration:.2f}s adaptive={recommended_difficulty} "
                     f"novelty={novel_count}/{num_questions} novel (warning={not is_novel})"
                 )
+                metrics.record_provider_attempt(provider.name, success=True, duration=t_llm_primary_total)
                 return validated_quiz
 
             except ProviderConfigError as pce:
                 last_error = pce
                 all_provider_errors.append(pce)
+                metrics.record_provider_attempt(provider.name, success=False, duration=time.perf_counter() - t_p_start, error=sanitize_error_text(str(pce)))
                 logger.error(
                     f"[PROVIDER CONFIG ERROR] provider={provider.name} "
                     f"category={pce.category} retryable={pce.retryable}: {pce}"
@@ -778,6 +782,7 @@ REQUIREMENTS:
                         f"attempt={attempt_idx + 1}/{max_retries + 1}: {ve}. Retrying..."
                     )
                     continue
+                metrics.record_provider_attempt(provider.name, success=False, duration=time.perf_counter() - t_p_start, error=sanitize_error_text(str(ve)))
                 logger.warning(
                     f"[PROVIDER FAILED] provider={provider.name} category=MALFORMED_OUTPUT: {ve}"
                 )
@@ -791,6 +796,7 @@ REQUIREMENTS:
                 next_provider_name = configured_providers[p_idx + 1].name if has_next else "none"
                 clean_pe = sanitize_error_text(str(pe))
 
+                metrics.record_provider_attempt(provider.name, success=False, duration=time.perf_counter() - t_p_start, error=clean_pe)
                 logger.warning(
                     f"[PROVIDER FAILED] provider={provider.name} "
                     f"category={cat} retryable={retryable} "

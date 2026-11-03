@@ -5,7 +5,7 @@ Thread-safe, in-memory AI request and performance metrics tracker for LearnAI.
 
 Tracks:
 - Total quiz requests (successes, failures, rate-limited)
-- Per-provider statistics: attempts, successes, failures, fallbacks, average response latency
+- Per-provider statistics: attempts, successes, failures, fallbacks, average response latency, and last error
 - Total submissions and evaluation counts
 
 Never logs or stores:
@@ -14,7 +14,7 @@ Never logs or stores:
 """
 import time
 import threading
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class MetricsCollector:
@@ -27,36 +27,54 @@ class MetricsCollector:
         self._rate_limited_quiz_requests = 0
         self._total_submissions = 0
 
-        # provider_name -> {attempts, successes, failures, total_duration, avg_latency}
+        # provider_name -> {attempts, successes, failures, total_duration, avg_latency, last_error}
         self._provider_stats: Dict[str, Dict[str, Any]] = {
-            "groq": {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0},
-            "nvidia": {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0},
-            "gemini": {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0},
+            "groq": {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0, "last_error": None},
+            "nvidia": {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0, "last_error": None},
+            "gemini": {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0, "last_error": None},
+            "cloudflare": {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0, "last_error": None},
         }
 
     def record_quiz_request(self):
         with self._lock:
             self._total_quiz_requests += 1
 
+    def record_provider_attempt(self, provider: str, success: bool, duration: float, error: Optional[str] = None):
+        with self._lock:
+            p = provider.lower()
+            if p not in self._provider_stats:
+                self._provider_stats[p] = {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0, "last_error": None}
+            self._provider_stats[p]["attempts"] += 1
+            if success:
+                self._provider_stats[p]["successes"] += 1
+            else:
+                self._provider_stats[p]["failures"] += 1
+                if error:
+                    self._provider_stats[p]["last_error"] = str(error)[:200]
+            self._provider_stats[p]["total_duration"] += duration
+
     def record_quiz_success(self, provider: str, duration: float):
         with self._lock:
             self._successful_quiz_requests += 1
             p = provider.lower()
             if p not in self._provider_stats:
-                self._provider_stats[p] = {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0}
-            self._provider_stats[p]["attempts"] += 1
-            self._provider_stats[p]["successes"] += 1
-            self._provider_stats[p]["total_duration"] += duration
+                self._provider_stats[p] = {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0, "last_error": None}
+            # Only record if record_provider_attempt hasn't already recorded this provider attempt
+            if self._provider_stats[p]["attempts"] == 0:
+                self._provider_stats[p]["attempts"] += 1
+                self._provider_stats[p]["successes"] += 1
+                self._provider_stats[p]["total_duration"] += duration
 
     def record_quiz_failure(self, provider: str, duration: float):
         with self._lock:
             self._failed_quiz_requests += 1
             p = provider.lower()
             if p not in self._provider_stats:
-                self._provider_stats[p] = {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0}
-            self._provider_stats[p]["attempts"] += 1
-            self._provider_stats[p]["failures"] += 1
-            self._provider_stats[p]["total_duration"] += duration
+                self._provider_stats[p] = {"attempts": 0, "successes": 0, "failures": 0, "total_duration": 0.0, "last_error": None}
+            if self._provider_stats[p]["attempts"] == 0 and p != "all":
+                self._provider_stats[p]["attempts"] += 1
+                self._provider_stats[p]["failures"] += 1
+                self._provider_stats[p]["total_duration"] += duration
 
     def record_rate_limit_exceeded(self):
         with self._lock:
@@ -80,7 +98,8 @@ class MetricsCollector:
                     "attempts": attempts,
                     "successes": data["successes"],
                     "failures": data["failures"],
-                    "avg_latency_seconds": avg_latency
+                    "avg_latency_seconds": avg_latency,
+                    "last_error": data.get("last_error")
                 }
 
             return {
@@ -107,6 +126,7 @@ class MetricsCollector:
                 data["successes"] = 0
                 data["failures"] = 0
                 data["total_duration"] = 0.0
+                data["last_error"] = None
 
 
 metrics = MetricsCollector()

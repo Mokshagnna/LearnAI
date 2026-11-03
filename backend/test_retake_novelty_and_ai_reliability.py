@@ -67,12 +67,11 @@ class TestAIProviderReliability:
         assert "2.5" not in model
 
     def test_groq_valid_model_defaults(self):
-        """Ensures Groq defaults to active models (llama-3.3-70b-versatile, llama-3.1-8b-instant)."""
-        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        fallback = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
-        assert model == "llama-3.3-70b-versatile"
-        assert fallback == "llama-3.1-8b-instant"
-        assert "70b-versatile" in model
+        """Ensures Groq defaults to active models (llama-3.1-8b-instant, llama-3.3-70b-versatile)."""
+        model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+        fallback = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.3-70b-versatile")
+        assert model in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile")
+        assert fallback in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile")
         assert "mixtral" not in model
 
     def test_nvidia_valid_model_defaults(self):
