@@ -1,6 +1,8 @@
-﻿# LearnAI — AI-Powered Adaptive Quiz Platform
+# LearnAI — Agentic-AI Notes to Quiz Generator
 
-**LearnAI** is a syllabus-grounded, adaptive quiz platform for B.Tech CSE (AI & ML) students at VFSTR Deemed to be University. Students select a course and topic from the R22 curriculum, and the backend generates a fresh 10-question multiple-choice quiz using one of three configurable AI providers. After submission, the system provides deterministic scoring, concept-level performance analysis, and AI-generated revision feedback. Subsequent retakes receive difficulty-adapted question sets that avoid previously seen questions and concepts.
+**LearnAI** is an agentic, syllabus-grounded adaptive quiz platform for B.Tech CSE (AI & ML) students at VFSTR Deemed to be University. Students register, log in, upload personal study notes (PDF, DOCX, PPTX, or plain text), and select a course + topic from the full R22 curriculum. The backend generates a fresh 10-question multiple-choice quiz driven by real AI inference across a resilient multi-provider chain (Groq → Cloudflare Workers AI → NVIDIA → Gemini). After submission, the system performs deterministic server-side scoring, concept-level performance analysis, and AI-generated revision feedback. Subsequent retakes receive difficulty-adapted question sets that explicitly avoid previously seen questions and concepts.
+
+> **Live deployment:** [https://learnai-fzgd.onrender.com](https://learnai-fzgd.onrender.com)
 
 ---
 
@@ -18,13 +20,14 @@
 10. [Quiz Generation Workflow](#quiz-generation-workflow)
 11. [Evaluation and Adaptive Learning](#evaluation-and-adaptive-learning)
 12. [Novelty and Deduplication Engine](#novelty-and-deduplication-engine)
-13. [Database](#database)
-14. [Error Handling and Troubleshooting](#error-handling-and-troubleshooting)
-15. [Testing and Verification](#testing-and-verification)
-16. [Security and Git Practices](#security-and-git-practices)
-17. [Deployment](#deployment)
-18. [Future Improvements](#future-improvements)
-19. [Repository](#repository)
+13. [Notes Upload & Topic Isolation](#notes-upload--topic-isolation)
+14. [Database](#database)
+15. [Error Handling and Troubleshooting](#error-handling-and-troubleshooting)
+16. [Testing and Verification](#testing-and-verification)
+17. [Security and Git Practices](#security-and-git-practices)
+18. [Deployment](#deployment)
+19. [Future Improvements](#future-improvements)
+20. [Repository](#repository)
 
 ---
 
@@ -32,23 +35,31 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Course and topic selection from R22 syllabus | Implemented | 55 courses, `quiz_topics` index per course |
-| AI quiz generation (10 MCQs per quiz) | Implemented | Multi-provider with configurable priority |
-| Difficulty distribution (Easy / Medium / Hard) | Implemented | Adaptive based on student history |
-| Answer evaluation and scoring | Implemented | Deterministic Python logic |
-| Concept-wise performance breakdown | Implemented | Correct/total per concept |
-| Difficulty-wise performance breakdown | Implemented | Correct/total per difficulty level |
-| Strong and weak concept identification | Implemented | Threshold: < 60% accuracy = weak |
-| AI-generated revision feedback | Implemented | Summary, revision guidance, next-step recommendation |
-| Quiz retakes with fresh questions | Implemented | New quiz_id on every call |
-| Question novelty / deduplication | Implemented | Jaccard similarity on text + concept fingerprints |
-| Adaptive difficulty adjustment | Implemented | Rule-based; mastery thresholds: 0.6 / 0.8 |
-| Student history persistence | Implemented | SQLite; per-student, per-course, per-topic |
-| Session state recovery on page refresh | Implemented | sessionStorage in the browser |
-| Local demo question fallback | Implemented | demo_questions.json used when no API keys present |
-| Student login / authentication | Not implemented | Student ID is a UUID generated in-browser |
-| PDF / notes upload | Not implemented | — |
-| Public student dashboard | Not implemented | History API exists; no dedicated history UI screen |
+| Student registration & login | ✅ Implemented | Argon2id password hashing; SHA-256 session tokens |
+| Course and topic selection from R22 syllabus | ✅ Implemented | 55 courses; `quiz_topics` index per course |
+| Notes upload (PDF, DOCX, PPTX, TXT) | ✅ Implemented | Up to 5 MB; magic-byte file validation |
+| AI quiz generation (10 MCQs per quiz) | ✅ Implemented | 4-provider chain with configurable priority |
+| Dual-Guard Topic Isolation | ✅ Implemented | TF-IDF competing topic suppression + downstream heuristic validation |
+| Difficulty distribution (Easy / Medium / Hard) | ✅ Implemented | Adaptive based on student history |
+| Server-side answer grading | ✅ Implemented | Correct answers stripped from client payload; never exposed |
+| Concept-wise performance breakdown | ✅ Implemented | Correct/total per concept |
+| Difficulty-wise performance breakdown | ✅ Implemented | Correct/total per difficulty level |
+| Strong and weak concept identification | ✅ Implemented | Threshold: < 60% accuracy = weak |
+| AI-generated revision feedback | ✅ Implemented | Summary, revision guidance, next-step recommendation |
+| Quiz retakes with fresh novel questions | ✅ Implemented | New quiz_id on every call; active deduplication |
+| Question novelty / deduplication | ✅ Implemented | Weighted Jaccard on text + concept fingerprints |
+| Adaptive difficulty adjustment | ✅ Implemented | Rule-based; mastery thresholds: 0.6 / 0.8 |
+| Student history persistence | ✅ Implemented | TiDB (MySQL-compatible cloud DB) + SQLite local fallback |
+| Session state recovery on page refresh | ✅ Implemented | `sessionStorage` in the browser |
+| KaTeX math rendering | ✅ Implemented | Auto-detected and rendered offline in-browser |
+| Syntax-highlighted code blocks | ✅ Implemented | 120-line zero-dependency regex lexer (Python, Java, C++, SQL, Bash) |
+| Provider quota manager with cooldown | ✅ Implemented | Thread-safe file-backed per-provider rate limiting |
+| IP-based rate limiting | ✅ Implemented | Sliding-window; configurable per-minute limits |
+| Health check endpoints | ✅ Implemented | `/health` and `/api/health` with DB connectivity probe |
+| Local demo question fallback | ✅ Implemented | `demo_questions.json` used when no API keys present |
+| Public student dashboard | ✅ Implemented | Quiz history, concept graphs, performance trends |
+| Handwritten notebook OCR | 🔮 Future Scope | Experimental Gemini Vision path; requires live Gemini credentials |
+| Formal WCAG automated contrast audit | 🔮 Future Scope | Designed to WCAG 2.1 AA token ratios; Axe-core integration pending |
 
 ---
 
@@ -59,22 +70,32 @@
 | Component | Technology |
 |-----------|-----------|
 | Web framework | FastAPI |
-| ASGI server | Uvicorn |
-| Database | SQLite (Python sqlite3 stdlib) |
-| AI provider — primary | Groq (llama-3.3-70b-versatile default) |
-| AI provider — secondary | NVIDIA Build (meta/llama-3.3-70b-instruct default) |
-| AI provider — tertiary | Google Gemini (gemini-1.5-flash default) |
-| Similarity computation | scikit-learn (Jaccard logic in novelty.py) |
+| ASGI server | Uvicorn (`--workers 1`, single-process async) |
+| Database — production | TiDB (MySQL-compatible cloud DB via PyMySQL + DBUtils pool) |
+| Database — local dev | SQLite (auto-created if `DATABASE_URL` is unset) |
+| AI provider — primary | Groq LPU (`llama-3.1-8b-instant` / `llama-3.3-70b-versatile`) |
+| AI provider — secondary | Cloudflare Workers AI (`@cf/meta/llama-3.1-8b-instruct`) |
+| AI provider — tertiary | NVIDIA Build (`meta/llama-3.1-8b-instruct`) |
+| AI provider — quaternary | Google Gemini (`gemini-2.0-flash`) |
+| Password hashing | argon2-cffi (Argon2id; `time_cost=3, memory_cost=65536`) |
+| Session security | SHA-256 HMAC token hashing |
+| File ingestion | pypdf, python-docx, python-pptx |
+| Similarity computation | scikit-learn (Jaccard in `novelty.py`) |
+| Math rendering — backend | KaTeX detection regex in `output_verifier.py` |
+| HTTP client | httpx (async, for Cloudflare REST API) |
 | Environment management | python-dotenv |
+| Test framework | Pytest 9.x |
 
 ### Frontend
 
 | Component | Technology |
 |-----------|-----------|
-| Markup | Plain HTML5 |
-| Styling | Vanilla CSS (frontend/css/style.css) |
-| Logic | Vanilla JavaScript (frontend/js/app.js) |
-| Served by | FastAPI StaticFiles mount at / |
+| Markup | Plain HTML5 (single-page, 4 screen sections) |
+| Styling | Vanilla CSS (`frontend/css/style.css`; WCAG 2.1 AA token design) |
+| Logic | Vanilla JavaScript (`frontend/js/app.js`) |
+| Math rendering | KaTeX (bundled offline in `frontend/vendor/katex/`) |
+| Code highlighting | Zero-dependency inline regex tokenizer |
+| Served by | FastAPI `StaticFiles` mount at `/` |
 
 ---
 
@@ -83,50 +104,65 @@
 ```
 LearnAI/
 ├── README.md
-├── render.yaml                     # Render.com deployment config
+├── render.yaml                           # Render.com deployment config (--workers 1)
+├── design.md                            # UI/UX design system specification
 ├── backend/
-│   ├── main.py                     # FastAPI app, API routes, CORS, static file mount
-│   ├── requirements.txt            # Python dependencies
-│   ├── .env.example                # Environment variable template (safe to commit)
-│   ├── .env                        # Real secrets — do NOT commit
-│   ├── Procfile                    # Process definition for Render/Heroku
+│   ├── main.py                          # FastAPI app: routes, auth middleware, static mount
+│   ├── requirements.txt                 # Python dependencies
+│   ├── Procfile                         # Process file: uvicorn --workers 1
+│   ├── conftest.py                      # Pytest shared fixtures
+│   ├── .env.example                     # Environment variable template (safe to commit)
 │   ├── data/
-│   │   ├── curriculum.json         # Full R22 B.Tech CSE-AI&ML syllabus (55 courses)
-│   │   ├── demo_questions.json     # Offline fallback question bank
-│   │   └── learnai.db              # SQLite database (auto-created; gitignored)
+│   │   ├── curriculum.json              # Full R22 B.Tech CSE-AI&ML syllabus (55 courses)
+│   │   ├── demo_questions.json          # Offline fallback question bank
+│   │   └── learnai.db                  # SQLite DB (auto-created locally; gitignored)
 │   ├── services/
-│   │   ├── llm_service.py          # Multi-provider orchestration, novelty repair loop
-│   │   ├── evaluator.py            # Deterministic answer scoring and concept analysis
-│   │   ├── adaptive.py             # Rule-based difficulty recommendation
-│   │   ├── novelty.py              # Jaccard-based question and concept deduplication
-│   │   ├── database.py             # SQLite schema, CRUD operations
-│   │   ├── curriculum_service.py   # Curriculum loading, topic normalization
-│   │   ├── topic_extractor.py      # Converts raw syllabus units to selectable topics
+│   │   ├── llm_service.py               # Multi-provider orchestration + novelty repair loop
+│   │   ├── evaluator.py                 # Deterministic answer scoring & concept analysis
+│   │   ├── adaptive.py                  # Rule-based difficulty recommendation
+│   │   ├── novelty.py                   # Weighted Jaccard deduplication engine
+│   │   ├── database.py                  # TiDB/SQLite schema, CRUD, connection pool
+│   │   ├── curriculum_service.py        # Curriculum loading and topic normalization
+│   │   ├── topic_extractor.py           # Converts raw syllabus units to selectable topics
+│   │   ├── notes_extractor.py           # PDF/DOCX/PPTX/TXT parsing (magic-byte validation)
+│   │   ├── notes_matcher.py             # TF-IDF topic isolation, relevant context selector
+│   │   ├── academic_verifier.py         # Post-generation heuristic correctness validation
+│   │   ├── account_service.py           # Argon2id auth, session token lifecycle
+│   │   ├── auth_utils.py                # SHA-256 session token hashing utilities
+│   │   ├── quota_manager.py             # Thread-safe per-provider cooldown & quota tracking
+│   │   ├── rate_limiter.py              # Sliding-window IP rate limiter
+│   │   ├── output_verifier.py           # LLM output structure & KaTeX detection
+│   │   ├── short_answer_evaluator.py    # Short-answer scoring (supplementary)
+│   │   ├── metrics.py                   # Provider latency & usage metrics
+│   │   ├── env_loader.py                # Environment variable loader with validation
+│   │   ├── logger_utils.py              # Structured logging helpers
+│   │   ├── backup.py                    # DB backup utilities
 │   │   └── providers/
 │   │       ├── __init__.py
-│   │       ├── base.py             # Abstract provider, shared prompt, JSON extractor, validator
-│   │       ├── gemini_provider.py  # Google Gemini integration (google-genai SDK)
-│   │       ├── groq_provider.py    # Groq integration (groq SDK)
-│   │       └── nvidia_provider.py  # NVIDIA Build via OpenAI-compatible API
-│   ├── test_api.py                 # Integration smoke test (requires running server)
-│   ├── test_suite_global.py        # Unit tests for novelty detection and evaluation
-│   ├── validate_curriculum_expansion.py  # Validates curriculum extraction across 55 courses
-│   └── validate_quiz_topics.py     # Validates curriculum.json integrity and topic mapping
+│   │       ├── base.py                  # Abstract provider, shared prompt, JSON extractor
+│   │       ├── groq_provider.py         # Groq LPU integration
+│   │       ├── cloudflare_provider.py   # Cloudflare Workers AI (REST API via httpx)
+│   │       ├── nvidia_provider.py       # NVIDIA Build (OpenAI-compatible API)
+│   │       └── gemini_provider.py       # Google Gemini (google-genai SDK)
+│   └── [60+ test files]                 # Comprehensive pytest suite (1,079 tests)
 └── frontend/
-    ├── index.html                  # Single-page HTML (4 screen sections)
+    ├── index.html                       # Single-page app (auth, dashboard, quiz, results)
     ├── css/
-    │   └── style.css
-    └── js/
-        └── app.js                  # All frontend logic (~790 lines)
+    │   └── style.css                    # WCAG 2.1 AA design tokens, responsive layout
+    ├── js/
+    │   └── app.js                       # Full SPA logic, auth flows, quiz lifecycle
+    └── vendor/
+        └── katex/                       # Offline KaTeX math renderer (fonts + JS + CSS)
 ```
 
 ---
 
 ## Prerequisites
 
-- **Python 3.10 or later** (the code uses the `str | None` union type syntax)
+- **Python 3.10 or later** (uses `str | None` union syntax and `asyncio` primitives)
 - **pip**
-- At least one API key from: [Groq](https://console.groq.com/), [NVIDIA Build](https://build.nvidia.com/), or [Google AI Studio](https://aistudio.google.com/)
+- At least one API key from: [Groq](https://console.groq.com/), [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/), [NVIDIA Build](https://build.nvidia.com/), or [Google AI Studio](https://aistudio.google.com/)
+- **Optional (production):** A TiDB or MySQL-compatible database URL for persistent student history
 
 ---
 
@@ -155,43 +191,63 @@ copy .env.example .env        # Windows
 # cp .env.example .env        # macOS / Linux
 ```
 
-Then open `backend/.env` and add at least one real API key (see [Environment Configuration](#environment-configuration)).
+Then open `backend/.env` and add your API keys (see [Environment Configuration](#environment-configuration)).
 
 ---
 
 ## Environment Configuration
 
-Copy `backend/.env.example` to `backend/.env` and fill in the values for whichever providers you want to use. You need **at least one** key configured.
+Copy `backend/.env.example` to `backend/.env` and fill in the values for the providers you want to use.
 
-```
-# Provider order (first = highest priority)
-PROVIDER_ORDER=groq,nvidia,gemini
+```env
+# Provider execution order
+PROVIDER_ORDER=groq,cloudflare,nvidia,gemini
 
-# Timing
-OVERALL_DEADLINE_SECONDS=25.0     # Total wall-clock budget for quiz generation
-PROVIDER_TIMEOUT_SECONDS=12.0     # Budget allocated per provider attempt
-MAX_PROVIDER_RETRIES=1            # Extra attempts on malformed output
-MAX_NOVELTY_REPAIR_ATTEMPTS=2     # Extra AI calls to reduce repeated questions
+# Timing budgets
+OVERALL_DEADLINE_SECONDS=40.0     # Total wall-clock budget for quiz generation
+PROVIDER_TIMEOUT_SECONDS=25.0     # Budget allocated per provider attempt
+MAX_PROVIDER_RETRIES=1            # Extra retry attempts on transient failures
+MAX_NOVELTY_REPAIR_ATTEMPTS=2     # Extra repair calls to reduce repeated questions
 
-# Groq (recommended: fastest response times)
+# Groq (recommended: fastest inference via LPU)
 GROQ_API_KEY=your_groq_api_key_here
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_SECONDARY_API_KEY=your_secondary_groq_key_here   # Optional backup key
+GROQ_MODEL=llama-3.1-8b-instant
+GROQ_FALLBACK_MODEL=llama-3.3-70b-versatile
+
+# Cloudflare Workers AI (independent fallback)
+CLOUDFLARE_ENABLED=true
+CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id_here
+CLOUDFLARE_API_TOKEN=your_cloudflare_api_token_here
+CLOUDFLARE_MODEL=@cf/meta/llama-3.1-8b-instruct
+CLOUDFLARE_TIMEOUT_SECONDS=20.0
 
 # NVIDIA Build
 NVIDIA_API_KEY=your_nvidia_api_key_here
-NVIDIA_MODEL=meta/llama-3.3-70b-instruct
+NVIDIA_MODEL=meta/llama-3.1-8b-instruct
+NVIDIA_FALLBACK_MODEL=meta/llama-3.1-70b-instruct
 
 # Google Gemini
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-1.5-flash
-GEMINI_FALLBACK_MODEL=gemini-1.5-flash-8b
+GEMINI_MODEL=gemini-2.0-flash
 
-# Misc
-ENABLE_LOCAL_DEMO_FALLBACK=true   # Fall back to demo_questions.json if all providers fail
+# Database (SQLite used locally if unset)
+# DATABASE_URL=mysql+pymysql://<user>:<password>@<host>:<port>/<db>?ssl_ca=<path>
+
+# Session security (generate with: openssl rand -hex 32)
+SESSION_SECRET_KEY=replace_with_a_secure_random_secret
+
+# Runtime
+ENVIRONMENT=development
 DEBUG=false
+ALLOWED_ORIGINS=*
+
+# Rate limiting (requests per minute per IP)
+RATE_LIMIT_QUIZ_GEN_PER_MIN=10
+RATE_LIMIT_QUIZ_SUBMIT_PER_MIN=30
 ```
 
-`PROVIDER_ORDER` controls which provider is tried first. The system automatically falls back to the next configured provider if a request fails, times out, or returns malformed output.
+`PROVIDER_ORDER` controls the fallback chain. The orchestrator automatically skips any provider whose credentials are missing or which is in an active cooldown window.
 
 ---
 
@@ -204,19 +260,87 @@ uvicorn main:app --reload
 
 The application is available at **http://127.0.0.1:8000**.
 
-The FastAPI backend serves the `frontend/` directory as static files at the root path, so no separate web server is needed for local development.
+The FastAPI backend serves the `frontend/` directory as static files at the root path, so no separate web server is needed for local development. The database (`backend/data/learnai.db`) is created automatically on first startup if `DATABASE_URL` is unset.
 
-The SQLite database (`backend/data/learnai.db`) is created automatically on first startup.
+> **Production note:** Always start with `--workers 1`. The quota manager uses an in-process `threading.Lock` backed by a local file; running multiple OS workers causes stale cooldown state across processes.
 
 ---
 
 ## API Documentation
 
-All API routes are defined in `backend/main.py`.
+All API routes are defined in `backend/main.py`. Interactive docs are available at `http://127.0.0.1:8000/docs` (Swagger UI).
+
+### GET /health
+
+Basic liveness probe.
+
+```json
+{ "status": "ok" }
+```
+
+### GET /api/health
+
+Deep health check including database connectivity and provider status.
+
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "providers": { "groq": "active", "cloudflare": "active" }
+}
+```
+
+---
+
+### POST /api/auth/register
+
+Registers a new student account.
+
+**Request body:**
+```json
+{
+  "username": "student123",
+  "password": "securepassword"
+}
+```
+
+**Response (201):**
+```json
+{
+  "student_id": "uuid",
+  "username": "student123",
+  "session_token": "hex-token"
+}
+```
+
+---
+
+### POST /api/auth/login
+
+Authenticates a returning student.
+
+**Request body:**
+```json
+{
+  "username": "student123",
+  "password": "securepassword"
+}
+```
+
+**Response (200):**
+```json
+{
+  "student_id": "uuid",
+  "username": "student123",
+  "session_token": "hex-token"
+}
+```
+
+---
 
 ### GET /api/courses
 
-Returns the full list of courses and their selectable topics.
+Returns the full list of courses and their selectable topics. No authentication required.
 
 **Response:**
 ```json
@@ -244,6 +368,29 @@ Returns the full list of courses and their selectable topics.
 
 ---
 
+### POST /api/notes/upload
+
+Uploads student notes for a specific topic. Accepts PDF, DOCX, PPTX, or plain text (max 5 MB).
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| file | File | The notes file (PDF/DOCX/PPTX/TXT) |
+| topic_id | string | The quiz topic ID from `/api/courses` |
+| student_id | string | Authenticated student UUID |
+
+**Response (200):**
+```json
+{
+  "status": "ok",
+  "characters_extracted": 4821,
+  "topic_id": "22AM301-Q001"
+}
+```
+
+---
+
 ### POST /api/quiz/generate
 
 Generates a fresh 10-question MCQ quiz. Correct answers are **never** included in the response.
@@ -254,32 +401,19 @@ Generates a fresh 10-question MCQ quiz. Correct answers are **never** included i
   "course_code": "22AM301",
   "topic": "Introduction to Deep Learning",
   "topic_id": "22AM301-Q001",
-  "student_id": "uuid-string-or-null",
+  "student_id": "uuid-string",
   "retake": false
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| course_code | string | Yes | e.g. "22AM301" |
-| topic | string | Yes | Exact topic name from /api/courses |
-| topic_id | string | No | Stable topic ID for accurate matching |
-| student_id | string | No | UUID from localStorage; a new one is created if absent |
-| retake | boolean | No | Informational flag only; the backend always generates fresh questions |
-
-**Successful response (200):**
+**Response (200):**
 ```json
 {
   "quiz_id": "uuid",
-  "attempt_id": "uuid",
   "attempt_number": 2,
   "course_code": "22AM301",
   "subject": "Deep Learning",
   "topic": "Introduction to Deep Learning",
-  "topic_id": "22AM301-Q001",
-  "parent_topic": "Introduction",
-  "module": 1,
-  "unit": 1,
   "questions": [
     {
       "id": 0,
@@ -290,17 +424,8 @@ Generates a fresh 10-question MCQ quiz. Correct answers are **never** included i
     }
   ],
   "is_fallback": false,
-  "fallback_label": "",
-  "novelty_warning": false,
   "novel_count": 10,
   "recommended_difficulty": "mixed",
-  "adaptive_applied": false,
-  "adaptive_explanation": {
-    "level": "initial",
-    "label": "Initial difficulty",
-    "description": "Initial difficulty — learning your current level.",
-    "detail": "..."
-  },
   "provider_used": "groq"
 }
 ```
@@ -309,28 +434,27 @@ Generates a fresh 10-question MCQ quiz. Correct answers are **never** included i
 
 | Code | Meaning |
 |------|---------|
-| 400 | Invalid course_code or topic not found in curriculum |
-| 500 | API key or configuration error |
+| 400 | Invalid `course_code` or topic not found in curriculum |
+| 401 | Missing or invalid session token |
+| 429 | Rate limit exceeded |
 | 503 | All AI providers temporarily unavailable |
 
 ---
 
 ### POST /api/quiz/submit
 
-Submits answers and returns scored results with AI feedback. The quiz attempt is saved to the database on this call.
+Submits answers and returns scored results with AI feedback. Grading is performed entirely server-side.
 
 **Request body:**
 ```json
 {
   "quiz_id": "uuid-from-generate",
   "answers": ["A", "C", "B", "D", "A", "B", "C", "D", "A", "B"],
-  "student_id": "uuid-string-or-null"
+  "student_id": "uuid-string"
 }
 ```
 
-`answers` is an ordered list of answer letters (A, B, C, or D), one per question.
-
-**Successful response (200):**
+**Response (200):**
 ```json
 {
   "score": 7,
@@ -344,10 +468,6 @@ Submits answers and returns scored results with AI feedback. The quiz attempt is
     "Medium": {"correct": 2, "total": 4, "accuracy": 50.0},
     "Hard":   {"correct": 1, "total": 2, "accuracy": 50.0}
   },
-  "concept_accuracy": {
-    "Activation Functions": {"correct": 2, "total": 2, "accuracy": 100.0},
-    "Backpropagation":      {"correct": 0, "total": 1, "accuracy": 0.0}
-  },
   "details": [
     {
       "question": "...",
@@ -360,27 +480,18 @@ Submits answers and returns scored results with AI feedback. The quiz attempt is
     }
   ],
   "analysis": {
-    "summary": "AI-generated summary...",
+    "summary": "AI-generated performance comment...",
     "revision": "AI-generated revision guidance...",
-    "recommendation": "AI-generated next step..."
-  },
-  "student_id": "uuid"
+    "recommendation": "AI-generated next-step advice..."
+  }
 }
 ```
-
-**HTTP error codes:**
-
-| Code | Meaning |
-|------|---------|
-| 404 | quiz_id not found (quiz expired or server restarted) |
 
 ---
 
 ### GET /api/student/{student_id}/history
 
-Returns a student's quiz attempt history, newest first.
-
-**Query parameters:**
+Returns a student's quiz attempt history (newest first).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -392,26 +503,9 @@ Returns a student's quiz attempt history, newest first.
 
 Returns aggregated concept and difficulty performance across all attempts.
 
-**Query parameters:**
-
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| course_code | (all courses) | Filter by course code |
-
-**Response:**
-```json
-{
-  "student_id": "uuid",
-  "concept_performance": {
-    "Activation Functions": {"correct": 8, "total": 10}
-  },
-  "difficulty_performance": {
-    "Easy":   {"correct": 18, "total": 20},
-    "Medium": {"correct": 12, "total": 20},
-    "Hard":   {"correct": 5,  "total": 10}
-  }
-}
-```
+| course_code | (all) | Filter by course code |
 
 ---
 
@@ -419,100 +513,67 @@ Returns aggregated concept and difficulty performance across all attempts.
 
 The curriculum is loaded from `backend/data/curriculum.json`. It follows the R22 B.Tech CSE-AI & ML regulation from VFSTR and contains **55 courses** across all years and semesters.
 
-### Top-level structure
-
 ```json
 {
   "program": "B.Tech CSE - Artificial Intelligence and Machine Learning",
   "regulation": "R22",
   "institution": "VFSTR Deemed to be University",
-  "courses": [ ... ]
+  "courses": [...]
 }
 ```
 
-### Course object
-
-```json
-{
-  "code": "22AM301",
-  "name": "Deep Learning",
-  "year": 2,
-  "semester": 1,
-  "prerequisite": "...",
-  "topics": [ ... ],
-  "quiz_topics": [ ... ]
-}
-```
-
-- **`topics`** — Unit-level syllabus sections used to build `syllabus_context` for the AI prompt.
-- **`quiz_topics`** — Derived, student-selectable topic index used by the frontend dropdown and API.
-
-### Quiz topic object
-
-```json
-{
-  "id": "22AM301-Q001",
-  "name": "Introduction to Deep Learning",
-  "module": 1,
-  "unit": 1,
-  "parent_topic": "Introduction",
-  "source_topic_index": 0,
-  "source_topic_name": "Introduction",
-  "syllabus_context": "Full syllabus text for the parent unit...",
-  "concepts": [
-    "Artificial Neural Networks",
-    "Perceptron",
-    "Activation Functions"
-  ]
-}
-```
-
-The `concepts` list is injected into the AI prompt to ensure balanced coverage across the unit's key learning objectives.
-
-If a course has no `quiz_topics` field or it is empty, `curriculum_service.py` falls back to the raw `topics` array.
+Each course contains a `quiz_topics` array of student-selectable topics with pre-computed `syllabus_context` and `concepts` lists. If `quiz_topics` is absent, the service falls back to the raw `topics` array.
 
 ---
 
 ## Quiz Generation Workflow
 
 ```
-Student selects Course + Topic
+Student selects Course + Topic (+ optional uploaded notes)
         |
         v
 POST /api/quiz/generate
         |
-        +-- Curriculum validation (course code + topic name/id lookup)
+        +-- Authentication guard (session_token → student_id)
+        |
+        +-- Curriculum validation (course_code + topic_id lookup)
+        |
+        +-- Notes context retrieval (notes_matcher.py)
+        |     +-- TF-IDF competing topic suppression
+        |     +-- Top-k relevant chunks selected
         |
         +-- Student context loaded from DB
         |     +-- topic attempt history
         |     +-- accumulated weak concepts
         |
-        +-- Adaptive difficulty calculated (rule-based)
+        +-- Adaptive difficulty calculated (adaptive.py)
         |     +-- maps to Easy/Medium/Hard distribution (e.g. 4-4-2)
         |
-        +-- Novelty context built
+        +-- Novelty context built (novelty.py)
         |     +-- question fingerprints from DB (up to 50 recent)
         |     +-- concept history from DB (up to 30 recent)
         |
         +-- Full prompt assembled
         |     +-- base prompt (topic, syllabus context, concepts, difficulty dist.)
-        |     +-- novelty exclusion block (previously seen questions/concepts)
-        |     +-- adaptive emphasis block (foundational / advanced directives)
+        |     +-- notes context block (from student's uploaded notes)
+        |     +-- novelty exclusion block (previously seen Qs/concepts)
+        |     +-- negative topic constraints (competing topic suppression)
         |
-        +-- Provider orchestration loop
-        |     for each configured provider (in PROVIDER_ORDER):
+        +-- Provider orchestration loop (quota_manager.py checks cooldowns)
+        |     for each provider in PROVIDER_ORDER (cooldown-skipped if active):
         |       +-- attempt with per-provider timeout budget
-        |       +-- parse JSON from raw text (regex + json.loads)
-        |       +-- validate structure (10 questions, 4 options, correct_answer, etc.)
-        |       +-- bounded replenishment (up to 2 extra calls if < 10 valid questions)
+        |       +-- parse JSON from raw LLM output (regex + json.loads)
+        |       +-- structural validation (10 Qs, 4 options, correct_answer)
+        |       +-- academic correctness verification (academic_verifier.py)
+        |       +-- bounded replenishment (up to 2 extra calls if < 10 valid)
         |       +-- novelty evaluation (Jaccard similarity vs. history)
-        |       +-- novelty repair (up to MAX_NOVELTY_REPAIR_ATTEMPTS extra calls)
+        |       +-- novelty repair (up to MAX_NOVELTY_REPAIR_ATTEMPTS calls)
         |
-        +-- Difficulty labels applied to questions (enforces exact distribution)
+        +-- Difficulty labels enforced (exact distribution applied)
         |
         +-- Correct answers stripped from public response
         |
-        +-- quiz_id assigned and quiz cached in-memory (QUIZZES dict)
+        +-- quiz_id assigned; quiz cached in-memory (QUIZZES dict)
                 |
                 v
         Response returned to frontend
@@ -520,124 +581,92 @@ POST /api/quiz/generate
 
 **Fallback chain when all providers fail:**
 1. Best partially-novel quiz generated during the loop (if any).
-2. Local `demo_questions.json` entries matching `course_code::topic_name` (if `ENABLE_LOCAL_DEMO_FALLBACK=true`).
-3. HTTP 503 response: "AI service is temporarily experiencing high demand."
+2. Local `demo_questions.json` entries matching `course_code::topic_name`.
+3. HTTP 503: `"AI service is temporarily experiencing high demand."`
 
 ---
 
 ## Evaluation and Adaptive Learning
 
-### Scoring (deterministic Python — evaluator.py)
+### Scoring (deterministic — `evaluator.py`)
 
-Answers are graded by exact string comparison against the stored correct answer. No AI is involved in the scoring step.
+Answers are graded by exact string comparison against server-stored correct answers. No AI is involved.
 
-| Percentage | Status label |
-|-----------|-------------|
+| Percentage | Status |
+|-----------|--------|
 | < 30% | Needs Strong Revision |
 | 30–49% | Needs Revision |
 | 50–69% | Developing |
 | 70–84% | Good |
-| >= 85% | Excellent |
+| ≥ 85% | Excellent |
 
-**Weak concept threshold:** A concept is flagged as weak if the student answered fewer than 60% of questions testing it correctly. If the student scores 100%, all tested concepts are marked strong.
+**Weak concept threshold:** < 60% accuracy on any concept → flagged weak.
 
-### AI Feedback (generate_analysis in llm_service.py)
+### Adaptive Difficulty (`adaptive.py`)
 
-After scoring, the same provider chain generates a three-field feedback object:
-- `summary` — Overall performance comment
-- `revision` — Targeted guidance on weak concepts
-- `recommendation` — Suggested next study action
-
-If all providers fail or time out within a 10-second deadline, a deterministic fallback message is returned. The analysis never blocks quiz results from being displayed.
-
-### Adaptive Difficulty (adaptive.py) — Rule-Based
-
-The system inspects a student's cumulative `concept_performance` and `difficulty_performance` from the database.
-
-| Overall mastery | Recommended difficulty | Distribution |
-|----------------|----------------------|-------------|
+| Overall mastery | Recommended | Distribution |
+|----------------|-------------|-------------|
 | No history | mixed | 4 Easy, 4 Medium, 2 Hard |
 | < 60% | foundational | 6 Easy, 3 Medium, 1 Hard |
 | 60–79% | mixed | 4 Easy, 4 Medium, 2 Hard |
-| >= 80% | advanced | 2 Easy, 4 Medium, 4 Hard |
+| ≥ 80% | advanced | 2 Easy, 4 Medium, 4 Hard |
 
-**Topic-specific override:** If weak concepts from the current topic have a per-concept accuracy below 40%, the recommendation falls back to "foundational" regardless of overall mastery.
+This is a purely rule-based system — not a trained ML model.
 
-This is a purely rule-based, deterministic system — not a trained machine-learning model.
+### AI Feedback (`llm_service.py::generate_analysis`)
+
+After scoring, the same provider chain generates a 3-field feedback object: `summary`, `revision`, `recommendation`. A deterministic fallback message is returned if all providers fail within a 10-second deadline.
 
 ---
 
 ## Novelty and Deduplication Engine
 
-`novelty.py` prevents the AI from repeating questions or testing the same concepts across multiple retakes by the same student on the same topic.
+`novelty.py` prevents the AI from repeating questions or concepts across retakes for the same student and topic.
 
-**Text similarity** is computed as a weighted blend of:
+**Text similarity** — weighted blend of:
 - Content keyword overlap (Jaccard on significant words)
 - Bigram overlap (Jaccard on word bigrams)
 - Trigram overlap (Jaccard on word trigrams)
 
-A question is considered a near-duplicate if the combined similarity score exceeds **0.45** (`TEXT_DUPLICATE_THRESHOLD`).
+Duplicate threshold: **0.45** (`TEXT_DUPLICATE_THRESHOLD`).
 
-**Concept similarity** checks whether two concept tags refer to the same learning objective using Jaccard on content keywords, with threshold **0.50** (`CONCEPT_SIMILARITY_THRESHOLD`).
+**Concept similarity** — Jaccard on content keywords. Threshold: **0.50** (`CONCEPT_SIMILARITY_THRESHOLD`).
 
-The novelty exclusion block injected into the prompt lists previously seen question texts and concept tags so the AI avoids repeating them. If the generated quiz still contains duplicates, up to `MAX_NOVELTY_REPAIR_ATTEMPTS` targeted repair calls are made.
+The novelty exclusion block is injected into every prompt, listing previously seen question texts and concept tags. If the generated quiz still contains duplicates, up to `MAX_NOVELTY_REPAIR_ATTEMPTS` targeted repair calls are made before accepting the best available set.
+
+---
+
+## Notes Upload & Topic Isolation
+
+`notes_extractor.py` accepts PDF, DOCX, PPTX, and plain-text files (max 5 MB). Files are validated by magic bytes (`%PDF-`, `PK\x03\x04`, `RIFF`) before parsing; malformed or oversized files are rejected.
+
+`notes_matcher.py` implements the **Dual-Guard Topic Isolation** architecture:
+
+1. **Upstream guard (pre-prompt):** TF-IDF vectorization identifies context windows dominated by competing topics. Sections with below-threshold topical similarity are suppressed before being injected into the prompt.
+2. **Downstream guard (post-generation):** `academic_verifier.py` applies deterministic heuristics to validate that generated questions genuinely relate to the requested topic and concepts.
+
+This prevents topic bleed — where notes containing multiple subjects cause the AI to generate questions about the wrong topic.
 
 ---
 
 ## Database
 
-The SQLite database is stored at `backend/data/learnai.db` and created automatically by `init_db()` on startup. It is gitignored and should not be committed.
+The application supports two database backends:
 
-### Tables
+| Environment | Backend | Config |
+|-------------|---------|--------|
+| Local development | SQLite | Auto-created at `backend/data/learnai.db` |
+| Production | TiDB / MySQL | `DATABASE_URL` env var (PyMySQL + DBUtils pool) |
 
-**students**
+### Core Tables
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | TEXT PK | UUID, generated client-side or server-side |
-| created_at | TEXT | ISO timestamp |
-| last_active | TEXT | Updated on each quiz generation |
+**students** — `id` (UUID PK), `username`, `password_hash`, `created_at`, `last_active`
 
-**quiz_attempts**
+**quiz_attempts** — Full attempt record including score, concept/difficulty accuracy, weak/strong concepts, and the full serialized quiz JSON (with correct answers, stored server-side only).
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | TEXT PK | UUID |
-| student_id | TEXT FK | References students.id |
-| course_code | TEXT | e.g. 22AM301 |
-| course_name | TEXT | e.g. Deep Learning |
-| topic_name | TEXT | Selected topic |
-| quiz_data | TEXT | Full quiz JSON (serialized) |
-| score | INTEGER | Correct answers |
-| total | INTEGER | Total questions |
-| percentage | REAL | Score percentage |
-| status | TEXT | e.g. Good |
-| difficulty_accuracy | TEXT | JSON: per-difficulty stats |
-| concept_accuracy | TEXT | JSON: per-concept stats |
-| weak_concepts | TEXT | JSON array |
-| strong_concepts | TEXT | JSON array |
-| recommended_difficulty | TEXT | mixed, foundational, or advanced |
-| created_at | TEXT | ISO timestamp |
+**question_metadata** — Per-question records for comprehensive novelty lookups, including `question_fingerprint`, `concept`, and `difficulty`.
 
-**question_metadata**
-
-Stores each individual question for comprehensive novelty lookups.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | TEXT PK | UUID |
-| attempt_id | TEXT FK | References quiz_attempts.id |
-| student_id | TEXT | |
-| course_code | TEXT | |
-| topic_name | TEXT | |
-| question_index | INTEGER | Position in the quiz (0-based) |
-| question_text | TEXT | Raw question string |
-| question_fingerprint | TEXT | Normalized text used for similarity checks |
-| concept | TEXT | |
-| difficulty | TEXT | |
-| question_type | TEXT | Always "mcq" |
-| correct_answer | TEXT | A, B, C, or D |
-| created_at | TEXT | |
+**student_notes** — Uploaded notes metadata and extracted text, keyed by `student_id` + `topic_id`.
 
 ---
 
@@ -645,18 +674,19 @@ Stores each individual question for comprehensive novelty lookups.
 
 ### Server won't start
 
-| Symptom | Likely cause | Fix |
+| Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| ModuleNotFoundError | Virtual environment not active or packages not installed | Activate venv and run `pip install -r requirements.txt` |
-| FileNotFoundError: curriculum.json | Wrong working directory | Run uvicorn from the `backend/` directory |
+| `ModuleNotFoundError` | venv not active or packages not installed | Activate venv, run `pip install -r requirements.txt` |
+| `FileNotFoundError: curriculum.json` | Wrong working directory | Run uvicorn from the `backend/` directory |
+| `DATABASE_URL invalid in production` | `ENVIRONMENT=production` requires a valid DB URL | Set `DATABASE_URL` in `.env` or switch to `ENVIRONMENT=development` |
 
 ### No questions generated
 
-| Symptom | Likely cause | Fix |
+| Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| 503 response | No provider key configured | Add at least one key to .env |
-| 503 with keys present | All providers timed out or rate-limited | Wait and retry; check API dashboard for quota |
-| is_fallback: true in response | API keys present but all failed; demo questions used | Normal fallback behavior |
+| 503 response | No provider key configured | Add at least one API key to `.env` |
+| 503 with keys present | All providers timed out or rate-limited | Wait and retry; check API dashboards for quota |
+| `is_fallback: true` | All providers failed; demo questions served | Normal fallback; check provider keys and connectivity |
 
 ### Quiz ID not found (404 on submit)
 
@@ -664,64 +694,64 @@ Quizzes are held in an in-memory Python dictionary. If the server restarts betwe
 
 ### Curriculum validation failures
 
-Run from the `backend/` directory:
-
 ```bash
+# From backend/
 python validate_quiz_topics.py
 python validate_curriculum_expansion.py
 ```
 
 ### CORS errors in browser
 
-The backend allows all origins by default. CORS errors typically mean the frontend HTML file was opened directly in the browser instead of being served by the FastAPI process. Always access the app through `http://127.0.0.1:8000`.
+Always access the app through `http://127.0.0.1:8000`. Opening `index.html` directly bypasses the FastAPI server.
 
 ---
 
 ## Testing and Verification
 
-### Unit tests — novelty detection and evaluation logic
-
-Self-contained; no running server required:
+The backend is covered by a comprehensive automated test suite of **1,079 tests** (Pytest 9.x), achieving **1,073 passed** and **6 conditional skips** with **zero failures**.
 
 ```bash
-# From backend/
-python test_suite_global.py
+# Run the full test suite from backend/
+pytest backend/ -q
+# Expected: 1073 passed, 6 skipped in ~82s
 ```
 
-Covers: exact duplicate detection, near-duplicate and paraphrase detection, within-quiz duplicate detection, topic relevance checking, and the `evaluate_answers` scoring function.
+The 6 skipped tests are in `test_smoke_test_tidb_tls.py` and are skipped when live TiDB TLS credentials are not present in the local environment. They are not failures.
 
-### Integration smoke test — full API round-trip
+### Key test modules
 
-Starts a local server on port 8001, runs generate → submit → history → performance, then terminates the server. **Requires at least one AI provider to be configured.**
+| File / Group | Coverage Area | Count |
+|---|---|---|
+| `test_phase2_stage_b_security.py` | Auth, session tokens, student isolation | — |
+| `test_code_aware_quiz_rendering.py` | Code block syntax, KaTeX detection, XSS escaping | 144 tests |
+| `test_phase2_stage_e_concurrency.py` | Concurrent request handling (5-thread) | — |
+| `test_cloudflare_provider.py` | Cloudflare Workers AI integration | — |
+| `test_strict_topic_quiz_generation.py` | Dual-Guard topic isolation accuracy | — |
+| `test_notes_upload_and_extraction.py` | PDF/DOCX/PPTX file parsing | — |
+| `test_smoke_test_tidb_tls.py` | TiDB TLS connectivity (skipped locally) | 6 tests |
 
-```bash
-# From backend/
-python test_api.py
-```
+### End-to-end browser journey (Module 5)
 
-### Curriculum validation
-
-```bash
-python validate_quiz_topics.py           # Checks all 55 courses
-python validate_curriculum_expansion.py  # Checks topic extraction completeness
-```
-
-No test results are claimed here. Run the scripts and inspect the output.
+A 29-checkpoint automated browser journey using headless Google Chrome via Chrome DevTools Protocol (CDP) verified the full student lifecycle (registration, topic selection, quiz generation, answer submission, scoring, and retakes) with zero uncaught JavaScript exceptions. The generation step was evaluated using a calibrated deterministic response pool.
 
 ---
 
 ## Security and Git Practices
 
-- **Never commit `backend/.env`** — it contains real API keys and is listed in `.gitignore`.
-- Use `backend/.env.example` as the committed template; it contains only placeholder values.
+- **Never commit `backend/.env`** — it contains real API keys and is in `.gitignore`.
 - **Never commit `backend/data/learnai.db`** — it contains student quiz history.
-- Do not commit `venv/` or `__pycache__/` directories.
+- Use `backend/.env.example` as the committed template (placeholder values only).
+- Do not commit `venv/`, `__pycache__/`, or any `*.pyc` files.
+- In production, `SESSION_SECRET_KEY` must be a cryptographically random string (`openssl rand -hex 32`).
+- API keys are never logged or included in HTTP responses.
 
 Recommended `.gitignore` entries:
 
 ```gitignore
 # Secrets
 backend/.env
+backend/.env.*
+!backend/.env.example
 
 # Database
 backend/data/learnai.db
@@ -742,7 +772,7 @@ build/
 
 ## Deployment
 
-A `render.yaml` is included for one-click deployment to [Render.com](https://render.com/) (free tier).
+A `render.yaml` is included for deployment to [Render.com](https://render.com/).
 
 ```yaml
 services:
@@ -751,37 +781,56 @@ services:
     env: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
     plan: free
-    envVars:
-      - key: GEMINI_API_KEY
-        sync: false
+    healthCheckPath: /health
 ```
 
-Set API keys as environment variables in the Render dashboard. Add `GROQ_API_KEY` and `NVIDIA_API_KEY` as additional environment variables if using those providers.
+> **Critical:** Always deploy with `--workers 1`. The in-process quota manager uses `threading.Lock()` which cannot coordinate across OS processes. Multi-worker deployment requires migrating quota state to Redis or a database table.
 
-**Note:** The SQLite database is stored on the container filesystem. On Render's free tier, the filesystem is ephemeral — the database and student history are reset on each deploy or restart. For persistent history in production, migration to a managed database (e.g. PostgreSQL) would be required.
+**Required environment variables in Render dashboard:**
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | TiDB/MySQL connection URI |
+| `SESSION_SECRET_KEY` | Cryptographically random string |
+| `GROQ_API_KEY` | Groq LPU API key (primary provider) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare Workers AI API token |
+| `NVIDIA_API_KEY` | NVIDIA Build API key (optional fallback) |
+| `GEMINI_API_KEY` | Google Gemini API key (optional fallback) |
+
+**Note on persistence:** On Render's free tier, the filesystem is ephemeral. Configure `DATABASE_URL` pointing to a persistent TiDB or MySQL instance to retain student history across deploys and restarts.
 
 ---
 
 ## Future Improvements
 
-The following features are not yet implemented:
-
-- **Student authentication** — Identity is currently an anonymous UUID stored in `localStorage`.
-- **History screen in the UI** — The `/api/student/{id}/history` endpoint exists; a frontend page to display it does not.
-- **Persistent production database** — The current SQLite database is local and reset on stateless hosting restarts.
-- **PDF / notes upload** — Would allow students to supply their own study material for question generation.
-- **Admin / instructor dashboard** — No instructor-facing tooling is built.
-- **Configurable question count** — Currently hard-coded to 10 questions.
+- **Redis-backed quota manager** — Enables safe horizontal scaling with `--workers > 1`.
+- **Handwritten notebook OCR** — Offline image-to-text pipeline for scanned handwritten notes.
+- **Formal WCAG 2.1 AA automated audit** — Axe-core or Lighthouse integration in the CI test suite.
+- **Configurable question count** — Currently hard-coded to 10 questions per quiz.
 - **Per-question timer** — The quiz screen does not enforce a time limit.
+- **Admin / instructor dashboard** — No instructor-facing tooling is built.
+- **Short-answer question type** — Infrastructure exists in `short_answer_evaluator.py`; frontend integration pending.
 
 ---
 
 ## Repository
 
-**GitHub:** https://github.com/Mokshagnna/LearnAI
+**GitHub:** https://github.com/Mokshagnna/LearnAI  
+**Live App:** https://learnai-fzgd.onrender.com  
+**Branch:** `main` | **HEAD:** `fbda6ca`
 
 **Program:** B.Tech CSE — Artificial Intelligence and Machine Learning  
 **Institution:** VFSTR Deemed to be University  
-**Curriculum:** R22 Regulation
+**Department:** ACSE (School of Computing and Informatics)  
+**Curriculum:** R22 Regulation  
+
+**Team:**
+- T. Naga Venkata Mallikharjuna (241FA18272)
+- B. Venkata Sai Ganapathi Naidu (241FA18476)
+- Sk. Irshad Vali (241FA18473)
+- G. Mokshagnna (241FA18302)
+
+**Supervisor:** Ms. I. Leela Priya, M.Tech., Assistant Professor, Dept. of ACSE
