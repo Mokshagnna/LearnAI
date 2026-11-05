@@ -573,7 +573,7 @@ def generate_quiz(
                 f"[DEADLINE REACHED] Only {deadline.remaining:.1f}s remaining (min required: {min_required_time:.1f}s for {provider.name}). "
                 f"Skipping provider={provider.name}."
             )
-            break
+            continue
 
         for attempt_idx in range(max_retries + 1):
             if len(preserved_questions) >= num_questions:

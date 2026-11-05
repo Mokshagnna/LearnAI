@@ -276,7 +276,9 @@ class GroqProvider(BaseAIProvider):
                         continue
 
                     if any(term in msg for term in ["rate limit", "429", "too many requests"]):
-                        rl_info = parse_rate_limit("groq", e, getattr(e, "response", None))
+                        resp = getattr(e, "response", None)
+                        resp_headers = dict(resp.headers) if hasattr(resp, "headers") else resp
+                        rl_info = parse_rate_limit("groq", e, resp_headers)
                         cooldown = quota_manager.record_rate_limit("groq", current_model, key_value, rl_info)
                         logger.warning(
                             f"[GROQ RATE LIMIT] model={current_model} type={rl_info.limit_type.value} "

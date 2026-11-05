@@ -22,8 +22,21 @@ logger = logging.getLogger("learnai.providers.nvidia")
 class NvidiaProvider(BaseAIProvider):
     """NVIDIA Build AI Provider via OpenAI-compatible API."""
 
+    DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-8b-instruct"
+    DEFAULT_FALLBACK_MODEL = "meta/llama-3.1-70b-instruct"
+    DEPRECATED_NVIDIA_MODELS = {"meta/llama-3.1-8b-instruct"}
+
     _client_cache: dict = {}
     _client_lock: threading.Lock = threading.Lock()
+    _catalog_cache: Optional[set] = None
+    _catalog_lock: threading.Lock = threading.Lock()
+    _runtime_deprecated_models: set = set()
+
+    @classmethod
+    def reset_runtime_caches(cls):
+        """Reset in-memory catalog cache and runtime-discovered deprecated models (used for testing)."""
+        cls._catalog_cache = None
+        cls._runtime_deprecated_models.clear()
 
     def __init__(self):
         self._name = "nvidia"
@@ -60,6 +73,49 @@ class NvidiaProvider(BaseAIProvider):
             else:
                 client.timeout = max(float(timeout_sec), 0.5)
             return client
+
+    def _discover_catalog_models(self, client, timeout_sec: float) -> Optional[set]:
+        """
+        Queries GET /v1/models to verify active models.
+        Cached in-memory. If discovery fails (timeout, network, auth, empty), returns None
+        so the provider safely falls back to verified static candidates.
+        """
+        if self._catalog_cache is not None:
+            return self._catalog_cache
+
+        if timeout_sec < 3.0:
+            logger.info("[NVIDIA CATALOG] Time budget too low for catalog discovery (%.1fs). Using static fallback.", timeout_sec)
+            return None
+
+        with self._catalog_lock:
+            if self._catalog_cache is not None:
+                return self._catalog_cache
+            try:
+                logger.info("[NVIDIA CATALOG] Discovering active models from catalog...")
+                lookup_timeout = min(1.5, timeout_sec * 0.25)
+                models_resp = client.models.list(timeout=lookup_timeout)
+                discovered = set()
+                if hasattr(models_resp, "data"):
+                    for m in models_resp.data:
+                        m_id = getattr(m, "id", None)
+                        if m_id:
+                            discovered.add(str(m_id).strip())
+                elif isinstance(models_resp, list):
+                    for m in models_resp:
+                        m_id = m.get("id") if isinstance(m, dict) else getattr(m, "id", None)
+                        if m_id:
+                            discovered.add(str(m_id).strip())
+
+                if discovered:
+                    self._catalog_cache = discovered
+                    logger.info("[NVIDIA CATALOG SUCCESS] Discovered %d active models from catalog.", len(discovered))
+                    return discovered
+                else:
+                    logger.warning("[NVIDIA CATALOG EMPTY] Catalog returned 0 models. Falling back to static candidates.")
+                    return None
+            except Exception as e:
+                logger.warning("[NVIDIA CATALOG FAILED] Catalog lookup failed (%s). Falling back safely to static candidate models.", sanitize_error_text(e))
+                return None
 
     def _is_auth_error(self, exc: Exception) -> bool:
         msg = str(exc).lower()
@@ -169,23 +225,36 @@ class NvidiaProvider(BaseAIProvider):
         if not keys_to_try:
             raise ProviderConfigError("NVIDIA_API_KEY is not configured.", category="MISSING_CREDENTIALS") from None
 
-        # Verified active NVIDIA models: meta/llama-3.1-8b-instruct (primary), meta/llama-3.1-70b-instruct (fallback)
-        DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-8b-instruct"
-        KNOWN_INVALID_NVIDIA_MODELS = {"meta/llama-3.3-70b-instruct"}
+        DEFAULT_NVIDIA_MODEL = self.DEFAULT_NVIDIA_MODEL
+        DEFAULT_FALLBACK_MODEL = self.DEFAULT_FALLBACK_MODEL
+        DEPRECATED_NVIDIA_MODELS = self.DEPRECATED_NVIDIA_MODELS
 
         configured_model = os.getenv("NVIDIA_MODEL", DEFAULT_NVIDIA_MODEL).strip()
-        fallback_model = (os.getenv("NVIDIA_FALLBACK_MODEL") or "meta/llama-3.1-70b-instruct").strip()
+        fallback_model = (os.getenv("NVIDIA_FALLBACK_MODEL") or DEFAULT_FALLBACK_MODEL).strip()
 
-        if configured_model in KNOWN_INVALID_NVIDIA_MODELS:
+        # Build active candidate list, skipping deprecated primary models
+        candidate_models = []
+        is_configured_deprecated = (
+            configured_model in DEPRECATED_NVIDIA_MODELS
+            or configured_model in self._runtime_deprecated_models
+        )
+
+        if is_configured_deprecated:
             logger.warning(
-                "[NVIDIA CONFIG WARNING] Configured NVIDIA_MODEL '%s' returned 410 Gone (endpoint deprecated) in production. "
-                "Adding verified active model '%s' to candidate models.",
-                configured_model, DEFAULT_NVIDIA_MODEL
+                "[NVIDIA CONFIG WARNING] Configured NVIDIA_MODEL '%s' is deprecated/invalid. "
+                "Skipping primary model in favor of active models.",
+                configured_model
             )
+        elif configured_model:
+            candidate_models.append(configured_model)
 
-        candidate_models = [configured_model]
-        for alt in [fallback_model, DEFAULT_NVIDIA_MODEL, "meta/llama-3.1-70b-instruct", "mistralai/mixtral-8x7b-instruct-v0.1"]:
-            if alt and alt not in candidate_models:
+        for alt in [fallback_model, "nvidia/nemotron-3.5-lightning-30b-a3b", "mistralai/mixtral-8x7b-instruct-v0.1", DEFAULT_NVIDIA_MODEL]:
+            if (
+                alt
+                and alt not in candidate_models
+                and alt not in self._runtime_deprecated_models
+                and (alt != configured_model or not is_configured_deprecated)
+            ):
                 candidate_models.append(alt)
 
         last_error = None
@@ -200,9 +269,25 @@ class NvidiaProvider(BaseAIProvider):
             key_error = None
             key_had_auth_error = False
 
-            for m_idx, current_model in enumerate(candidate_models):
+            # Discover catalog models if budget permits
+            active_catalog = self._discover_catalog_models(client, time_left_for_key)
+            if active_catalog is not None:
+                valid_from_catalog = [m for m in candidate_models if m in active_catalog]
+                if valid_from_catalog:
+                    effective_models = valid_from_catalog
+                else:
+                    logger.warning("[NVIDIA CATALOG] None of candidate models %s found in catalog. Using static candidates.", candidate_models)
+                    effective_models = candidate_models
+            else:
+                effective_models = candidate_models
+
+            if not effective_models:
+                logger.error("[NVIDIA] No active candidate models available.")
+                raise ProviderConfigError("No valid or active NVIDIA models available.", category="MODEL_NOT_FOUND_404")
+
+            for m_idx, current_model in enumerate(effective_models):
                 time_left = timeout_seconds - (time.perf_counter() - overall_start)
-                if time_left < 2.5:
+                if time_left < 2.0:
                     logger.warning(f"[NVIDIA] Budget exhausted ({time_left:.1f}s left). Skipping model={current_model}.")
                     break
 
@@ -213,8 +298,15 @@ class NvidiaProvider(BaseAIProvider):
                     )
                     continue
 
+                remaining_models_count = len(effective_models) - (m_idx + 1)
+                if remaining_models_count > 0:
+                    # Bound attempt timeout so at least 2.5s is reserved for subsequent fallback models
+                    model_timeout = max(2.0, min(time_left - 2.5, 7.5))
+                else:
+                    model_timeout = time_left
+
                 call_start = time.perf_counter()
-                logger.info(f"[NVIDIA START] key={key_label} model={current_model} timeout={time_left:.1f}s")
+                logger.info(f"[NVIDIA START] key={key_label} model={current_model} timeout={model_timeout:.1f}s")
 
                 try:
                     completion = client.chat.completions.create(
@@ -228,7 +320,7 @@ class NvidiaProvider(BaseAIProvider):
                         ],
                         temperature=0.4,
                         max_tokens=calculate_max_output_tokens(current_model, 11),
-                        timeout=time_left
+                        timeout=model_timeout
                     )
                     duration = time.perf_counter() - call_start
 
@@ -257,8 +349,9 @@ class NvidiaProvider(BaseAIProvider):
                             "NVIDIA API key is invalid or unauthorized.", category="AUTH_CONFIG_ERROR"
                         ) from None
 
-                    # 2. Model 410 Gone (Deprecated): attempt next candidate model!
+                    # 2. Model 410 Gone (Deprecated): dynamically record and immediately attempt next candidate model!
                     if cat == "MODEL_DEPRECATED_410":
+                        self._runtime_deprecated_models.add(current_model)
                         logger.warning(
                             f"[NVIDIA MODEL DEPRECATED] key={key_label} model={current_model} "
                             f"duration={duration:.2f}s category={cat}: {sanitize_error_text(e)}. Attempting fallback model..."
@@ -284,7 +377,9 @@ class NvidiaProvider(BaseAIProvider):
 
                     # 4. Retryable error (rate-limit, temporary service, timeout, connection)
                     if cat == "RATE_LIMIT_429" or "rate limit" in str(e).lower() or "429" in str(e):
-                        rl_info = parse_rate_limit("nvidia", e, getattr(e, "response", None))
+                        resp = getattr(e, "response", None)
+                        resp_headers = dict(resp.headers) if hasattr(resp, "headers") else resp
+                        rl_info = parse_rate_limit("nvidia", e, resp_headers)
                         cooldown = quota_manager.record_rate_limit("nvidia", current_model, key_value, rl_info)
                         logger.warning(
                             f"[NVIDIA RATE LIMIT] model={current_model} type={rl_info.limit_type.value} "

@@ -1,4 +1,4 @@
-name: LearnAI CI
+name: Agentic-AI Notes to Quiz Generator CI
 
 on:
   push:

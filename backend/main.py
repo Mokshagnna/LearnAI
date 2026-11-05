@@ -213,7 +213,7 @@ DEBUG = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
 
 app = FastAPI(
 
-    title="LearnAI Quiz Platform",
+    title="Agentic-AI Notes to Quiz Generator",
 
     docs_url="/docs" if DEBUG else None,
 

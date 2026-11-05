@@ -1,7 +1,7 @@
 """
 conftest.py
 ===========
-Shared pytest configuration and fixtures for the LearnAI backend test suite.
+Shared pytest configuration and fixtures for the Agentic-AI Notes to Quiz Generator backend test suite.
 Provides automatic test-isolation safeguards for in-memory services.
 """
 import pytest

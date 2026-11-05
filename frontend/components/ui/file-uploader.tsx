@@ -171,7 +171,7 @@ export const Component: React.FC<ComponentProps> = ({ onExtractionSuccess }) => 
     }
   };
 
-  // Real API request to LearnAI backend
+  // Real API request to Agentic-AI Notes to Quiz Generator backend
   const handleUpload = async () => {
     if (selectedFiles.length === 0 || uploading) return;
 

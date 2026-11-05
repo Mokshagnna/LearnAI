@@ -1,6 +1,6 @@
-# LearnAI — Agentic-AI Notes to Quiz Generator
+# Agentic-AI Notes to Quiz Generator
 
-**LearnAI** is an agentic, syllabus-grounded adaptive quiz platform for B.Tech CSE (AI & ML) students at VFSTR Deemed to be University. Students register, log in, upload personal study notes (PDF, DOCX, PPTX, or plain text), and select a course + topic from the full R22 curriculum. The backend generates a fresh 10-question multiple-choice quiz driven by real AI inference across a resilient multi-provider chain (Groq → Cloudflare Workers AI → NVIDIA → Gemini). After submission, the system performs deterministic server-side scoring, concept-level performance analysis, and AI-generated revision feedback. Subsequent retakes receive difficulty-adapted question sets that explicitly avoid previously seen questions and concepts.
+**Agentic-AI Notes to Quiz Generator** is an agentic, syllabus-grounded adaptive quiz platform for B.Tech CSE (AI & ML) students at VFSTR Deemed to be University. Students register, log in, upload personal study notes (PDF, DOCX, PPTX, or plain text), and select a course + topic from the full R22 curriculum. The backend generates a fresh 10-question multiple-choice quiz driven by real AI inference across a resilient multi-provider chain (Groq → Cloudflare Workers AI → NVIDIA → Gemini). After submission, the system performs deterministic server-side scoring, concept-level performance analysis, and AI-generated revision feedback. Subsequent retakes receive difficulty-adapted question sets that explicitly avoid previously seen questions and concepts.
 
 > **Live deployment:** [https://learnai-fzgd.onrender.com](https://learnai-fzgd.onrender.com)
 
@@ -80,8 +80,8 @@
 | Database — production | TiDB (MySQL-compatible cloud DB via PyMySQL + DBUtils pool) |
 | Database — local dev | SQLite (auto-created if `DATABASE_URL` is unset) |
 | AI provider — primary | Groq LPU (`llama-3.1-8b-instant` / `llama-3.3-70b-versatile`) |
-| AI provider — secondary | Cloudflare Workers AI (`@cf/meta/llama-3.1-8b-instruct`) |
-| AI provider — tertiary | NVIDIA Build (`meta/llama-3.1-8b-instruct`) |
+| AI provider — secondary | Cloudflare Workers AI (`@cf/meta/llama-3.1-8b-instruct`; chat `messages` payload with JSON mode) |
+| AI provider — tertiary | NVIDIA Build (OpenAI-compatible API with dynamic catalog discovery & HTTP 410 fallback) |
 | AI provider — quaternary | Google Gemini (`gemini-2.0-flash`) |
 | Password hashing | argon2-cffi (Argon2id; `time_cost=3, memory_cost=65536`) |
 | Session security | SHA-256 HMAC token hashing |
@@ -108,7 +108,7 @@
 ## Project Structure
 
 ```
-LearnAI/
+agentic-ai-notes-to-quiz-generator/
 ├── README.md
 ├── render.yaml                           # Render.com deployment config (--workers 1)
 ├── design.md                            # UI/UX design system specification
@@ -176,8 +176,8 @@ LearnAI/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Mokshagnna/LearnAI.git
-cd LearnAI
+git clone https://github.com/Mokshagnna/LearnAI.git agentic-ai-notes-to-quiz-generator
+cd agentic-ai-notes-to-quiz-generator
 
 # 2. Create and activate a virtual environment inside the backend directory
 cd backend
@@ -221,17 +221,19 @@ GROQ_SECONDARY_API_KEY=your_secondary_groq_key_here   # Optional backup key
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_FALLBACK_MODEL=llama-3.3-70b-versatile
 
-# Cloudflare Workers AI (independent fallback)
+# Cloudflare Workers AI (independent fallback; uses chat messages format with response_format: {"type": "json_object"})
+# Note: 1,800 max_tokens is the current request configuration default in CloudflareProvider, not a provider-wide ceiling.
 CLOUDFLARE_ENABLED=true
 CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id_here
 CLOUDFLARE_API_TOKEN=your_cloudflare_api_token_here
 CLOUDFLARE_MODEL=@cf/meta/llama-3.1-8b-instruct
 CLOUDFLARE_TIMEOUT_SECONDS=20.0
 
-# NVIDIA Build
+# NVIDIA Build (Dynamic serverless catalog discovery with static fallback)
+# Note: Model IDs are candidate/fallback configurations subject to live catalog availability via /v1/models.
 NVIDIA_API_KEY=your_nvidia_api_key_here
-NVIDIA_MODEL=meta/llama-3.1-8b-instruct
-NVIDIA_FALLBACK_MODEL=meta/llama-3.1-70b-instruct
+NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b   # Candidate model subject to live catalog availability
+NVIDIA_FALLBACK_MODEL=meta/llama-3.1-70b-instruct     # Secondary fallback candidate; deprecated models returning HTTP 410 failover automatically
 
 # Google Gemini
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -266,7 +268,7 @@ uvicorn main:app --reload
 
 The application is available at **http://127.0.0.1:8000**.
 
-The FastAPI backend serves the `frontend/` directory as static files at the root path, so no separate web server is needed for local development. The database (`backend/data/learnai.db`) is created automatically on first startup if `DATABASE_URL` is unset.
+The FastAPI backend serves the `frontend/` directory as static files at the root path, so no separate web server is needed for local development. The frontend dynamically resolves backend API routes relative to the host window origin (`window.location.origin`), ensuring requests route cleanly to whichever port FastAPI is serving from (e.g. `8000` or an isolated test server on `8001`) without port collisions or CORS mismatches. The database (`backend/data/learnai.db`) is created automatically on first startup if `DATABASE_URL` is unset.
 
 > **Production note:** Always start with `--workers 1`. The quota manager uses an in-process `threading.Lock` backed by a local file; running multiple OS workers causes stale cooldown state across processes.
 
@@ -286,13 +288,32 @@ Basic liveness probe.
 
 ### GET /api/health
 
-Deep health check including database connectivity and provider status.
+Deep health check reporting service status, database connectivity, and provider telemetry.
 
+**Basic probe response (200 — illustrative example):**
 ```json
 {
   "status": "healthy",
+  "timestamp": "2026-11-05T13:14:09Z",
+  "version": "1.0.0",
+  "database": "connected"
+}
+```
+
+**Detailed probe response (with `?detailed=true` or in `DEBUG` mode — illustrative example):**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-11-05T13:14:09Z",
+  "version": "1.0.0",
   "database": "connected",
-  "providers": { "groq": "active", "cloudflare": "active" }
+  "configured_providers": ["groq", "cloudflare"],
+  "metrics": {
+    "uptime_seconds": 320,
+    "quiz_requests": { "total": 1, "successful": 1, "failed": 0, "rate_limited": 0 },
+    "providers": { "groq": { "attempts": 1, "successes": 1, "failures": 0, "avg_latency_seconds": 4.88 } }
+  },
+  "groq_available_models": ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
 }
 ```
 
@@ -567,8 +588,12 @@ POST /api/quiz/generate
         |
         +-- Provider orchestration loop (quota_manager.py checks cooldowns)
         |     for each provider in PROVIDER_ORDER (cooldown-skipped if active):
+        |       +-- non-blocking deadline preflight (skips provider if budget insufficient, continues to next)
+        |       +-- dynamic rate-limit header parsing (httpx.Response and dict support)
         |       +-- attempt with per-provider timeout budget
-        |       +-- parse JSON from raw LLM output (regex + json.loads)
+        |       +-- Cloudflare uses chat messages with JSON Mode (current request default: 1,800 max_tokens)
+        |       +-- NVIDIA queries live catalog with automatic HTTP 410 failover (candidate models subject to live availability; reserves >= 2.5s for fallback)
+        |       +-- parse JSON from LLM output (native JSON Mode / regex + json.loads)
         |       +-- structural validation (10 Qs, 4 options, correct_answer)
         |       +-- academic correctness verification (academic_verifier.py)
         |       +-- bounded replenishment (up to 2 extra calls if < 10 valid)
@@ -594,13 +619,14 @@ POST /api/quiz/generate
 
 ## Session Persistence & Active Quiz Restoration
 
-LearnAI guarantees state preservation for active study sessions across user interactions and browser interruptions:
+Agentic-AI Notes to Quiz Generator guarantees state preservation for active study sessions across user interactions and browser interruptions:
 
 ### Active Quiz Persistence Across Navigation & Refresh
 - **Cross-Tab Continuity:** Students can freely navigate between **Practice Quiz**, **Notes & Slides**, and the **Student Dashboard** without losing an in-progress quiz.
 - **State Integrity:** The active quiz object, question list, current question index, selected option answers, and elapsed progress are persisted in client session storage and mirrored on the backend.
 - **Non-Destructive Navigation:** Course and topic selectors are synchronized using non-destructive population logic (`populateTopicDropdown`). Internal navigation does not trigger synthetic reset events or wipe active question state.
-- **Page Refresh Recovery:** Upon page reload (`location.reload()`), `restoreSessionState()` re-hydrates the active quiz session without flashing the setup screen. Promise deduplication prevents race conditions during rapid state transitions.
+- **Page Refresh Recovery:** Upon page reload (`location.reload()`), `restoreSessionState()` re-hydrates the active quiz session without flashing the setup screen. Promise deduplication (`restoreSessionPromise`) prevents race conditions during rapid state transitions, and identity guards ensure anonymous UUID minting cannot overwrite registered student state.
+- **Identity Isolation:** Quiz state persistence is scoped to the authenticated student ID. Switching student accounts or unauthenticated session drops deliberately clear unsubmitted quiz state to prevent session cross-talk.
 - **Retake vs. Active Quiz Isolation:** Completed quizzes are never restored as in-progress. Selecting a new topic or initiating a retake explicitly generates a new quiz session with a distinct `quiz_id`.
 
 ---
@@ -755,12 +781,15 @@ Always access the app through `http://127.0.0.1:8000`. Opening `index.html` dire
 
 ## Testing and Verification
 
-The backend is covered by a comprehensive automated test suite of **1,079 tests** (Pytest 9.x), achieving **1,073 passed** and **6 conditional skips** with **zero failures**.
+The backend test suite contains **1,119 collected tests** (Pytest 9.x):
+- **1,113 passed, 6 conditionally skipped** in 83s (`pytest backend -q`).
+- The 6 skipped tests are in `test_smoke_test_tidb_tls.py` (active when live TiDB TLS certificate credentials are not configured in local development).
+- **204 focused regression tests** verified passing across the core provider remediation, local routing, selective replacement, quota management, and Render production suites.
 
 ```bash
 # Run the full test suite from backend/
 pytest backend/ -q
-# Expected: 1073 passed, 6 skipped in ~82s
+# Result: 1113 passed, 6 skipped in ~83s
 ```
 
 The 6 skipped tests are in `test_smoke_test_tidb_tls.py` and are skipped when live TiDB TLS credentials are not present in the local environment. They are not failures.
@@ -795,7 +824,11 @@ Automated browser verification via Chrome DevTools Protocol (CDP) tests 10 criti
 | `test_phase2_stage_b_security.py` | Auth, session tokens, student isolation | — |
 | `test_code_aware_quiz_rendering.py` | Code block syntax, KaTeX detection, XSS escaping | 144 tests |
 | `test_phase2_stage_e_concurrency.py` | Concurrent request handling (5-thread) | — |
-| `test_cloudflare_provider.py` | Cloudflare Workers AI integration | — |
+| `test_cloudflare_provider.py` | Cloudflare Workers AI integration | 29 tests |
+| `test_nvidia_provider.py` | NVIDIA dynamic catalog discovery & HTTP 410 fallback | 6 tests |
+| `test_frontend_api_routing.py` | Local API routing across FastAPI ports and origins | 17 tests |
+| `test_quota_manager.py` | Case-insensitive rate-limit parser (`httpx.Response` & dict) | 22 tests |
+| `test_selective_replacement_and_deadline.py` | Provider loop deadline handling & selective question repair | 13 tests |
 | `test_strict_topic_quiz_generation.py` | Dual-Guard topic isolation accuracy | — |
 | `test_notes_upload_and_extraction.py` | PDF/DOCX/PPTX file parsing | — |
 | `test_smoke_test_tidb_tls.py` | TiDB TLS connectivity (skipped locally) | 6 tests |
@@ -888,14 +921,13 @@ services:
 
 ## Repository
 
-**GitHub:** https://github.com/Mokshagnna/LearnAI  
-**Live App:** https://learnai-fzgd.onrender.com  
-**Branch:** `main` | **HEAD:** `fbda6ca`
-
-**Program:** B.Tech CSE — Artificial Intelligence and Machine Learning  
-**Institution:** VFSTR Deemed to be University  
-**Department:** ACSE (School of Computing and Informatics)  
-**Curriculum:** R22 Regulation  
+- **GitHub:** https://github.com/Mokshagnna/LearnAI
+- **Live App:** https://learnai-fzgd.onrender.com
+- **Branch:** `main`
+- **Program:** B.Tech CSE — Artificial Intelligence and Machine Learning
+- **Institution:** VFSTR Deemed to be University
+- **Department:** ACSE (School of Computing and Informatics)
+- **Curriculum:** R22 Regulation
 
 **Team:**
 - T. Naga Venkata Mallikharjuna (241FA18272)

@@ -14,13 +14,13 @@ They use the platform in situations ranging from regular course revision to high
 
 ## Product Purpose
 
-LearnAI exists to provide distraction-free, syllabus-grounded formative assessments that give engineering students instantaneous, rigorous, and actionable insight into their topic-level understanding.
+Agentic-AI Notes to Quiz Generator exists to provide distraction-free, syllabus-grounded formative assessments that give engineering students instantaneous, rigorous, and actionable insight into their topic-level understanding.
 
 Success means a student can choose any syllabus topic or upload their course lecture materials, immediately sit for a high-quality 10-question adaptive assessment, receive objective concept-level diagnosis, and know precisely what to review next without extraneous friction.
 
 ## Positioning
 
-Unlike generic flashcard generators or open-ended conversational AI tutors that drift off-syllabus, hallucinate question difficulty, and introduce distracting gamification, LearnAI is an authoritative, curriculum-anchored academic assessment system.
+Unlike generic flashcard generators or open-ended conversational AI tutors that drift off-syllabus, hallucinate question difficulty, and introduce distracting gamification, Agentic-AI Notes to Quiz Generator is an authoritative, curriculum-anchored academic assessment system.
 
 Its core differentiators are:
 1. **Curriculum Grounding:** Every generated question is strictly bounded by the official VFSTR R22 curriculum units or student-provided lecture notes and slides.
@@ -29,7 +29,7 @@ Its core differentiators are:
 
 ## Operating Context
 
-Students interact with LearnAI on laptops, desktop monitors, and mobile devices in university computer labs, library reading rooms, and hostel study desks.
+Students interact with Agentic-AI Notes to Quiz Generator on laptops, desktop monitors, and mobile devices in university computer labs, library reading rooms, and hostel study desks.
 
 Factual artifacts and workflows include:
 - Official course units and codes across 55 R22 curriculum courses (e.g., 22AM201 Machine Learning, 22CS104 Data Structures, 22TP103 Soft Skills).
@@ -56,7 +56,7 @@ Factual artifacts and workflows include:
 
 ## Brand Commitments
 
-- **Name:** LearnAI
+- **Name:** Agentic-AI Notes to Quiz Generator
 - **Visual Aesthetic:** Academic Scholar — clean, calm, structured, and authoritative.
 - **Voice & Tone:** Scholarly, objective, encouraging, and direct. The interface respects the student's intellect; it avoids patronizing praise, exclamation-heavy copy, and superficial game mechanics (streaks, badges, confetti).
 - **Core Palette:** Oxford Forest Green (`--color-brand: #1e4635`), Warm Stone Canvas (`--color-bg: #f8f9fa`), White Surface (`--color-surface: #ffffff`), Charcoal Text (`--color-text-primary: #111827`), with restrained functional accents for Success, Warning, and Error states.

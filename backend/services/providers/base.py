@@ -217,6 +217,9 @@ def extract_json_from_text(text: str) -> Any:
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE).strip()
         text = re.sub(r"\s*```$", "", text).strip()
 
+    if not text:
+        raise ValueError("Model output is empty or whitespace only.")
+
     # 1. Fast direct parse
     try:
         return json.loads(text, strict=False)
@@ -266,6 +269,11 @@ def extract_json_from_text(text: str) -> Any:
                 return json.loads(repaired, strict=False)
             except Exception:
                 pass
+
+    first_bracket = text.find("[")
+    if first_brace == -1 and first_bracket == -1:
+        snippet = text[:120].replace("\n", " ").strip()
+        raise ValueError(f"Model output contains no JSON object or array: '{snippet}'")
 
     # 4. Final attempt fallback
     return json.loads(text, strict=False)

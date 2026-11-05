@@ -67,34 +67,48 @@ def _hash_key(api_key: Optional[str]) -> str:
 def parse_rate_limit(
     provider_name: str,
     error: Exception,
-    response_headers: Optional[Dict[str, Any]] = None
+    response_headers: Optional[Any] = None
 ) -> RateLimitInfo:
     """
     Parses provider-specific rate limit errors, HTTP headers, and message bodies.
     Never assumes every 429 is TPM or TPD. Unknown 429 errors are strictly classified
     as UNKNOWN_429 to avoid unjustified daily lockouts.
+    Safely accepts response_headers as a dictionary, an httpx.Response object, or None.
     """
     msg = str(error).lower()
     raw_msg_snippet = str(error)[:300]
-    headers = response_headers or {}
-    if not headers and hasattr(error, "response"):
-        resp = getattr(error, "response", None)
-        if resp is not None and hasattr(resp, "headers"):
-            headers = dict(resp.headers)
+
+    # Normalize headers safely from dictionary, Response object, or error.response
+    raw_source = response_headers if response_headers is not None else getattr(error, "response", None)
+    headers: Dict[str, Any] = {}
+    if raw_source is not None:
+        if hasattr(raw_source, "headers"):
+            try:
+                headers = dict(raw_source.headers)
+            except Exception:
+                headers = {}
+        elif isinstance(raw_source, dict):
+            headers = dict(raw_source)
+        elif hasattr(raw_source, "items"):
+            try:
+                headers = dict(raw_source.items())
+            except Exception:
+                headers = {}
 
     # 1. Parse Retry-After / Reset headers if available
     retry_after_header_sec: Optional[float] = None
     explicit_reset = False
 
+    # Lowercase lookup map for case-insensitive header access
+    lower_headers = {str(k).lower(): v for k, v in headers.items()}
+
     # Standard Retry-After
-    for h_name in ["retry-after", "Retry-After"]:
-        if h_name in headers:
-            try:
-                retry_after_header_sec = float(headers[h_name])
-                explicit_reset = True
-                break
-            except (ValueError, TypeError):
-                pass
+    if "retry-after" in lower_headers:
+        try:
+            retry_after_header_sec = float(lower_headers["retry-after"])
+            explicit_reset = True
+        except (ValueError, TypeError):
+            pass
 
     # Provider-specific headers
     if retry_after_header_sec is None:
@@ -103,9 +117,9 @@ def parse_rate_limit(
             "x-ratelimit-reset-requests",
             "retry-after-ms"
         ]:
-            if h_reset in headers:
+            if h_reset in lower_headers:
                 try:
-                    val = float(headers[h_reset])
+                    val = float(lower_headers[h_reset])
                     if "ms" in h_reset:
                         retry_after_header_sec = max(0.5, val / 1000.0)
                     else:

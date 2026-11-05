@@ -548,3 +548,37 @@ class TestPersistenceSafetyAndCorrectness:
             assert is_valid is True, f"Question failed academic verification: {reason}"
             assert len(q["options"]) == 4
             assert q["correct_answer"] in ("A", "B", "C", "D")
+
+    @patch("services.llm_service.get_or_create_student", return_value="student_mod3")
+    def test_gemini_skipped_for_budget_allows_later_eligible_provider(self, mock_student):
+        """Test 13: When Gemini is skipped because remaining deadline < 10.0s, the loop continues to later eligible providers."""
+        mock_gemini = MagicMock(spec=BaseAIProvider)
+        mock_gemini.name = "gemini"
+        mock_gemini.is_configured.return_value = True
+
+        mock_cloudflare = MagicMock(spec=BaseAIProvider)
+        mock_cloudflare.name = "cloudflare"
+        mock_cloudflare.is_configured.return_value = True
+
+        questions = [dict(q) for q in DISTINCT_QUESTIONS_POOL[:10]]
+        mock_cloudflare.generate_quiz_raw.return_value = _make_quiz_json(questions)
+
+        # Simulate deadline having 8.5s remaining (less than Gemini's 10.0s requirement, but more than Cloudflare's 3.0s requirement)
+        fake_deadline = RequestDeadline(overall_deadline=8.5, start_time=time.perf_counter())
+
+        with patch("services.llm_service._get_providers", return_value=[mock_gemini, mock_cloudflare]):
+            with patch("services.llm_service.RequestDeadline", return_value=fake_deadline):
+                quiz = generate_quiz(
+                    course_code="22MA101",
+                    course_name="Linear Algebra",
+                    topic_name="Matrices",
+                    syllabus_context="Matrices, determinants",
+                    num_questions=10
+                )
+
+        # Assert Gemini was skipped without calling generate_quiz_raw
+        assert mock_gemini.generate_quiz_raw.call_count == 0
+        # Assert Cloudflare ran successfully and provided the quiz
+        assert mock_cloudflare.generate_quiz_raw.call_count >= 1
+        assert quiz["provider_used"] == "cloudflare"
+        assert len(quiz["questions"]) == 10

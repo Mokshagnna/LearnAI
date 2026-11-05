@@ -1,8 +1,8 @@
-# LearnAI — Design System & UI/UX Specification
+# Agentic-AI Notes to Quiz Generator — Design System & UI/UX Specification
 
 **Document Version:** 2.0.0 (Implemented)  
 **Theme:** Academic Scholar (Oxford Forest & Warm Stone)  
-**Target Repository:** `LearnAI` (`frontend/index.html`, `frontend/css/style.css`, `frontend/js/app.js`)  
+**Target Repository:** `agentic-ai-notes-to-quiz-generator` (`frontend/index.html`, `frontend/css/style.css`, `frontend/js/app.js`)
 **Design Philosophy:** Distraction-free, high-legibility educational assessment platform for university computer science engineering students.
 
 ---
@@ -27,9 +27,9 @@
 
 ## 1. Design Philosophy and Visual Direction
 
-LearnAI is an adaptive curriculum quiz platform designed for undergraduate students in B.Tech CSE (AI & ML). The interface follows the **Academic Scholar** visual language:
+Agentic-AI Notes to Quiz Generator is an adaptive curriculum quiz platform designed for undergraduate students in B.Tech CSE (AI & ML). The interface follows the **Academic Scholar** visual language:
 - **Calm and Intentional:** The visual aesthetic prioritizes cognitive focus, reading clarity, and low stress during assessments. Flashy gamification, neon glows, purple gradients, and floating decorations are strictly avoided.
-- **Brand Continuity:** Retains LearnAI’s collegiate heritage using an authoritative **Oxford forest green** (`--color-brand: #1e4635`) for primary calls to action, focus rings, and active indicators, set against clean warm-stone neutrals (`--color-bg: #f8f9fa`) and pure white panels (`--color-surface: #ffffff`).
+- **Brand Continuity:** Retains Agentic-AI Notes to Quiz Generator’s collegiate heritage using an authoritative **Oxford forest green** (`--color-brand: #1e4635`) for primary calls to action, focus rings, and active indicators, set against clean warm-stone neutrals (`--color-bg: #f8f9fa`) and pure white panels (`--color-surface: #ffffff`).
 - **Open Panels over Nested Cards:** Replaces deep card-in-card enclosures with structured open panels, hairline dividers (`--color-border: #e5e7eb`), and subtle tonal shifts (`--color-surface-subtle: #f3f4f6`).
 
 ---

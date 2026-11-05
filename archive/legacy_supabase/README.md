@@ -1,10 +1,10 @@
 # Archived Legacy Supabase / PostgreSQL Artifacts
 
-This directory contains retired artifacts from LearnAI's legacy Phase 2 Supabase PostgreSQL architecture.
+This directory contains retired artifacts from Agentic-AI Notes to Quiz Generator's legacy Phase 2 Supabase PostgreSQL architecture.
 
 ## Architecture Context
 
-LearnAI has migrated to:
+Agentic-AI Notes to Quiz Generator has migrated to:
 - **Production:** TiDB Cloud Serverless (MySQL 8.0 wire protocol via PyMySQL + DBUtils connection pooling)
 - **Local Development & Testing:** SQLite with WAL mode (`backend/data/learnai.db`)
 

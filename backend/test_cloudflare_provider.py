@@ -459,3 +459,144 @@ def test_quiz_provider_used_is_cloudflare(monkeypatch):
 
     assert quiz["provider_used"] == "cloudflare"
     assert len(quiz["questions"]) == 5
+
+
+# ── Phase 2A: Cloudflare JSON Mode & Response Handling Regressions ──────
+
+def test_cloudflare_request_payload_json_mode(monkeypatch):
+    """Verifies Cloudflare request payload contains messages format, system prompt, and response_format json_object."""
+    for k, v in _env_creds().items():
+        monkeypatch.setenv(k, v)
+    provider = CloudflareProvider()
+
+    quiz_json = _make_valid_quiz_json("Python Functions", "Python Programming")
+    response = _mock_http_response(
+        200,
+        json_data={"result": {"response": quiz_json}, "success": True, "errors": [], "messages": []},
+    )
+
+    mock_client = MagicMock()
+    mock_client.post.return_value = response
+    cm = MagicMock()
+    cm.__enter__.return_value = mock_client
+    cm.__exit__.return_value = False
+
+    with patch("services.providers.cloudflare_provider.httpx.Client", return_value=cm):
+        result = provider._execute("Custom prompt text", timeout_seconds=10.0, max_tokens=1500)
+
+    assert result == quiz_json
+    assert mock_client.post.called
+    call_kwargs = mock_client.post.call_args[1]
+    payload = call_kwargs.get("json", {})
+
+    assert "messages" in payload, "Payload must contain 'messages'"
+    assert isinstance(payload["messages"], list)
+    assert len(payload["messages"]) == 2
+    assert payload["messages"][0]["role"] == "system"
+    assert "Output ONLY a valid JSON object" in payload["messages"][0]["content"]
+    assert payload["messages"][1]["role"] == "user"
+    assert payload["messages"][1]["content"] == "Custom prompt text"
+
+    assert "response_format" in payload, "Payload must contain 'response_format'"
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["max_tokens"] == 1500
+
+
+def test_cloudflare_conversational_text_without_json(monkeypatch):
+    """Verifies that when Cloudflare returns conversational text without JSON braces, extract_json_from_text raises descriptive ValueError."""
+    from services.providers.base import extract_json_from_text
+
+    for k, v in _env_creds().items():
+        monkeypatch.setenv(k, v)
+    provider = CloudflareProvider()
+
+    conversational_text = "Here are 10 questions on Python Programming:\n1. What is def?\n2. What is a lambda?"
+    response = _mock_http_response(
+        200,
+        json_data={"result": {"response": conversational_text}, "success": True, "errors": [], "messages": []},
+    )
+    with _patch_httpx_client(response):
+        raw_output = provider._execute("Generate quiz", timeout_seconds=10.0)
+
+    assert raw_output == conversational_text
+    with pytest.raises(ValueError) as exc:
+        extract_json_from_text(raw_output)
+    assert "contains no JSON object or array" in str(exc.value)
+
+
+def test_cloudflare_empty_response_text_raises_empty_response(monkeypatch):
+    """Verifies HTTP 200 with empty or whitespace result.response raises ProviderError(EMPTY_RESPONSE)."""
+    for k, v in _env_creds().items():
+        monkeypatch.setenv(k, v)
+    provider = CloudflareProvider()
+
+    response = _mock_http_response(
+        200,
+        json_data={"result": {"response": "   "}, "success": True, "errors": [], "messages": []},
+    )
+    with _patch_httpx_client(response):
+        with pytest.raises(ProviderError) as exc:
+            provider._execute("Generate quiz", timeout_seconds=10.0)
+    assert exc.value.category == "EMPTY_RESPONSE"
+
+
+def test_cloudflare_malformed_envelope_missing_result(monkeypatch):
+    """Verifies HTTP 200 missing 'result' object raises ProviderError(MALFORMED_JSON_PARSE_ERROR)."""
+    for k, v in _env_creds().items():
+        monkeypatch.setenv(k, v)
+    provider = CloudflareProvider()
+
+    response = _mock_http_response(
+        200,
+        json_data={"success": True, "errors": [], "messages": []},
+    )
+    with _patch_httpx_client(response):
+        with pytest.raises(ProviderError) as exc:
+            provider._execute("Generate quiz", timeout_seconds=10.0)
+    assert exc.value.category == "MALFORMED_JSON_PARSE_ERROR"
+
+
+def test_cloudflare_timeout_regression(monkeypatch):
+    """Verifies httpx.TimeoutException raises ProviderUnavailableError(TIMEOUT)."""
+    for k, v in _env_creds().items():
+        monkeypatch.setenv(k, v)
+    provider = CloudflareProvider()
+
+    mock_client = MagicMock()
+    mock_client.post.side_effect = httpx.TimeoutException("Read timeout after 10.0s")
+    cm = MagicMock()
+    cm.__enter__.return_value = mock_client
+    cm.__exit__.return_value = False
+
+    with patch("services.providers.cloudflare_provider.httpx.Client", return_value=cm):
+        with pytest.raises(ProviderUnavailableError) as exc:
+            provider._execute("Generate quiz", timeout_seconds=10.0)
+    assert exc.value.category == "TIMEOUT"
+
+
+def test_cloudflare_http_429_regression(monkeypatch):
+    """Verifies HTTP 429 raises RATE_LIMIT_429 and puts model on cooldown."""
+    for k, v in _env_creds().items():
+        monkeypatch.setenv(k, v)
+    provider = CloudflareProvider()
+
+    resp_429 = _mock_http_response(429, text="Rate limit exceeded")
+    with _patch_httpx_client(resp_429):
+        with pytest.raises(ProviderUnavailableError) as exc429:
+            provider._execute("Generate quiz", timeout_seconds=10.0)
+    assert exc429.value.category == "RATE_LIMIT_429"
+
+
+def test_cloudflare_http_500_regression(monkeypatch):
+    """Verifies HTTP 500 raises SERVER_ERROR_500."""
+    from services.quota_manager import quota_manager
+    for k, v in _env_creds().items():
+        monkeypatch.setenv(k, v)
+    provider = CloudflareProvider()
+    quota_manager.reset_all()
+
+    resp_500 = _mock_http_response(500, text="Internal Server Error")
+    with _patch_httpx_client(resp_500):
+        with pytest.raises(ProviderUnavailableError) as exc500:
+            provider._execute("Generate quiz", timeout_seconds=10.0)
+    assert exc500.value.category == "SERVER_ERROR_500"

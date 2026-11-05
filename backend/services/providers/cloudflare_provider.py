@@ -106,7 +106,7 @@ class CloudflareProvider(BaseAIProvider):
 
     # ── request execution ───────────────────────────────────────────────
 
-    def _execute(self, prompt: str, timeout_seconds: float) -> str:
+    def _execute(self, prompt: str, timeout_seconds: float, max_tokens: int = 1800) -> str:
         if not self.is_configured():
             raise ProviderConfigError(
                 "Cloudflare Workers AI is not configured. Set CLOUDFLARE_ACCOUNT_ID "
@@ -133,9 +133,18 @@ class CloudflareProvider(BaseAIProvider):
             )
 
         payload = {
-            "prompt": prompt,
-            # Cloudflare text-generation models accept max_tokens; pass it through.
-            "max_tokens": 1800,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a professional educational quiz generator. Output ONLY a valid JSON object matching the requested schema. "
+                        "Do not include conversational text, pleasantries, or markdown explanations outside the JSON object."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": max_tokens,
         }
 
         request_timeout = httpx.Timeout(
@@ -311,7 +320,7 @@ class CloudflareProvider(BaseAIProvider):
         syllabus_context: str,
         timeout_seconds: float,
         custom_prompt: Optional[str] = None,
-        max_tokens: int = 4000,
+        max_tokens: int = 1800,
         **kwargs
     ) -> str:
         if custom_prompt:
@@ -323,7 +332,7 @@ class CloudflareProvider(BaseAIProvider):
                 topic_name=topic_name,
                 syllabus_context=syllabus_context,
             )
-        return self._execute(prompt, timeout_seconds)
+        return self._execute(prompt, timeout_seconds, max_tokens=max_tokens)
 
     def generate_analysis_raw(
         self,

@@ -131,6 +131,30 @@ class TestRateLimitParsing:
             mgr.reset_all()
 
 
+
+    def test_parse_rate_limit_with_httpx_response_object(self):
+        import httpx
+        resp = httpx.Response(429, headers={"retry-after": "7.5"})
+        info = parse_rate_limit("groq", Exception("Too Many Requests"), response_headers=resp)
+        assert info.retry_after_seconds == 7.5
+        assert info.explicit_reset_time is True
+
+    def test_parse_rate_limit_with_error_containing_httpx_response(self):
+        import httpx
+        err = Exception("Rate limit reached (429)")
+        err.response = httpx.Response(429, headers={"Retry-After": "4.2"})
+        info = parse_rate_limit("groq", err, getattr(err, "response", None))
+        assert info.retry_after_seconds == 4.2
+        assert info.explicit_reset_time is True
+
+    def test_parse_rate_limit_case_insensitive_reset_tokens_with_response(self):
+        import httpx
+        resp = httpx.Response(429, headers={"X-RateLimit-Reset-Tokens": "15.0"})
+        info = parse_rate_limit("nvidia", Exception("TPM limit exceeded"), response_headers=resp)
+        assert info.retry_after_seconds == 15.0
+        assert info.explicit_reset_time is True
+
+
 class TestProviderQuotaManagerPersistence:
     """Tests dual-tier memory + disk state persistence across instances."""
 
