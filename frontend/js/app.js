@@ -1976,25 +1976,6 @@ $("prevBtn").addEventListener("click", () => {
   }
 });
 
-$("exitQuizBtn")?.addEventListener("click", async () => {
-  if (confirm("Exit quiz and change topic? Your unfinished quiz progress will be discarded.")) {
-    const sId = currentQuiz ? (currentQuiz.quiz_id || currentQuiz.session_id) : null;
-    if (sId) {
-      try {
-        await authenticatedFetch("/api/quiz/abandon", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sId })
-        });
-      } catch (e) {
-        console.warn("[QUIZ] Failed to abandon quiz on server:", e);
-      }
-    }
-    clearSessionState();
-    showScreen("setup");
-    if ($("setupMsg")) $("setupMsg").textContent = "";
-  }
-});
 
 $("resumeActiveQuizBtn")?.addEventListener("click", () => {
   resumeActiveQuiz();
@@ -4111,8 +4092,7 @@ async function handlePracticeNav() {
   }
   const hasActive = await loadActiveQuizState();
   if (hasActive) {
-    showScreen("setup");
-    if ($("setupMsg")) $("setupMsg").textContent = "";
+    resumeActiveQuiz();
     return;
   }
   if (lastCompletedResult) {
@@ -5771,7 +5751,7 @@ async function handleLoginSubmit(e) {
     await loadCourses();
     const hasActive = await loadActiveQuizState();
     if (hasActive) {
-      showScreen("setup");
+      resumeActiveQuiz();
     } else {
       let restoredCompleted = false;
       try {
@@ -6257,7 +6237,7 @@ async function initApp() {
 
     let restoredResult = false;
     if (hasActive) {
-      showScreen("setup");
+      resumeActiveQuiz();
     } else {
       try {
         const compRes = await authenticatedFetch("/api/quiz/completed/latest");
@@ -6280,7 +6260,7 @@ async function initApp() {
     // Initialize base history state if not already present
     if (typeof window !== "undefined" && window.history && !window.history.state) {
       try {
-        window.history.replaceState({ screen: restoredResult ? "resultSection" : "setup" }, "");
+        window.history.replaceState({ screen: hasActive ? "quizSection" : (restoredResult ? "resultSection" : "setup") }, "");
       } catch (e) {
         // Ignore if sandbox restricts replaceState
       }
@@ -6339,9 +6319,13 @@ if (typeof window !== "undefined" && window.addEventListener) {
       }
       isGenerating = false;
     }
-    showScreen(targetScreen, false);
-    if (targetScreen === "dashboardSection") {
-      loadDashboard();
+    if (targetScreen === "quizSection") {
+      resumeActiveQuiz();
+    } else {
+      showScreen(targetScreen, false);
+      if (targetScreen === "dashboardSection") {
+        loadDashboard();
+      }
     }
   });
 }

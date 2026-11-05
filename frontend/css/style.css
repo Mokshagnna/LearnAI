@@ -5194,17 +5194,6 @@ html.unauthenticated #loginSection {
   height: auto !important;
 }
 
-#exitQuizBtn {
-  border: 1px solid #cbd5e1;
-  color: #64748b;
-  background: transparent;
-}
-
-#exitQuizBtn:hover {
-  background: #fef2f2;
-  color: #dc2626;
-  border-color: #fca5a5;
-}
 
 .auth-loading-state {
   display: flex;
