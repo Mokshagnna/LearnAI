@@ -18,16 +18,18 @@
 8. [API Documentation](#api-documentation)
 9. [Curriculum Configuration](#curriculum-configuration)
 10. [Quiz Generation Workflow](#quiz-generation-workflow)
-11. [Evaluation and Adaptive Learning](#evaluation-and-adaptive-learning)
-12. [Novelty and Deduplication Engine](#novelty-and-deduplication-engine)
-13. [Notes Upload & Topic Isolation](#notes-upload--topic-isolation)
-14. [Database](#database)
-15. [Error Handling and Troubleshooting](#error-handling-and-troubleshooting)
-16. [Testing and Verification](#testing-and-verification)
-17. [Security and Git Practices](#security-and-git-practices)
-18. [Deployment](#deployment)
-19. [Future Improvements](#future-improvements)
-20. [Repository](#repository)
+11. [Session Persistence & Active Quiz Restoration](#session-persistence--active-quiz-restoration)
+12. [Authentication & Credential Security](#authentication--credential-security)
+13. [Evaluation and Adaptive Learning](#evaluation-and-adaptive-learning)
+14. [Novelty and Deduplication Engine](#novelty-and-deduplication-engine)
+15. [Notes Upload & Topic Isolation](#notes-upload--topic-isolation)
+16. [Database](#database)
+17. [Error Handling and Troubleshooting](#error-handling-and-troubleshooting)
+18. [Testing and Verification](#testing-and-verification)
+19. [Security and Git Practices](#security-and-git-practices)
+20. [Deployment](#deployment)
+21. [Future Improvements](#future-improvements)
+22. [Repository](#repository)
 
 ---
 
@@ -50,7 +52,11 @@
 | Question novelty / deduplication | ✅ Implemented | Weighted Jaccard on text + concept fingerprints |
 | Adaptive difficulty adjustment | ✅ Implemented | Rule-based; mastery thresholds: 0.6 / 0.8 |
 | Student history persistence | ✅ Implemented | TiDB (MySQL-compatible cloud DB) + SQLite local fallback |
-| Session state recovery on page refresh | ✅ Implemented | `sessionStorage` in the browser |
+| Persistent authentication & zero login flash | ✅ Implemented | Multi-layered storage & cookie verification restores authenticated UI immediately |
+| Active quiz preservation across navigation | ✅ Implemented | Questions, progress, and selected answers retained across tabs & page refreshes |
+| Accessible password eye visibility toggle | ✅ Implemented | Oxford Forest design tokens, keyboard accessible (`Enter`/`Space`), aria-supported |
+| Complete credential clearing on logout | ✅ Implemented | Comprehensive DOM property, attribute, and form reset prevents credential lingering |
+| Session state recovery on page refresh | ✅ Implemented | In-memory fast path and `sessionStorage` in the browser |
 | KaTeX math rendering | ✅ Implemented | Auto-detected and rendered offline in-browser |
 | Syntax-highlighted code blocks | ✅ Implemented | 120-line zero-dependency regex lexer (Python, Java, C++, SQL, Bash) |
 | Provider quota manager with cooldown | ✅ Implemented | Thread-safe file-backed per-provider rate limiting |
@@ -586,6 +592,47 @@ POST /api/quiz/generate
 
 ---
 
+## Session Persistence & Active Quiz Restoration
+
+LearnAI guarantees state preservation for active study sessions across user interactions and browser interruptions:
+
+### Active Quiz Persistence Across Navigation & Refresh
+- **Cross-Tab Continuity:** Students can freely navigate between **Practice Quiz**, **Notes & Slides**, and the **Student Dashboard** without losing an in-progress quiz.
+- **State Integrity:** The active quiz object, question list, current question index, selected option answers, and elapsed progress are persisted in client session storage and mirrored on the backend.
+- **Non-Destructive Navigation:** Course and topic selectors are synchronized using non-destructive population logic (`populateTopicDropdown`). Internal navigation does not trigger synthetic reset events or wipe active question state.
+- **Page Refresh Recovery:** Upon page reload (`location.reload()`), `restoreSessionState()` re-hydrates the active quiz session without flashing the setup screen. Promise deduplication prevents race conditions during rapid state transitions.
+- **Retake vs. Active Quiz Isolation:** Completed quizzes are never restored as in-progress. Selecting a new topic or initiating a retake explicitly generates a new quiz session with a distinct `quiz_id`.
+
+---
+
+## Authentication & Credential Security
+
+The authentication architecture incorporates strict credential lifecycle management and accessible UI controls:
+
+### Persistent Authentication Lifecycle
+- **Session Verification:** Authenticated students retain their session across browser restarts and page refreshes via SHA-256 session tokens and HttpOnly session cookies.
+- **Zero Login Flash:** The application checks the session marker synchronously during early DOM initialization to render the authenticated interface immediately, avoiding jarring authentication screen flashes.
+- **Protected Student Identity:** The session loader enforces registered student identity boundaries (`stu_...`), preventing anonymous temporary UUID generation from overwriting logged-in student accounts.
+
+### Complete Credential Clearing on Logout
+- **Server Session Invalidation:** Calling `/api/auth/logout` revokes the session on the server and expires the authentication cookie.
+- **Multi-Layer DOM Sanitization:** To ensure user privacy on shared laboratory terminals, `handleLogout()` executes comprehensive credential cleanup:
+  - Resets all authentication forms (`loginForm`, `registerForm`, `forgotPasswordForm`, `resetPasswordForm`).
+  - Clears DOM input properties (`.value = ""`).
+  - Clears DOM default values (`.defaultValue = ""`).
+  - Resets HTML attributes (`.setAttribute("value", "")`).
+  - Purges authentication keys and tokens from local and session storage.
+  - Resets password toggle buttons to masked state (`type="password"`).
+
+### Accessible Password Eye Visibility Controls
+- **Oxford Forest Token Alignment:** Password input fields feature a dedicated toggle button neatly embedded inside the right edge (`right: 6px`, 32×32px touch target) with a mandatory `padding-right: 44px` clearance on the input element, completely eliminating text overlap across all viewports.
+- **Accessible & Form-Safe:** Toggle controls are explicitly configured with `type="button"` to prevent accidental form submissions.
+- **Full Keyboard Support:** Interactive toggle handles `click`, `Enter`, and `Space` key events, dynamically updating `aria-label`, `title`, and `aria-pressed`.
+- **Dynamic Event Delegation:** Supported by document-level event delegation, ensuring dynamically rendered or restored forms maintain responsive password visibility controls.
+- **Mobile Responsive:** Verified across compact viewports (375×667) for precise alignment and responsive usability.
+
+---
+
 ## Evaluation and Adaptive Learning
 
 ### Scoring (deterministic — `evaluator.py`)
@@ -717,6 +764,29 @@ pytest backend/ -q
 ```
 
 The 6 skipped tests are in `test_smoke_test_tidb_tls.py` and are skipped when live TiDB TLS credentials are not present in the local environment. They are not failures.
+
+### Persistent Authentication & Quiz Restoration Suite
+
+```bash
+# Run the persistent authentication, password toggle, and quiz restoration suite
+pytest backend/test_persistent_auth_and_quiz_restoration.py -v
+
+# Run core student authentication and retake reliability tests
+pytest backend/test_student_auth_system.py backend/test_phase2_stage_i_auth.py backend/test_quiz_retake_reliability_and_auth_flash.py -v
+```
+
+### Real Browser 10-Checkpoint Verification
+Automated browser verification via Chrome DevTools Protocol (CDP) tests 10 critical end-to-end scenarios against a live browser engine:
+1. **Masked Password:** Form displays masked password input with aligned Oxford Forest eye control.
+2. **Password Unmask:** Toggle click unmasks password (`type="text"`, eye-off SVG, `aria-label="Hide password"`).
+3. **Password Remask:** Subsequent click returns password to masked state (`type="password"`, eye SVG, `aria-label="Show password"`).
+4. **Active Quiz Progress:** Quiz advances through Question 1 and records Option B on Question 2 with active progress styling.
+5. **Notes Navigation:** Navigating to Notes & Slides and returning to Practice Quiz retains Question 2, Option B, and all questions.
+6. **Dashboard Navigation:** Navigating to Dashboard and returning to Practice Quiz retains Question 2, Option B, and all questions.
+7. **Page Refresh Recovery:** Full browser reload restores in-progress quiz at Question 2 with selected option intact.
+8. **Logout Sanitization:** Logout revokes session, clears email/password DOM values, defaults, attributes, and resets eye toggles.
+9. **Form Switching Sanitization:** Navigating between Login and Register screens preserves clean, unpopulated form inputs.
+10. **Mobile Viewport (375×667):** Eye toggle control maintains correct right-edge spacing and touch targets without text collision.
 
 ### Key test modules
 

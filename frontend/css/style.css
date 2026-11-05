@@ -5210,42 +5210,46 @@ html.unauthenticated #loginSection {
 }
 
 .password-input-wrapper input {
-  padding-right: 42px !important;
+  padding-right: 44px !important;
   width: 100%;
   box-sizing: border-box;
 }
 
 .password-toggle-btn {
   position: absolute;
-  right: 8px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
   background: transparent;
   border: none;
-  padding: 6px;
+  padding: 0;
   margin: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-muted, #4b5563);
   cursor: pointer;
   border-radius: var(--radius-sm, 4px);
   transition: color 0.15s ease, background-color 0.15s ease;
   line-height: 1;
+  z-index: 2;
 }
 
 .password-toggle-btn:hover {
-  color: var(--color-text-primary, #111827);
-  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--color-brand, #1e4635);
+  background-color: var(--color-brand-tint, #edf7f2);
 }
 
 .password-toggle-btn:focus-visible {
   outline: 2px solid var(--color-brand, #1e4635);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
 .password-toggle-btn svg {
   width: 18px;
   height: 18px;
+  display: block;
   pointer-events: none;
 }

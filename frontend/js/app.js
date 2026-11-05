@@ -159,7 +159,13 @@ async function ensureAuthSession(forceRefresh = false) {
         if (res.ok) {
           const data = await res.json();
           // Never overwrite a registered student ID with a minted anonymous UUID
-          if (!currentUser || !currentUser.student_id) {
+          const hasRegisteredIdentity = Boolean(
+            (currentUser && currentUser.student_id && String(currentUser.student_id).startsWith("stu_")) ||
+            (studentId && String(studentId).startsWith("stu_")) ||
+            (typeof localStorage !== "undefined" && localStorage.getItem("learnai_session_active") === "1") ||
+            (typeof localStorage !== "undefined" && (localStorage.getItem("learnai_student_id") || "").startsWith("stu_"))
+          );
+          if (!hasRegisteredIdentity) {
             studentId = data.student_id;
             if (typeof localStorage !== "undefined" && localStorage.setItem) {
               localStorage.setItem("learnai_student_id", studentId);
@@ -1459,6 +1465,7 @@ function showScreen(screenId, pushHistory = true) {
   if (isAuthScreen) {
     mainNav?.classList.add("hidden");
     topbarUser?.classList.add("hidden");
+    resetPasswordToggles();
   } else {
     mainNav?.classList.remove("hidden");
     if (currentUser) {
@@ -1555,18 +1562,31 @@ function hasActiveQuiz() {
   }
 }
 
+let restoreSessionPromise = null;
+
 async function restoreSessionState() {
-  try {
-    // 1. In-memory fast path: If active quiz is already in-memory, render immediately
-    if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
-      currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
-      currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
-      renderQuizHeader(currentQuiz);
-      renderQuestion();
-      showScreen("quizSection");
-      saveSessionState();
-      return true;
-    }
+  if (restoreSessionPromise) {
+    return restoreSessionPromise;
+  }
+  restoreSessionPromise = (async () => {
+    try {
+      // 1. In-memory fast path: If active quiz is already in-memory, render immediately
+      if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
+        currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
+        currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
+        if (activeCourseCode) {
+          if ($("course")) $("course").value = activeCourseCode;
+          populateTopicDropdown(activeCourseCode);
+          if ($("topic") && activeTopicName) {
+            $("topic").value = activeTopicName;
+          }
+        }
+        renderQuizHeader(currentQuiz);
+        renderQuestion();
+        showScreen("quizSection");
+        saveSessionState();
+        return true;
+      }
 
     let raw = null;
     try {
@@ -1639,11 +1659,12 @@ async function restoreSessionState() {
       activeStudyMaterialId = data.activeStudyMaterialId || currentQuiz.study_material_id || null;
 
       // Safely reflect dropdown values without triggering destructive change events
-      if ($("course") && activeCourseCode) {
-        $("course").value = activeCourseCode;
-      }
-      if ($("topic") && activeTopicName) {
-        $("topic").value = activeTopicName;
+      if (activeCourseCode) {
+        if ($("course")) $("course").value = activeCourseCode;
+        populateTopicDropdown(activeCourseCode);
+        if ($("topic") && activeTopicName) {
+          $("topic").value = activeTopicName;
+        }
       }
 
       renderQuizHeader(currentQuiz);
@@ -1652,11 +1673,15 @@ async function restoreSessionState() {
       saveSessionState();
       return true;
     }
-  } catch (err) {
-    console.warn("[QUIZ] Failed to restore session state:", err);
-    clearSessionState();
-  }
-  return false;
+    } catch (err) {
+      console.warn("[QUIZ] Failed to restore session state:", err);
+      clearSessionState();
+    } finally {
+      restoreSessionPromise = null;
+    }
+    return false;
+  })();
+  return restoreSessionPromise;
 }
 
 // ── Load Curriculum & Course Select ──────────────────────────────────────────
@@ -1846,11 +1871,6 @@ $("course").addEventListener("change", () => {
     activeCourseCode = selectedCourseCode;
     activeTopicName = "";
     activeTopicId = "";
-    if (currentQuiz && currentQuiz.course_code !== selectedCourseCode) {
-      currentQuiz = null;
-      currentIndex = 0;
-      answers = [];
-    }
     const topicSelect = $("topic");
     if (topicSelect) {
       topicSelect.value = "";
@@ -2031,12 +2051,10 @@ function returnFromLoading() {
     goToHome();
     if (activeCourseCode && $("course")) {
       $("course").value = activeCourseCode;
-      $("course").dispatchEvent(new Event("change"));
-      setTimeout(() => {
-        if ($("topic") && activeTopicName) {
-          $("topic").value = activeTopicName;
-        }
-      }, 50);
+      populateTopicDropdown(activeCourseCode);
+      if ($("topic") && activeTopicName) {
+        $("topic").value = activeTopicName;
+      }
     }
   }
 }
@@ -2103,11 +2121,8 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
 
     // Sync select dropdowns
     if ($("course")) $("course").value = courseCode;
-    if ($("topic") && $("topic").value !== topic) {
-      $("course").dispatchEvent(new Event("change"));
-      await new Promise(r => setTimeout(r, 40));
-      if ($("topic")) $("topic").value = topic;
-    }
+    populateTopicDropdown(courseCode);
+    if ($("topic")) $("topic").value = topic;
 
     // ── Setup Loading Screen (Calm, Minimal, Academic) ──
     if (spinner) spinner.style.display = "block";
@@ -3888,9 +3903,7 @@ async function selectAndPracticeTopic(courseCode, topicName, topicId = null) {
   const topicSelect = $("topic");
   if (courseSelect && courseObj) {
     courseSelect.value = courseObj.code;
-    if (typeof Event !== "undefined") {
-      courseSelect.dispatchEvent(new Event("change"));
-    }
+    populateTopicDropdown(courseObj.code);
     if (topicSelect && resolvedTopic) {
       topicSelect.value = resolvedTopic.name;
     }
@@ -5830,29 +5843,53 @@ async function handleResetPasswordSubmit(e) {
 const EYE_ICON_SVG = '<svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
 const EYE_OFF_ICON_SVG = '<svg class="eye-off-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
 
+function togglePasswordVisibility(btn) {
+  if (!btn) return;
+  const targetId = btn.getAttribute("data-target");
+  const input = targetId ? document.getElementById(targetId) : null;
+  if (!input) return;
+
+  const isCurrentlyPassword = input.type === "password";
+  input.type = isCurrentlyPassword ? "text" : "password";
+  btn.innerHTML = isCurrentlyPassword ? EYE_OFF_ICON_SVG : EYE_ICON_SVG;
+  btn.setAttribute("aria-label", isCurrentlyPassword ? "Hide password" : "Show password");
+  btn.setAttribute("title", isCurrentlyPassword ? "Hide password" : "Show password");
+  btn.setAttribute("aria-pressed", isCurrentlyPassword ? "true" : "false");
+}
+
 function initPasswordToggles() {
   if (typeof document === "undefined") return;
   const toggleButtons = document.querySelectorAll(".password-toggle-btn");
   toggleButtons.forEach(btn => {
-    // Avoid double-binding
     if (btn.dataset.toggleBound === "true") return;
     btn.dataset.toggleBound = "true";
 
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const targetId = btn.getAttribute("data-target");
-      const input = targetId ? document.getElementById(targetId) : null;
-      if (!input) return;
+      togglePasswordVisibility(btn);
+    });
 
-      const isCurrentlyPassword = input.type === "password";
-      input.type = isCurrentlyPassword ? "text" : "password";
-      btn.innerHTML = isCurrentlyPassword ? EYE_OFF_ICON_SVG : EYE_ICON_SVG;
-      btn.setAttribute("aria-label", isCurrentlyPassword ? "Hide password" : "Show password");
-      btn.setAttribute("title", isCurrentlyPassword ? "Hide password" : "Show password");
-      btn.setAttribute("aria-pressed", isCurrentlyPassword ? "true" : "false");
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        togglePasswordVisibility(btn);
+      }
     });
   });
+
+  // Global delegated listener for resilient dynamic handling
+  if (!document._learnaiPasswordToggleDelegated) {
+    document._learnaiPasswordToggleDelegated = true;
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest ? e.target.closest(".password-toggle-btn") : null;
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      togglePasswordVisibility(btn);
+    });
+  }
 }
 
 function resetPasswordToggles() {
@@ -5903,6 +5940,7 @@ async function handleLogout() {
     if (el) {
       el.value = "";
       el.defaultValue = "";
+      try { el.setAttribute("value", ""); } catch (e) {}
     }
   });
 
@@ -6061,9 +6099,7 @@ async function initApp() {
             const topicSelect = $("topic");
             if (courseSelect && (curriculum || []).some(c => (c.code || "").toLowerCase() === urlCourse.trim().toLowerCase())) {
               courseSelect.value = urlCourse;
-              if (typeof Event !== "undefined") {
-                courseSelect.dispatchEvent(new Event("change"));
-              }
+              populateTopicDropdown(urlCourse);
               if (topicSelect) {
                 topicSelect.value = urlTopic;
               }
