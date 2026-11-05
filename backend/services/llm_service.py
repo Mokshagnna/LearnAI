@@ -45,6 +45,7 @@ from services.novelty import (
 )
 from services.logger_utils import sanitize_error_text
 from services.metrics import metrics
+from services.quota_manager import quota_manager
 
 from services.env_loader import resolve_and_load_env
 
@@ -347,21 +348,52 @@ def _get_providers() -> List[BaseAIProvider]:
         }
     provider_map = _CACHED_PROVIDERS
 
-    order_str = os.getenv("PROVIDER_ORDER", "groq,nvidia,gemini")
+    order_str = os.getenv("PROVIDER_ORDER", "groq,nvidia,gemini,cloudflare")
     order = [p.strip().lower() for p in order_str.split(",") if p.strip()]
 
     ordered = []
     seen = set()
     for name in order:
         if name in provider_map and name not in seen:
-            ordered.append(provider_map[name])
-            seen.add(name)
+            provider = provider_map[name]
+            if provider.is_configured():
+                ordered.append(provider)
+                seen.add(name)
+                logger.info(
+                    f"[PROVIDER SELECTED] provider={name} position={len(ordered)} "
+                    f"configured=True"
+                )
+            else:
+                logger.info(
+                    f"[PROVIDER SKIPPED] provider={name} reason=missing_credentials "
+                    f"configured=False"
+                )
+        elif name not in provider_map:
+            logger.warning(
+                f"[PROVIDER UNKNOWN] provider={name} not in registered providers "
+                f"({', '.join(provider_map.keys())})"
+            )
 
-    # Append any not listed
+    # Append any not listed in PROVIDER_ORDER
     for name, provider in provider_map.items():
         if name not in seen:
-            ordered.append(provider)
+            if provider.is_configured():
+                ordered.append(provider)
+                seen.add(name)
+                logger.info(
+                    f"[PROVIDER SELECTED] provider={name} position={len(ordered)} "
+                    f"configured=True (appended from default map)"
+                )
+            else:
+                logger.info(
+                    f"[PROVIDER SKIPPED] provider={name} reason=missing_credentials "
+                    f"configured=False (not in PROVIDER_ORDER)"
+                )
 
+    logger.info(
+        f"[PROVIDER CHAIN] effective_order={[p.name for p in ordered]} "
+        f"total_configured={len(ordered)}"
+    )
     return ordered
 
 
@@ -625,6 +657,34 @@ def generate_quiz(
             t_p_start = time.perf_counter()
             is_retake = attempt_number > 1 or bool(all_fingerprints)
 
+            # ── Pre-flight cooldown check ───
+            provider_default_models = {
+                "groq": "llama-3.1-8b-instant",
+                "nvidia": "meta/llama-3.1-8b-instruct",
+                "gemini": "gemini-1.5-flash",
+                "cloudflare": "@cf/meta/llama-3.1-8b-instruct",
+            }
+            provider_model = provider_default_models.get(provider.name, provider.name)
+            provider_api_key = None
+            if provider.name == "groq":
+                provider_api_key = os.getenv("GROQ_API_KEY")
+            elif provider.name == "nvidia":
+                provider_api_key = os.getenv("NVIDIA_API_KEY")
+            elif provider.name == "gemini":
+                provider_api_key = os.getenv("GEMINI_API_KEY")
+            elif provider.name == "cloudflare":
+                provider_api_key = os.getenv("CLOUDFLARE_API_TOKEN")
+
+            is_avail, cooldown_remaining = quota_manager.is_model_available(
+                provider.name, provider_model, provider_api_key
+            )
+            if not is_avail:
+                logger.info(
+                    f"[PROVIDER SKIPPED] provider={provider.name} model={provider_model} "
+                    f"reason=cooldown remaining={cooldown_remaining:.1f}s"
+                )
+                continue
+
             try:
                 # ── Phase 1: Initial Batch Generation (if preserved_questions is empty) ───
                 if len(preserved_questions) == 0:
@@ -691,6 +751,11 @@ def generate_quiz(
                     t_json_val_total += (time.perf_counter() - t_v_start)
                     provider_used_name = provider.name
                     initial_valid_count = len(preserved_questions)
+                    if p_idx > 0:
+                        logger.info(
+                            f"[PROVIDER FALLBACK] succeeded_with={provider.name} "
+                            f"after_failed_providers={[p.name for p in configured_providers[:p_idx]]}"
+                        )
 
                 # ── Phase 2: Selective Question Replacement (if needed < num_questions) ───
                 rep_round = 0
@@ -797,6 +862,12 @@ def generate_quiz(
                                 q["difficulty"] = "Medium"
 
                     total_duration = time.perf_counter() - start_time
+                    logger.info(
+                        f"[QUIZ GENERATION COMPLETE] provider={provider.name} "
+                        f"total_duration={total_duration:.2f}s "
+                        f"questions={len(final_questions)}/{num_questions} "
+                        f"deadline_remaining={deadline.remaining:.1f}s"
+                    )
                     timing_metrics = {
                         "db_context_sec": round(t_db_context, 3),
                         "llm_primary_sec": round(t_llm_primary_total, 3),

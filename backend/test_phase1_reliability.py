@@ -23,6 +23,10 @@ from services.providers.base import (
     ProviderConfigError,
     BaseAIProvider
 )
+from services.providers.groq_provider import GroqProvider
+from services.providers.nvidia_provider import NvidiaProvider
+from services.providers.gemini_provider import GeminiProvider
+from services.providers.cloudflare_provider import CloudflareProvider
 from services.llm_service import (
     generate_quiz,
     generate_analysis,
@@ -73,16 +77,22 @@ class TestPhase1Reliability(unittest.TestCase):
 
     def test_provider_order_configuration(self):
         """Provider order strictly follows PROVIDER_ORDER env var."""
-        with patch.dict(os.environ, {"PROVIDER_ORDER": "gemini,groq,nvidia"}):
-            providers = _get_providers()
-            names = [p.name for p in providers]
-            self.assertEqual(names[:3], ["gemini", "groq", "nvidia"])
+        # Mock is_configured() to return True for all providers, since
+        # no real API keys are set in the test environment.
+        with patch.object(GroqProvider, "is_configured", return_value=True), \
+             patch.object(NvidiaProvider, "is_configured", return_value=True), \
+             patch.object(GeminiProvider, "is_configured", return_value=True), \
+             patch.object(CloudflareProvider, "is_configured", return_value=True):
+            with patch.dict(os.environ, {"PROVIDER_ORDER": "gemini,groq,nvidia"}):
+                providers = _get_providers()
+                names = [p.name for p in providers]
+                self.assertEqual(names[:3], ["gemini", "groq", "nvidia"])
 
-        with patch.dict(os.environ, {"PROVIDER_ORDER": "nvidia,gemini"}):
-            providers = _get_providers()
-            names = [p.name for p in providers]
-            self.assertEqual(names[0], "nvidia")
-            self.assertEqual(names[1], "gemini")
+            with patch.dict(os.environ, {"PROVIDER_ORDER": "nvidia,gemini"}):
+                providers = _get_providers()
+                names = [p.name for p in providers]
+                self.assertEqual(names[0], "nvidia")
+                self.assertEqual(names[1], "gemini")
 
     @patch("services.llm_service._get_providers")
     def test_cross_provider_fallback_groq_to_nvidia(self, mock_get_providers):
