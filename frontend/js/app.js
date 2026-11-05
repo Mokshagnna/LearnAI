@@ -103,6 +103,11 @@ let activeTopicName = "";
 let activeTopicId = "";
 let activeNotesSessionId = null;
 let isGenerating = false;
+// generationScreenOwner is set when quiz generation starts and cleared when the
+// user navigates away to an unrelated screen (Dashboard, Notes, Materials). It
+// determines whether the finished quiz should be auto-shown or left in memory
+// for in-memory resume via handlePracticeNav.
+let generationScreenOwner = null;
 let activeAbortController = null;
 let studentId = (typeof localStorage !== "undefined" && localStorage.getItem) ? (localStorage.getItem("learnai_student_id") || null) : null;
 let authToken = (typeof localStorage !== "undefined" && localStorage.getItem) ? (localStorage.getItem("learnai_auth_token") || null) : null;
@@ -2151,12 +2156,14 @@ function goToHome() {
     return;
   }
   if (isGenerating) return;
+  generationScreenOwner = null;
   lastCompletedResult = null;
   showScreen("setup");
   $("setupMsg").textContent = "";
 }
 
 function returnFromLoading() {
+  generationScreenOwner = null;
   if (activeAbortController) {
     activeAbortController.abort();
     activeAbortController = null;
@@ -2250,6 +2257,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     }
   }
   isGenerating = true;
+  generationScreenOwner = "generation";
 
   if (notesSessionId) {
     activeNotesSessionId = notesSessionId;
@@ -2456,52 +2464,49 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     quizStatus = "displayed";
 
     renderQuestion();
-    // Only auto-open the quiz screen if already on a practice-relevant view.
-    // If the user switched tabs away, leave the quiz in memory; it reappears when
-    // they return to Practice Quiz via handlePracticeNav (in-memory resume).
-    const curScreen = (typeof getCurrentScreen === "function") ? getCurrentScreen() : null;
-    const isPracticeView = curScreen === "setup" || curScreen === "quizSection" || curScreen === "loadingSection";
-    if (isPracticeView) {
+    // Only auto-open the quiz screen if the user is still in the generation
+    // flow (hasn't navigated to Dashboard, Notes, Materials, etc.). Otherwise
+    // leave the quiz in memory; it reappears when they return to Practice Quiz
+    // via handlePracticeNav (in-memory resume).
+    if (generationScreenOwner) {
       showScreen("quizSection");
     }
+    generationScreenOwner = null;
     saveSessionState();
 
   } catch (e) {
     if (timeoutId) clearTimeout(timeoutId);
 
-    // Stay on loading section with clean, human-readable error with Retry & Cancel
-    if (spinner) spinner.style.display = "none";
-    if ($("loadingSkeleton")) $("loadingSkeleton").classList.add("hidden");
+    generationScreenOwner = null;
 
-    let friendlyMsg = "Quiz generation is temporarily unavailable. Please try again shortly.";
-    if (e.name === "AbortError") {
-      friendlyMsg = "Quiz generation was cancelled or timed out. Please try again.";
-    } else if (e.message && typeof e.message === "string" && e.message.trim().length > 0 && !e.message.startsWith("{")) {
-      const lower = e.message.toLowerCase();
-      if (
-        lower.includes("high demand") ||
-        lower.includes("rate limit") ||
-        lower.includes("quota exceeded") ||
-        lower.includes("unavailable") ||
-        lower.includes("temporarily busy") ||
-        lower.includes("timed out")
-      ) {
-        friendlyMsg = "Quiz generation is temporarily unavailable. Please try again shortly.";
-      } else {
-        friendlyMsg = e.message;
+    // AbortError comes from Cancel (returnFromLoading) or popstate back/forward.
+    // Never show an error message for a user-initiated cancel.
+    const isAbort = e.name === "AbortError";
+
+    if (!isAbort) {
+      let friendlyMsg = "Quiz generation is temporarily unavailable. Please try again shortly.";
+      if (e.message && typeof e.message === "string" && e.message.trim().length > 0 && !e.message.startsWith("{")) {
+        const lower = e.message.toLowerCase();
+        if (
+          lower.includes("high demand") ||
+          lower.includes("rate limit") ||
+          lower.includes("quota exceeded") ||
+          lower.includes("unavailable") ||
+          lower.includes("temporarily busy") ||
+          lower.includes("timed out")
+        ) {
+          friendlyMsg = "Quiz generation is temporarily unavailable. Please try again shortly.";
+        } else {
+          friendlyMsg = e.message;
+        }
       }
+
+      // Never leave the loading screen stuck and never show a quiz for a failed
+      // generation: return to topic selection with the error message.
+      if ($("setupMsg")) $("setupMsg").textContent = friendlyMsg;
     }
 
-    if ($("loadingErrorMsg")) $("loadingErrorMsg").textContent = friendlyMsg;
-    if ($("loadingErrorBox")) $("loadingErrorBox").classList.remove("hidden");
-
-    // Configure retry button
-    const retryBtn = $("loadingRetryBtn");
-    if (retryBtn) {
-      retryBtn.onclick = () => {
-        startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId);
-      };
-    }
+    showScreen("setup");
 
   } finally {
     isGenerating = false;
@@ -3132,6 +3137,10 @@ async function openDashboard() {
     return;
   }
   if (isGenerating) return;
+  // Leaving the generation flow: clear the generation owner so a finishing
+  // generation does not auto-show the quiz on an unrelated screen.
+  generationScreenOwner = null;
+  lastCompletedResult = null;
   saveSessionState();
   expandedReviewCourseId = null;
   if (typeof window !== "undefined") window.expandedReviewCourseId = null;
@@ -4205,22 +4214,10 @@ async function handlePracticeNav() {
     resumeActiveQuiz();
     return;
   }
-  // quizStatus 'idle' or 'completed': show last result if available, else topic selection.
-  if (lastCompletedResult) {
-    showResult(lastCompletedResult);
-    return;
-  }
-  try {
-    const compRes = await authenticatedFetch("/api/quiz/completed/latest");
-    if (compRes.ok && compRes.status === 200) {
-      const compData = await compRes.json();
-      if (compData && compData.score !== undefined) {
-        lastCompletedResult = compData;
-        showResult(compData);
-        return;
-      }
-    }
-  } catch (e) {}
+  // quizStatus 'idle' or 'completed': always show topic selection. Never fall back
+  // to a completed or latest result (fixes the phantom-active-quiz bug).
+  generationScreenOwner = null;
+  lastCompletedResult = null;
   showScreen("setup");
   if ($("setupMsg")) $("setupMsg").textContent = "";
 }
@@ -5205,12 +5202,16 @@ function initNotesUploaderListeners() {
 
   $("navNotesBtn")?.addEventListener("click", () => {
     if (isGenerating) return;
+    generationScreenOwner = null;
+    lastCompletedResult = null;
     saveSessionState();
     showScreen("notesUploadSection");
   });
 
   $("setupNotesBtn")?.addEventListener("click", () => {
     if (isGenerating) return;
+    generationScreenOwner = null;
+    lastCompletedResult = null;
     showScreen("notesUploadSection");
   });
 }
@@ -5326,6 +5327,7 @@ async function loadStudyMaterials(options = {}) {
 // Backward-compatibility alias
 function openStudyMaterials() {
   if (isGenerating) return;
+  generationScreenOwner = null;
   showScreen("notesUploadSection");
   loadStudyMaterials({ forceRefresh: true });
 }
@@ -5864,21 +5866,10 @@ async function handleLoginSubmit(e) {
     if (hasActive) {
       resumeActiveQuiz();
     } else {
-      let restoredCompleted = false;
-      try {
-        const compRes = await authenticatedFetch("/api/quiz/completed/latest");
-        if (compRes.ok && compRes.status === 200) {
-          const compData = await compRes.json();
-          if (compData && compData.score !== undefined) {
-            lastCompletedResult = compData;
-            showResult(compData);
-            restoredCompleted = true;
-          }
-        }
-      } catch (e) {}
-      if (!restoredCompleted) {
-        showScreen("setup");
-      }
+      // Never fall back to a completed or latest result on login. Always show
+      // topic selection unless there is an in-progress quiz to resume.
+      lastCompletedResult = null;
+      showScreen("setup");
     }
   } catch (err) {
     console.error("[AUTH] Login error:", err);
@@ -6202,6 +6193,7 @@ async function handleLogout() {
   } catch (e) {
     console.warn("[AUTH] Quiz abandonment on logout failed (non-fatal):", e);
   }
+  generationScreenOwner = null;
 
   try {
     const headers = {};
@@ -6401,39 +6393,26 @@ async function initApp() {
     await loadCourses();
     const hasActive = await loadActiveQuizState();
 
-    let restoredResult = false;
     if (hasActive) {
       resumeActiveQuiz();
     } else {
-      try {
-        const compRes = await authenticatedFetch("/api/quiz/completed/latest");
-        if (compRes.ok && compRes.status === 200) {
-          const compData = await compRes.json();
-          if (compData && compData.score !== undefined) {
-            lastCompletedResult = compData;
-            showResult(compData);
-            restoredResult = true;
-          }
-        }
-      } catch (e) {
-        console.debug("[QUIZ] Failed to restore completed quiz on init:", e);
-      }
-      if (!restoredResult) {
-        showScreen("setup");
-      }
+      // Never fall back to a completed or latest result on init/refresh. Always
+      // show topic selection unless there is an in-progress quiz to resume.
+      lastCompletedResult = null;
+      showScreen("setup");
     }
 
     // Initialize base history state if not already present
     if (typeof window !== "undefined" && window.history && !window.history.state) {
       try {
-        window.history.replaceState({ screen: hasActive ? "quizSection" : (restoredResult ? "resultSection" : "setup") }, "");
+        window.history.replaceState({ screen: hasActive ? "quizSection" : "setup" }, "");
       } catch (e) {
         // Ignore if sandbox restricts replaceState
       }
     }
 
     // If no active quiz was restored, check URL parameters
-    if (!hasActive && !restoredResult && typeof window !== "undefined" && window.location && window.location.search) {
+    if (!hasActive && typeof window !== "undefined" && window.location && window.location.search) {
       try {
         const params = new URLSearchParams(window.location.search);
         const urlCourse = params.get("course");
@@ -6484,6 +6463,9 @@ if (typeof window !== "undefined" && window.addEventListener) {
         activeAbortController = null;
       }
       isGenerating = false;
+      // Leaving the generation flow via Back/Forward: clear owner so a finishing
+      // generation never auto-shows the quiz on an unrelated screen.
+      generationScreenOwner = null;
     }
     if (targetScreen === "quizSection") {
       // In-memory resume only: never restore from storage on popstate.
@@ -6496,6 +6478,10 @@ if (typeof window !== "undefined" && window.addEventListener) {
       } else {
         showScreen("setup", false);
       }
+    } else if (targetScreen === "resultSection") {
+      // Never show a completed result on popstate; always topic selection.
+      lastCompletedResult = null;
+      showScreen("setup", false);
     } else {
       showScreen(targetScreen, false);
       if (targetScreen === "dashboardSection") {

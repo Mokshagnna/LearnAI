@@ -566,13 +566,17 @@ class TestFrontendWiringAndElements:
         assert "resumeActiveQuiz" in js
         assert "saveSessionState" in js
         assert "lastCompletedResult" in js
-        assert "/api/quiz/completed/latest" in js
+        # The completed-result fallback has been removed from initApp / login /
+        # handlePracticeNav / popstate; the endpoint is no longer referenced as a
+        # navigation fallback in app.js.
+        assert "/api/quiz/completed/latest" not in js
         assert "/api/quiz/abandon" in js
 
     def test_handle_practice_nav_in_memory_resume_only_no_storage_read(self):
         """handlePracticeNav must resume an in-memory quiz (quizStatus 'displayed' or
         'in_progress') WITHOUT calling loadActiveQuizState / reading storage on every
-        tab switch. quizStatus 'idle' or 'completed' shows topic selection / last result."""
+        tab switch. quizStatus 'idle' or 'completed' shows topic selection (never a
+        completed result)."""
         js = APP_JS.read_text(encoding="utf-8")
         import re
         hp_start = js.index("async function handlePracticeNav")
@@ -594,6 +598,17 @@ class TestFrontendWiringAndElements:
         )
         assert "resumeActiveQuiz();" in hp_body, (
             "handlePracticeNav must call resumeActiveQuiz for in-memory quiz"
+        )
+        # No result fallback: never showResult or fetch latest completed on nav.
+        assert "showResult(" not in hp_body, (
+            "handlePracticeNav must not call showResult"
+        )
+        assert "/api/quiz/completed/latest" not in hp_body, (
+            "handlePracticeNav must not fetch /api/quiz/completed/latest"
+        )
+        # Resets any cached completed result before showing topic selection.
+        assert "lastCompletedResult = null;" in hp_body, (
+            "handlePracticeNav must reset lastCompletedResult before topic selection"
         )
 
     def test_init_app_restores_only_with_progress(self):
@@ -624,6 +639,159 @@ class TestFrontendWiringAndElements:
         )
         assert "hasActive" in js, (
             "initApp must resume only when loadActiveQuizState returns true"
+        )
+
+    def test_login_does_not_show_results_on_no_active_quiz(self):
+        """handleLoginSubmit must NOT call showResult or fetch
+        /api/quiz/completed/latest when there is no in-progress quiz; it must
+        show topic selection instead (fixes the phantom-active-quiz bug on login)."""
+        js = APP_JS.read_text(encoding="utf-8")
+        hl_start = js.index("async function handleLoginSubmit")
+        hl_end = js.index("async function handleRegisterSubmit", hl_start)
+        hl_body = js[hl_start:hl_end]
+        # No completed-result fallback on login
+        assert "showResult(" not in hl_body, (
+            "handleLoginSubmit must not call showResult as a login fallback"
+        )
+        assert "/api/quiz/completed/latest" not in hl_body, (
+            "handleLoginSubmit must not fetch /api/quiz/completed/latest"
+        )
+        # Always shows topic selection unless resuming an in-progress quiz
+        assert 'showScreen("setup")' in hl_body, (
+            "handleLoginSubmit must show topic selection when no active quiz"
+        )
+        assert "lastCompletedResult = null;" in hl_body, (
+            "handleLoginSubmit must reset lastCompletedResult"
+        )
+
+    def test_results_show_right_after_submit(self):
+        """submitQuiz must show the result screen immediately after a successful submit
+        (the only legitimate place showResult is called)."""
+        js = APP_JS.read_text(encoding="utf-8")
+        sq_start = js.index("async function submitQuiz")
+        sq_end = js.index("function showResult(data)", sq_start)
+        sq_body = js[sq_start:sq_end]
+        # On confirmed success: mark completed, cache the result, then show it.
+        assert 'quizStatus = "completed"' in sq_body, (
+            "submitQuiz must mark quizStatus completed on success"
+        )
+        assert "lastCompletedResult = data;" in sq_body, (
+            "submitQuiz must cache the result in lastCompletedResult"
+        )
+        assert "showResult(data)" in sq_body, (
+            "submitQuiz must call showResult immediately after success"
+        )
+        # showResult is defined right after submitQuiz
+        assert "function showResult(data)" in js
+
+    def test_handle_practice_nav_does_not_show_results(self):
+        """handlePracticeNav must never render a completed result; idle/completed
+        status always leads to topic selection (fixes the phantom-active-quiz bug
+        on nav back to Practice Quiz)."""
+        js = APP_JS.read_text(encoding="utf-8")
+        hp_start = js.index("async function handlePracticeNav")
+        hp_end = js.index('$("navPracticeBtn")?.addEventListener("click", handlePracticeNav);', hp_start)
+        hp_body = js[hp_start:hp_end]
+        assert "showResult(" not in hp_body, (
+            "handlePracticeNav must not call showResult"
+        )
+        assert "/api/quiz/completed/latest" not in hp_body, (
+            "handlePracticeNav must not fetch /api/quiz/completed/latest"
+        )
+        assert "lastCompletedResult = null;" in hp_body, (
+            "handlePracticeNav must reset lastCompletedResult before topic selection"
+        )
+        assert 'showScreen("setup")' in hp_body, (
+            "handlePracticeNav must show topic selection for idle/completed status"
+        )
+
+    def test_start_quiz_generation_sets_owner_and_shows_quiz_in_flow(self):
+        """startQuizGeneration must set generationScreenOwner when generation starts
+        and show the quiz screen when the user is still in the generation flow."""
+        js = APP_JS.read_text(encoding="utf-8")
+        sg_start = js.index("async function startQuizGeneration")
+        sg_end = js.index("function renderQuizHeader", sg_start)
+        sg_body = js[sg_start:sg_end]
+        # Marks generation as active so the finished quiz can be auto-shown.
+        assert "generationScreenOwner = \"generation\"" in sg_body, (
+            "startQuizGeneration must set generationScreenOwner when generation starts"
+        )
+        # Shows the quiz screen when generationScreenOwner is still set.
+        assert "if (generationScreenOwner) {" in sg_body, (
+            "startQuizGeneration must check generationScreenOwner before showing quiz"
+        )
+        assert "showScreen(\"quizSection\")" in sg_body, (
+            "startQuizGeneration must call showScreen quizSection when in flow"
+        )
+        # Clears the owner after the show/hide decision.
+        assert "generationScreenOwner = null;" in sg_body, (
+            "startQuizGeneration must clear generationScreenOwner after showing quiz"
+        )
+
+    def test_start_quiz_generation_nav_away_clears_owner(self):
+        """Nav handlers must clear generationScreenOwner so a finishing generation
+        never auto-shows the quiz on Dashboard, Notes, or Materials."""
+        js = APP_JS.read_text(encoding="utf-8")
+
+        # openDashboard clears the owner.
+        od_start = js.index("async function openDashboard()")
+        od_end = js.index("function populateDashboardCourseFilter", od_start)
+        od_body = js[od_start:od_end]
+        assert "generationScreenOwner = null;" in od_body, (
+            "openDashboard must clear generationScreenOwner when leaving generation flow"
+        )
+
+        # Notes nav handler clears the owner.
+        assert '$("navNotesBtn")?.addEventListener("click", () => {' in js
+        notes_start = js.index('$("navNotesBtn")?.addEventListener("click", () => {')
+        notes_end = js.index("$(\"setupNotesBtn\")?.addEventListener", notes_start)
+        notes_body = js[notes_start:notes_end]
+        assert "generationScreenOwner = null;" in notes_body, (
+            "navNotesBtn handler must clear generationScreenOwner"
+        )
+
+        # openStudyMaterials clears the owner.
+        osm_start = js.index("function openStudyMaterials()")
+        osm_end = js.index("function renderMaterialsGrid", osm_start)
+        osm_body = js[osm_start:osm_end]
+        assert "generationScreenOwner = null;" in osm_body, (
+            "openStudyMaterials must clear generationScreenOwner"
+        )
+
+    def test_start_quiz_generation_error_returns_to_setup(self):
+        """startQuizGeneration catch block must return to topic selection with an
+        error message, never leaving the loading screen stuck."""
+        js = APP_JS.read_text(encoding="utf-8")
+        sg_start = js.index("async function startQuizGeneration")
+        sg_end = js.index("function renderQuizHeader", sg_start)
+        sg_body = js[sg_start:sg_end]
+        # Clears generation owner on error so the quiz is never shown for a failed generation.
+        assert "generationScreenOwner = null;" in sg_body, (
+            "startQuizGeneration must clear generationScreenOwner on error"
+        )
+        # Returns to topic selection with error message.
+        assert 'showScreen("setup")' in sg_body, (
+            "startQuizGeneration must show setup screen on generation error"
+        )
+        assert "$(\"setupMsg\").textContent = friendlyMsg" in sg_body, (
+            "startQuizGeneration must set setupMsg with error message"
+        )
+
+    def test_start_quiz_generation_cancel_never_shows_quiz(self):
+        """returnFromLoading (Cancel) must clear generationScreenOwner so a cancelled
+        generation never opens the quiz when it later fails with AbortError."""
+        js = APP_JS.read_text(encoding="utf-8")
+        rfl_start = js.index("function returnFromLoading()")
+        rfl_end = js.index("function clearResultDisplay()", rfl_start)
+        rfl_body = js[rfl_start:rfl_end]
+        assert "generationScreenOwner = null;" in rfl_body, (
+            "returnFromLoading must clear generationScreenOwner on cancel"
+        )
+        assert "activeAbortController.abort()" in rfl_body, (
+            "returnFromLoading must abort the in-flight generation on cancel"
+        )
+        assert "isGenerating = false" in rfl_body, (
+            "returnFromLoading must set isGenerating false on cancel"
         )
 
     def test_popstate_in_memory_resume_only_no_storage_read(self):
