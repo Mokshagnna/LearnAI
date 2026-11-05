@@ -604,6 +604,46 @@ class TestFrontendWiringAndElements:
         assert "data.currentQuiz.student_id !== activeStudentId" in js
         assert "clearSessionState();" in js
 
+    def test_409_recovery_resets_isGenerating_before_recursive_call(self):
+        """Verify startQuizGeneration resets isGenerating before re-entering on 409 confirm,
+        so the recursive call is not blocked by the in-flight guard."""
+        js = APP_JS.read_text(encoding="utf-8")
+        # Multi-session confirm path: isGenerating = false must precede recursive call
+        assert "isGenerating = false;" in js
+        # The reset must appear between the confirmMulti branch and the recursive call
+        multi_pattern = r"if \(confirmMulti\) \{\s*isGenerating = false;\s*const allIds"
+        import re
+        assert re.search(multi_pattern, js) is not None, (
+            "409 multi-session path does not reset isGenerating before recursive startQuizGeneration()"
+        )
+        # Single-session discard path: isGenerating = false must precede recursive call
+        single_pattern = r"\}\s*else \{\s*isGenerating = false;\s*return await startQuizGeneration"
+        assert re.search(single_pattern, js) is not None, (
+            "409 single-session discard path does not reset isGenerating before recursive startQuizGeneration()"
+        )
+
+    def test_start_quiz_generation_checks_backend_when_local_state_empty(self):
+        """Verify startQuizGeneration falls back to /api/quiz/active via restoreSessionState()
+        when local frontend state shows no active quiz, preventing duplicate session creation."""
+        js = APP_JS.read_text(encoding="utf-8")
+        # The else-if branch that checks backend when hasActiveQuiz() is false
+        assert "} else if (!isRetake) {" in js
+        assert "const restored = await restoreSessionState();" in js
+        assert "if (restored) {" in js
+        assert "return;" in js
+
+    def test_start_quiz_generation_prevents_reentry_while_generating(self):
+        """Verify startQuizGeneration blocks re-entry while a generation is in flight."""
+        js = APP_JS.read_text(encoding="utf-8")
+        assert "if (isGenerating) return;" in js
+        assert "isGenerating = true;" in js
+
+    def test_409_cancel_leaves_all_sessions_untouched(self):
+        """Verify that cancelling a 409 dialog returns without modifying any sessions."""
+        js = APP_JS.read_text(encoding="utf-8")
+        # Cancel path returns immediately without calling startQuizGeneration again
+        assert "} else {\n            return;\n          }" in js or "} else {\n            return;\n          }" in js.replace("  ", " ")
+
     def test_frontend_assets_exist_and_are_versioned(self):
         """Verify that style.css and app.js physically exist and are referenced with cache-busting version query parameters in index.html."""
         import re

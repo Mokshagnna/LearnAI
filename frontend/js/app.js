@@ -2196,6 +2196,14 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
         abandonSessionId = sId;
       }
     }
+  } else if (!isRetake) {
+    // Local state shows no active quiz, but frontend state may have been lost
+    // (timeout, refresh, navigation). Check the backend as a fallback before
+    // creating a new session. Restore the existing session if one is found.
+    const restored = await restoreSessionState();
+    if (restored) {
+      return;
+    }
   }
   isGenerating = true;
 
@@ -2301,6 +2309,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
           const msg = "You have " + activeSessions.length + " unfinished quiz sessions in progress:\n\n" + sessionList + "\n\nDiscard ALL listed unfinished quizzes and start a new quiz for " + (courseCode ? (courseCode + " - ") : "") + topic + "?\n\nClick OK to discard all listed quizzes and proceed.\nClick Cancel to keep your existing quizzes.";
           const confirmMulti = confirm(msg);
           if (confirmMulti) {
+            isGenerating = false;
             const allIds = activeSessions.map(s => s.session_id);
             return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId, allIds);
           } else {
@@ -2315,6 +2324,7 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
             await restoreSessionState();
             return;
           } else {
+            isGenerating = false;
             return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId, [conflictSessionId]);
           }
         }
