@@ -69,6 +69,8 @@ from services.database import (
     get_latest_completed_attempt_for_student,
     abandon_quiz_session,
 
+    abandon_all_quiz_sessions_for_student,
+
     submit_quiz_atomic,
 
     get_student_dashboard_data,
@@ -771,7 +773,26 @@ def handle_logout(request: Request, response: Response):
 
     Revoke current authenticated session token and clear HttpOnly cookie on logout.
 
+    Before revoking, abandons any in_progress quiz session(s) for the student so a
+    quiz never stays 'in_progress' across logout/login. Backend abandonment failures
+    are logged but never block logout.
+
     """
+
+    student_id = None
+    try:
+        student_id = get_authenticated_student_id(request)
+    except Exception:
+        student_id = None
+
+    if student_id:
+        try:
+            abandoned = abandon_all_quiz_sessions_for_student(student_id)
+            if abandoned:
+                logger.info("Logout abandoned %d in_progress quiz session(s) for student %s", abandoned, student_id)
+        except Exception as e:
+            # Never let session abandonment block logout.
+            logger.warning("Failed to abandon quiz sessions on logout for student %s: %s", student_id, e)
 
     token = get_token_from_request(request)
 

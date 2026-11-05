@@ -1248,6 +1248,46 @@ def abandon_quiz_session(
             conn.close()
 
 
+def abandon_all_quiz_sessions_for_student(
+    student_id: str,
+    conn: Optional[sqlite3.Connection] = None
+) -> int:
+    """
+    Transition ALL in-progress quiz sessions for a student to 'abandoned'.
+    Used on logout so a quiz never stays 'in_progress' across sessions.
+    Returns the number of sessions abandoned. Never raises.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE quiz_sessions SET status = 'abandoned' WHERE student_id = ? AND status = 'in_progress'",
+            (student_id,)
+        )
+        affected = cursor.rowcount if hasattr(cursor, "rowcount") else 0
+        if close_conn:
+            conn.commit()
+        return affected or 0
+    except Exception as e:
+        logger.warning("Failed to abandon quiz sessions for student %s: %s", student_id, e)
+        if close_conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return 0
+    finally:
+        if close_conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def submit_quiz_atomic(
     session_id: str,
     student_id: Optional[str],

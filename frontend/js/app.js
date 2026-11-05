@@ -107,6 +107,20 @@ let activeAbortController = null;
 let studentId = (typeof localStorage !== "undefined" && localStorage.getItem) ? (localStorage.getItem("learnai_student_id") || null) : null;
 let authToken = (typeof localStorage !== "undefined" && localStorage.getItem) ? (localStorage.getItem("learnai_auth_token") || null) : null;
 let authSessionPromise = null;
+// ── Quiz lifecycle status ────────────────────────────────────────────────
+// idle: no quiz (show topic selection)
+// generating: quiz generation in flight
+// displayed: questions rendered, zero answers saved (NOT "in progress")
+// in_progress: at least one answer saved — restorable across refresh/tabs
+// completed: quiz submitted — cleared everywhere
+let quizStatus = "idle";
+// Storage version for staleness/cleanup. Bump when storage shape changes so
+// old learnai_active_quiz values (e.g. zero-answer phantom state) are ignored.
+const QUIZ_STORAGE_VERSION = 2;
+// Staleness window aligned with backend quiz_sessions.expires_at (24 hours / 86400s).
+const QUIZ_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
+// Guard against double-submit on the Submit Quiz button.
+let submitInFlight = false;
 var expandedReviewCourseId = null;
 var lastDashboardData = null;
 let lastCompletedResult = null;
@@ -1520,26 +1534,40 @@ function showScreen(screenId, pushHistory = true) {
 }
 
 // ── Session State Persistence across Navigation & Browser Refresh ───────────
+// Persist ONLY when the quiz has real progress (>= 1 saved answer).
+// A generated-but-unanswered quiz (status "displayed") must never be stored
+// as an active quiz.
 function saveSessionState() {
-  if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
-    const state = {
-      currentQuiz,
-      currentIndex,
-      answers,
-      activeCourseCode: activeCourseCode || currentQuiz.course_code,
-      activeTopicName: activeTopicName || currentQuiz.topic,
-      activeTopicId: activeTopicId || currentQuiz.topic_id || "",
-      activeNotesSessionId: activeNotesSessionId || null,
-      activeStudyMaterialId: activeStudyMaterialId || currentQuiz.study_material_id || null,
-      timestamp: Date.now()
-    };
-    try {
-      localStorage.setItem("learnai_active_quiz", JSON.stringify(state));
-    } catch (e) {}
-    try {
-      sessionStorage.setItem("learnai_active_quiz", JSON.stringify(state));
-    } catch (e) {}
+  if (quizStatus !== "in_progress") {
+    return;
   }
+  if (!currentQuiz || !Array.isArray(currentQuiz.questions) || currentQuiz.questions.length === 0) {
+    return;
+  }
+  const hasProgress = answers.some((a) => a !== "" && a !== null && a !== undefined);
+  if (!hasProgress) {
+    return;
+  }
+  const state = {
+    version: QUIZ_STORAGE_VERSION,
+    currentQuiz,
+    currentIndex,
+    answers,
+    activeCourseCode: activeCourseCode || currentQuiz.course_code,
+    activeTopicName: activeTopicName || currentQuiz.topic,
+    activeTopicId: activeTopicId || currentQuiz.topic_id || "",
+    activeNotesSessionId: activeNotesSessionId || null,
+    activeStudyMaterialId: activeStudyMaterialId || currentQuiz.study_material_id || null,
+    student_id: getStudentId() || null,
+    expires_at: currentQuiz.expires_at || null,
+    timestamp: Date.now()
+  };
+  try {
+    localStorage.setItem("learnai_active_quiz", JSON.stringify(state));
+  } catch (e) {}
+  try {
+    sessionStorage.setItem("learnai_active_quiz", JSON.stringify(state));
+  } catch (e) {}
 }
 
 function clearSessionState() {
@@ -1552,21 +1580,30 @@ function clearSessionState() {
   currentQuiz = null;
   answers = [];
   currentIndex = 0;
+  quizStatus = "idle";
   activeNotesSessionId = null;
   const banner = $("activeQuizBanner");
   if (banner) banner.classList.add("hidden");
 }
 
 function hasActiveQuiz() {
+  // A quiz is "active" only when it has real progress: at least one answer saved.
+  if (quizStatus !== "in_progress") {
+    return false;
+  }
   if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
-    return true;
+    return answers.some((a) => a !== "" && a !== null && a !== undefined);
   }
   try {
     const raw = (typeof localStorage !== "undefined" && localStorage.getItem("learnai_active_quiz")) ||
                 (typeof sessionStorage !== "undefined" && sessionStorage.getItem("learnai_active_quiz"));
     if (!raw) return false;
     const data = JSON.parse(raw);
-    return Boolean(data && data.currentQuiz && Array.isArray(data.currentQuiz.questions) && data.currentQuiz.questions.length > 0);
+    if (!data || data.version !== QUIZ_STORAGE_VERSION) return false;
+    if (!data.currentQuiz || !Array.isArray(data.currentQuiz.questions) || data.currentQuiz.questions.length === 0) {
+      return false;
+    }
+    return (Array.isArray(data.answers) && data.answers.some((a) => a !== "" && a !== null && a !== undefined));
   } catch (e) {
     return false;
   }
@@ -1592,12 +1629,29 @@ function updateActiveQuizBanner(quiz) {
 
 async function loadActiveQuizState() {
   try {
+    // One-time cleanup: drop legacy storage entries that lack a version field
+    // (e.g. pre-fix phantom state generated but never answered).
+    try {
+      const legacyRaw = (typeof localStorage !== "undefined" && localStorage.getItem("learnai_active_quiz")) ||
+                        (typeof sessionStorage !== "undefined" && sessionStorage.getItem("learnai_active_quiz"));
+      if (legacyRaw) {
+        try {
+          const legacyData = JSON.parse(legacyRaw);
+          if (!legacyData || legacyData.version !== QUIZ_STORAGE_VERSION) {
+            try { localStorage.removeItem("learnai_active_quiz"); } catch (e) {}
+            try { sessionStorage.removeItem("learnai_active_quiz"); } catch (e) {}
+          }
+        } catch (e) {
+          // Unparseable: treat as legacy and clear.
+          try { localStorage.removeItem("learnai_active_quiz"); } catch (e) {}
+          try { sessionStorage.removeItem("learnai_active_quiz"); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+
     // 1. In-memory fast path
-    if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
-      currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
-      currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
-      updateActiveQuizBanner(currentQuiz);
-      return true;
+    if (quizStatus === "in_progress" && currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
+      return hasActiveQuiz();
     }
 
     let raw = null;
@@ -1611,39 +1665,60 @@ async function loadActiveQuizState() {
       try { data = JSON.parse(raw); } catch (e) {}
     }
 
-    if (data && data.currentQuiz && Array.isArray(data.currentQuiz.questions) && data.currentQuiz.questions.length > 0) {
-      // Validate student ownership
-      const activeStudentId = (currentUser && currentUser.student_id) || studentId;
-      if (activeStudentId && data.currentQuiz.student_id && data.currentQuiz.student_id !== activeStudentId) {
+    if (!data || data.version !== QUIZ_STORAGE_VERSION) {
+      const banner = $("activeQuizBanner");
+      if (banner) banner.classList.add("hidden");
+      return false;
+    }
+
+    if (!data.currentQuiz || !Array.isArray(data.currentQuiz.questions) || data.currentQuiz.questions.length === 0) {
+      const banner = $("activeQuizBanner");
+      if (banner) banner.classList.add("hidden");
+      return false;
+    }
+
+    // Validate student ownership
+    const activeStudentId = (currentUser && currentUser.student_id) || studentId;
+    if (activeStudentId && data.currentQuiz.student_id && data.currentQuiz.student_id !== activeStudentId) {
+      clearSessionState();
+      return false;
+    }
+
+    // Validate expiration (aligned with backend quiz_sessions.expires_at, 24h)
+    if (data.currentQuiz.expires_at) {
+      const expTime = new Date(data.currentQuiz.expires_at).getTime();
+      if (!isNaN(expTime) && Date.now() > expTime) {
         clearSessionState();
         return false;
       }
-      // Validate expiration
-      if (data.currentQuiz.expires_at) {
-        const expTime = new Date(data.currentQuiz.expires_at).getTime();
-        if (!isNaN(expTime) && Date.now() > expTime) {
-          clearSessionState();
-          return false;
-        }
-      }
-
-      currentQuiz = data.currentQuiz;
-      currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
-      currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
-
-      currentIndex = (typeof data.currentIndex === "number" && data.currentIndex >= 0 && data.currentIndex < currentQuiz.questions.length)
-        ? data.currentIndex : 0;
-      answers = (Array.isArray(data.answers) && data.answers.length === currentQuiz.questions.length)
-        ? data.answers : Array(currentQuiz.questions.length).fill("");
-      activeCourseCode = data.activeCourseCode || currentQuiz.course_code;
-      activeTopicName = data.activeTopicName || currentQuiz.topic;
-      activeTopicId = data.activeTopicId || currentQuiz.topic_id || "";
-      activeNotesSessionId = data.activeNotesSessionId || null;
-      activeStudyMaterialId = data.activeStudyMaterialId || currentQuiz.study_material_id || null;
-
-      updateActiveQuizBanner(currentQuiz);
-      return true;
+    } else if (data.timestamp && Date.now() - data.timestamp > QUIZ_STORAGE_TTL_MS) {
+      clearSessionState();
+      return false;
     }
+
+    // Require real progress: at least one saved answer
+    if (!(Array.isArray(data.answers) && data.answers.some((a) => a !== "" && a !== null && a !== undefined))) {
+      clearSessionState();
+      return false;
+    }
+
+    currentQuiz = data.currentQuiz;
+    currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
+    currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
+
+    currentIndex = (typeof data.currentIndex === "number" && data.currentIndex >= 0 && data.currentIndex < currentQuiz.questions.length)
+      ? data.currentIndex : 0;
+    answers = (Array.isArray(data.answers) && data.answers.length === currentQuiz.questions.length)
+      ? data.answers : Array(currentQuiz.questions.length).fill("");
+    activeCourseCode = data.activeCourseCode || currentQuiz.course_code;
+    activeTopicName = data.activeTopicName || currentQuiz.topic;
+    activeTopicId = data.activeTopicId || currentQuiz.topic_id || "";
+    activeNotesSessionId = data.activeNotesSessionId || null;
+    activeStudyMaterialId = data.activeStudyMaterialId || currentQuiz.study_material_id || null;
+    quizStatus = "in_progress";
+
+    updateActiveQuizBanner(currentQuiz);
+    return true;
   } catch (err) {
     console.warn("[QUIZ] Failed to load active quiz state:", err);
     clearSessionState();
@@ -1659,6 +1734,7 @@ function resumeActiveQuiz() {
   }
   currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
   currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
+  quizStatus = "in_progress";
   if (activeCourseCode) {
     if ($("course")) $("course").value = activeCourseCode;
     populateTopicDropdown(activeCourseCode);
@@ -2272,29 +2348,63 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
         const activeInfo = data.detail;
         const activeSessions = Array.isArray(activeInfo.active_sessions) ? activeInfo.active_sessions : [];
 
+        // If we have local progress, offer the user resume vs discard.
+        // Otherwise auto-abandon the stale backend session(s) and retry once.
+        const hasLocalProgress = hasActiveQuiz();
+
         if (activeSessions.length > 1) {
           const sessionList = activeSessions.map(s => "• " + (s.course_code ? (s.course_code + " - ") : "") + s.topic).join("\n");
-          const msg = "You have " + activeSessions.length + " unfinished quiz sessions in progress:\n\n" + sessionList + "\n\nDiscard ALL listed unfinished quizzes and start a new quiz for " + (courseCode ? (courseCode + " - ") : "") + topic + "?\n\nClick OK to discard all listed quizzes and proceed.\nClick Cancel to keep your existing quizzes.";
-          const confirmMulti = confirm(msg);
-          if (confirmMulti) {
-            isGenerating = false;
-            const allIds = activeSessions.map(s => s.session_id);
-            return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId, allIds);
-          } else {
-            return;
+          if (hasLocalProgress) {
+            const msg = "You have " + activeSessions.length + " unfinished quiz sessions in progress:\n\n" + sessionList + "\n\nDiscard ALL listed unfinished quizzes and start a new quiz for " + (courseCode ? (courseCode + " - ") : "") + topic + "?\n\nClick OK to discard all listed quizzes and proceed.\nClick Cancel to keep your existing quizzes.";
+            const confirmMulti = confirm(msg);
+            if (confirmMulti) {
+              isGenerating = false;
+              const allIds = activeSessions.map(s => s.session_id);
+              return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId, allIds);
+            } else {
+              return;
+            }
           }
+          // No local progress: auto-abandon all stale sessions and retry once.
+          isGenerating = false;
+          for (const s of activeSessions) {
+            try {
+              await authenticatedFetch("/api/quiz/abandon", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: s.session_id })
+              });
+            } catch (e) {
+              console.warn("[QUIZ] Failed to abandon stale session", s.session_id, e);
+            }
+          }
+          return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId);
         } else {
           const conflictSessionId = activeInfo.active_session_id;
           const conflictTopic = activeInfo.topic || "another topic";
           const conflictCourse = activeInfo.course_code || "";
-          const resumeConflict = confirm("You already have an active quiz session in progress for " + (conflictCourse ? (conflictCourse + " - ") : "") + conflictTopic + ".\n\nClick OK to resume your active quiz.\nClick Cancel to discard it and create this new quiz.");
-          if (resumeConflict) {
-            await restoreSessionState();
-            return;
-          } else {
-            isGenerating = false;
-            return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId, [conflictSessionId]);
+          if (hasLocalProgress) {
+            const resumeConflict = confirm("You already have an active quiz session in progress for " + (conflictCourse ? (conflictCourse + " - ") : "") + conflictTopic + ".\n\nClick OK to resume your active quiz.\nClick Cancel to discard it and create this new quiz.");
+            if (resumeConflict) {
+              await restoreSessionState();
+              return;
+            } else {
+              isGenerating = false;
+              return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId, [conflictSessionId]);
+            }
           }
+          // No local progress: auto-abandon the stale session and retry once.
+          isGenerating = false;
+          try {
+            await authenticatedFetch("/api/quiz/abandon", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ session_id: conflictSessionId })
+            });
+          } catch (e) {
+            console.warn("[QUIZ] Failed to abandon stale session", conflictSessionId, e);
+          }
+          return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId);
         }
       }
       const errMsg = (data && data.detail)
@@ -2342,10 +2452,18 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     if (data.notes_session_id) activeNotesSessionId = data.notes_session_id;
     currentIndex = 0;
     answers = Array(data.questions.length).fill("");
+    // Questions rendered but zero answers saved: NOT "in progress" yet.
+    quizStatus = "displayed";
 
-    // Render directly to Question 1 with no intermediate flashes
     renderQuestion();
-    showScreen("quizSection");
+    // Only auto-open the quiz screen if already on a practice-relevant view.
+    // If the user switched tabs away, leave the quiz in memory; it reappears when
+    // they return to Practice Quiz via handlePracticeNav (in-memory resume).
+    const curScreen = (typeof getCurrentScreen === "function") ? getCurrentScreen() : null;
+    const isPracticeView = curScreen === "setup" || curScreen === "quizSection" || curScreen === "loadingSection";
+    if (isPracticeView) {
+      showScreen("quizSection");
+    }
     saveSessionState();
 
   } catch (e) {
@@ -2484,6 +2602,10 @@ function renderQuestion() {
 
     const selectOption = () => {
       answers[currentIndex] = key;
+      // Mark in_progress only when the first answer is saved (zero answers != active).
+      if (quizStatus !== "in_progress") {
+        quizStatus = "in_progress";
+      }
       if ($("quizAlert")) $("quizAlert").textContent = "";
       saveSessionState();
       renderQuestion();
@@ -2581,6 +2703,9 @@ document.addEventListener("keydown", (e) => {
     if (q.options && q.options[optKey]) {
       e.preventDefault();
       answers[currentIndex] = optKey;
+      if (quizStatus !== "in_progress") {
+        quizStatus = "in_progress";
+      }
       if ($("quizAlert")) $("quizAlert").textContent = "";
       saveSessionState();
       renderQuestion();
@@ -2597,6 +2722,10 @@ document.addEventListener("keydown", (e) => {
 
 // ── Submit Quiz ─────────────────────────────────────────────────────────────
 async function submitQuiz() {
+  // Double-click guard: never submit twice concurrently.
+  if (submitInFlight) return;
+  submitInFlight = true;
+
   const nextBtn = $("nextBtn");
   nextBtn.disabled = true;
   nextBtn.textContent = "Analyzing answers with AI...";
@@ -2621,12 +2750,16 @@ async function submitQuiz() {
     const data = await res.json();
 
     if (!res.ok) {
+      // Expired / not found: clear and surface error.
       if (res.status === 404 || (res.status === 400 && typeof data.detail === "string" && data.detail.toLowerCase().includes("expired"))) {
         clearSessionState();
       }
+      // Any submit failure: keep state (answers + in_progress) so the user can retry.
       throw new Error(data.detail || "Failed to submit quiz.");
     }
 
+    // Confirmed success: mark completed and clear everywhere.
+    quizStatus = "completed";
     lastPracticedStudyMaterialId = activeStudyMaterialId || currentQuiz.study_material_id || null;
     clearSessionState();
     studyMaterialsCacheTime = 0;
@@ -2648,8 +2781,9 @@ async function submitQuiz() {
     } else if (e.message) {
       msg = e.message;
     }
-    alert(msg);
+    alert(msg + "\n\nYour answers are kept — you can retry submitting.");
   } finally {
+    submitInFlight = false;
     nextBtn.disabled = false;
     nextBtn.textContent = "Submit Quiz";
   }
@@ -4064,15 +4198,14 @@ async function handlePracticeNav() {
     return;
   }
   if (isGenerating) return;
-  const curScreen = (typeof getCurrentScreen === "function") ? getCurrentScreen() : null;
-  if (curScreen === "quizSection" && currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
-    return;
-  }
-  const hasActive = await loadActiveQuizState();
-  if (hasActive) {
+  // In-memory resume only: never read storage on tab switch (req #6).
+  // A quiz left in memory after generation (status "displayed") or with progress
+  // (status "in_progress") reappears here when the user returns to Practice Quiz.
+  if ((quizStatus === "displayed" || quizStatus === "in_progress") && currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
     resumeActiveQuiz();
     return;
   }
+  // quizStatus 'idle' or 'completed': show last result if available, else topic selection.
   if (lastCompletedResult) {
     showResult(lastCompletedResult);
     return;
@@ -6061,6 +6194,15 @@ function resetPasswordToggles() {
 }
 
 async function handleLogout() {
+  // 0. Best-effort: abandon the student's in_progress quiz session(s) on the
+  //    backend BEFORE the auth token is revoked. Wrapped in try/catch with a
+  //    short timeout so logout never hangs even if the backend is unreachable.
+  try {
+    await abandonActiveQuizOnServer();
+  } catch (e) {
+    console.warn("[AUTH] Quiz abandonment on logout failed (non-fatal):", e);
+  }
+
   try {
     const headers = {};
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
@@ -6128,6 +6270,52 @@ async function handleLogout() {
 
   showScreen("loginSection");
   showAuthMessage("loginMsg", "You have been logged out.", "success");
+}
+
+// Best-effort server-side abandonment of in_progress quiz sessions on logout.
+// Never throws: logout must always complete locally.
+async function abandonActiveQuizOnServer() {
+  const ids = new Set();
+  if (currentQuiz && (currentQuiz.quiz_id || currentQuiz.session_id)) {
+    ids.add(currentQuiz.quiz_id || currentQuiz.session_id);
+  }
+  // Discover any server-side active session not present in memory.
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(apiUrl("/api/quiz/active"), {
+      method: "GET",
+      headers: authToken ? { "Authorization": `Bearer ${authToken}` } : {},
+      credentials: "include",
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.session_id) ids.add(data.session_id);
+    }
+  } catch (e) {
+    console.warn("[AUTH] Could not query active quiz on logout:", e);
+  }
+  for (const id of ids) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      await fetch(apiUrl("/api/quiz/abandon"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { "Authorization": `Bearer ${authToken}` } : {})
+        },
+        credentials: "include",
+        body: JSON.stringify({ session_id: id }),
+        signal: ctrl.signal
+      });
+      clearTimeout(t);
+    } catch (e) {
+      console.warn("[AUTH] Could not abandon quiz session", id, "on logout:", e);
+    }
+  }
 }
 
 function initAuthEventListeners() {
@@ -6298,7 +6486,16 @@ if (typeof window !== "undefined" && window.addEventListener) {
       isGenerating = false;
     }
     if (targetScreen === "quizSection") {
-      resumeActiveQuiz();
+      // In-memory resume only: never restore from storage on popstate.
+      if ((quizStatus === "displayed" || quizStatus === "in_progress") && currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
+        quizStatus = "in_progress";
+        renderQuizHeader(currentQuiz);
+        renderQuestion();
+        showScreen("quizSection", false);
+        saveSessionState();
+      } else {
+        showScreen("setup", false);
+      }
     } else {
       showScreen(targetScreen, false);
       if (targetScreen === "dashboardSection") {
@@ -6336,7 +6533,8 @@ const _learnAiExports = {
   handlePracticeNav,
   initPasswordToggles,
   resetPasswordToggles,
-  initApp
+  initApp,
+  abandonActiveQuizOnServer
 };
 
 if (typeof window !== "undefined") {

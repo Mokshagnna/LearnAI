@@ -31,7 +31,8 @@ from services.database import (
     get_active_quiz_session_for_student,
     save_quiz_attempt,
     get_latest_completed_attempt_for_student,
-    abandon_quiz_session
+    abandon_quiz_session,
+    abandon_all_quiz_sessions_for_student,
 )
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -568,25 +569,82 @@ class TestFrontendWiringAndElements:
         assert "/api/quiz/completed/latest" in js
         assert "/api/quiz/abandon" in js
 
-    def test_handle_practice_nav_automatically_resumes_active_quiz(self):
+    def test_handle_practice_nav_in_memory_resume_only_no_storage_read(self):
+        """handlePracticeNav must resume an in-memory quiz (quizStatus 'displayed' or
+        'in_progress') WITHOUT calling loadActiveQuizState / reading storage on every
+        tab switch. quizStatus 'idle' or 'completed' shows topic selection / last result."""
         js = APP_JS.read_text(encoding="utf-8")
-        # handlePracticeNav must call resumeActiveQuiz() directly when active quiz exists
-        pattern = r"const hasActive = await loadActiveQuizState\(\);\s*if \(hasActive\) \{\s*resumeActiveQuiz\(\);"
         import re
-        assert re.search(pattern, js) is not None, "handlePracticeNav does not directly call resumeActiveQuiz()"
+        hp_start = js.index("async function handlePracticeNav")
+        hp_end = js.index("$(\"navPracticeBtn\")?.addEventListener(\"click\", handlePracticeNav);", hp_start)
+        hp_body = js[hp_start:hp_end]
+        # Must NOT read storage via loadActiveQuizState on nav (in-memory only)
+        assert "await loadActiveQuizState()" not in hp_body, (
+            "handlePracticeNav must not call loadActiveQuizState on tab switch"
+        )
+        assert "loadActiveQuizState()" not in hp_body, (
+            "handlePracticeNav must not invoke loadActiveQuizState at all"
+        )
+        # Must resume from in-memory when quizStatus is displayed/in_progress
+        assert 'quizStatus === "displayed"' in hp_body, (
+            "handlePracticeNav must resume in-memory quiz with status displayed"
+        )
+        assert 'quizStatus === "in_progress"' in hp_body, (
+            "handlePracticeNav must resume in-memory quiz with status in_progress"
+        )
+        assert "resumeActiveQuiz();" in hp_body, (
+            "handlePracticeNav must call resumeActiveQuiz for in-memory quiz"
+        )
 
-    def test_init_app_automatically_resumes_active_quiz_on_load_or_refresh(self):
+    def test_init_app_restores_only_with_progress(self):
+        """initApp restores an active quiz only when loadActiveQuizState reports real
+        progress (>= 1 saved answer). A generated-but-unanswered quiz must NOT be restored."""
         js = APP_JS.read_text(encoding="utf-8")
-        # initApp must call resumeActiveQuiz() directly when active quiz exists
-        pattern = r"const hasActive = await loadActiveQuizState\(\);[\s\S]*?if \(hasActive\) \{\s*resumeActiveQuiz\(\);"
         import re
-        assert re.search(pattern, js) is not None, "initApp does not directly call resumeActiveQuiz()"
+        # initApp must call loadActiveQuizState on load/refresh
+        assert "await loadActiveQuizState()" in js, (
+            "initApp must call loadActiveQuizState on load/refresh"
+        )
+        # loadActiveQuizState must gate restore on real progress (answers.some)
+        laqs_start = js.index("async function loadActiveQuizState")
+        laqs_end = js.index("function resumeActiveQuiz", laqs_start)
+        laqs_body = js[laqs_start:laqs_end]
+        assert "quizStatus = \"in_progress\"" in laqs_body, (
+            "loadActiveQuizState must set quizStatus in_progress on successful restore"
+        )
+        assert "data.answers.some" in laqs_body, (
+            "loadActiveQuizState must require real progress (>=1 non-empty answer) before restoring"
+        )
+        assert "clearSessionState()" in laqs_body, (
+            "loadActiveQuizState must clear state when there is no progress / version mismatch / expiry"
+        )
+        # initApp conditionally resumes only when loadActiveQuizState returns true
+        assert "await loadActiveQuizState()" in js, (
+            "initApp must call loadActiveQuizState on load/refresh"
+        )
+        assert "hasActive" in js, (
+            "initApp must resume only when loadActiveQuizState returns true"
+        )
 
-    def test_popstate_automatically_resumes_quiz_section(self):
+    def test_popstate_in_memory_resume_only_no_storage_read(self):
+        """popstate must resume the quiz from in-memory state only; it must NOT call
+        resumeActiveQuiz() (which performs a storage read) nor loadActiveQuizState."""
         js = APP_JS.read_text(encoding="utf-8")
-        pattern = r'if \(targetScreen === "quizSection"\) \{\s*resumeActiveQuiz\(\);'
         import re
-        assert re.search(pattern, js) is not None, "popstate does not call resumeActiveQuiz for quizSection"
+        ps_start = js.index('window.addEventListener("popstate"')
+        # The popstate listener body ends at the first '});' that closes the
+        # addEventListener call (there are no nested '});' inside it).
+        ps_end = js.index("});", ps_start) + 3
+        ps_body = js[ps_start:ps_end]
+        assert "loadActiveQuizState" not in ps_body, (
+            "popstate must not call loadActiveQuizState"
+        )
+        assert "resumeActiveQuiz()" not in ps_body, (
+            "popstate must not call resumeActiveQuiz (storage read); use in-memory only"
+        )
+        assert 'quizStatus === "displayed"' in ps_body or 'quizStatus === "in_progress"' in ps_body, (
+            "popstate must resume from in-memory quizStatus"
+        )
 
     def test_question_index_and_answer_persistence_preserved_in_client(self):
         js = APP_JS.read_text(encoding="utf-8")
@@ -644,20 +702,24 @@ class TestFrontendWiringAndElements:
         )
 
     def test_load_active_quiz_state_no_backend_fallback(self):
-        """Verify loadActiveQuizState restores only from frontend state (memory / storage),
-        never by querying the backend for orphaned in_progress sessions."""
+        """loadActiveQuizState must restore only from frontend memory/storage, never by
+        querying the backend. (/api/quiz/active may exist elsewhere, e.g. logout
+        abandonment, but must NOT be referenced inside loadActiveQuizState.)"""
         js = APP_JS.read_text(encoding="utf-8")
-        # /api/quiz/active must not appear anywhere in app.js (backend fallback fully removed)
-        assert "/api/quiz/active" not in js, (
-            "loadActiveQuizState must not consult the backend; /api/quiz/active must not "
-            "be referenced in app.js"
-        )
-        # authenticatedFetch must not be used inside loadActiveQuizState
         laqs_start = js.index("async function loadActiveQuizState")
         laqs_end = js.index("function resumeActiveQuiz", laqs_start)
         laqs_body = js[laqs_start:laqs_end]
         assert "authenticatedFetch" not in laqs_body, (
             "loadActiveQuizState must not call authenticatedFetch"
+        )
+        assert "fetch(" not in laqs_body, (
+            "loadActiveQuizState must not call fetch"
+        )
+        assert "/api/quiz/active" not in laqs_body, (
+            "loadActiveQuizState must not reference /api/quiz/active"
+        )
+        assert "/api/quiz/abandon" not in laqs_body, (
+            "loadActiveQuizState must not call /api/quiz/abandon"
         )
 
     def test_has_active_quiz_checks_frontend_state_only(self):
@@ -682,11 +744,43 @@ class TestFrontendWiringAndElements:
         assert "if (isGenerating) return;" in js
         assert "isGenerating = true;" in js
 
-    def test_409_cancel_leaves_all_sessions_untouched(self):
-        """Verify that cancelling a 409 dialog returns without modifying any sessions."""
+    def test_409_resume_keeps_sessions_untouched(self):
+        """On 409 with local progress, choosing to RESUME keeps the existing session(s)
+        untouched (restoreSessionState, no /api/quiz/abandon call on the resume branch)."""
         js = APP_JS.read_text(encoding="utf-8")
-        # Cancel path returns immediately without calling startQuizGeneration again
-        assert "} else {\n            return;\n          }" in js or "} else {\n            return;\n          }" in js.replace("  ", " ")
+        sg_start = js.index("async function startQuizGeneration")
+        sg_end = js.index("// ── Dedicated Quiz Header Renderer", sg_start)
+        sg_body = js[sg_start:sg_end]
+        assert 'res.status === 409' in sg_body, "startQuizGeneration must handle 409 conflicts"
+        assert "hasActiveQuiz()" in sg_body, "409 path must check for local progress"
+        # Resume branch (local progress + user confirms): restore, return, no abandon
+        assert "await restoreSessionState();" in sg_body, (
+            "409 resume path must call restoreSessionState()"
+        )
+        assert "res.status === 409" in sg_body
+
+    def test_409_auto_abandon_when_no_local_progress(self):
+        """On 409 with NO local in-memory progress, startQuizGeneration must auto-abandon
+        the stale session(s) via POST /api/quiz/abandon and retry generation once (no
+        user confirmation required)."""
+        js = APP_JS.read_text(encoding="utf-8")
+        sg_start = js.index("async function startQuizGeneration")
+        sg_end = js.index("// ── Dedicated Quiz Header Renderer", sg_start)
+        sg_body = js[sg_start:sg_end]
+        assert 'res.status === 409' in sg_body, "startQuizGeneration must handle 409 conflicts"
+        assert "hasActiveQuiz()" in sg_body, "409 path must check for local progress"
+        assert '/api/quiz/abandon' in sg_body, (
+            "409 path must abandon stale session via POST /api/quiz/abandon"
+        )
+        assert "isGenerating = false;" in sg_body, (
+            "409 path must reset isGenerating before retrying"
+        )
+        assert "return await startQuizGeneration(" in sg_body, (
+            "409 path must retry generation once after abandoning"
+        )
+        assert "authenticatedFetch(\"/api/quiz/abandon\"" in sg_body, (
+            "409 auto-abandon must use authenticatedFetch for /api/quiz/abandon"
+        )
 
     def test_frontend_assets_exist_and_are_versioned(self):
         """Verify that style.css and app.js physically exist and are referenced with cache-busting version query parameters in index.html."""
@@ -731,7 +825,7 @@ class TestFrontendWiringAndElements:
             capture_output=True, text=True, cwd=str(ROOT_DIR)
         )
         if head_html_cmd.returncode == 0:
-            head_html = head_html_cmd.stdout
+            head_html = head_html_cmd.stdout or ""
             head_css_m = re.search(r'href=["\']css/style\.css\?v=([a-zA-Z0-9._-]+)["\']', head_html)
             head_js_m = re.search(r'src=["\']js/app\.js\?v=([a-zA-Z0-9._-]+)["\']', head_html)
             head_css_ver = head_css_m.group(1) if head_css_m else None
@@ -774,7 +868,7 @@ class TestFrontendWiringAndElements:
                 capture_output=True, text=True, cwd=str(ROOT_DIR)
             )
             if parent_html_cmd.returncode == 0:
-                parent_html = parent_html_cmd.stdout
+                parent_html = parent_html_cmd.stdout or ""
                 parent_js_m = re.search(r'src=["\']js/app\.js\?v=([a-zA-Z0-9._-]+)["\']', parent_html)
                 if parent_js_m:
                     parent_js_ver = parent_js_m.group(1)
@@ -783,3 +877,99 @@ class TestFrontendWiringAndElements:
                         f"frontend/js/app.js was modified in {last_js_commit[:7]}, but index.html "
                         f"asset version remained {parent_js_ver} (must be incremented for cache invalidation)"
                     )
+
+
+    def test_save_session_state_does_not_persist_zero_answer_quiz(self):
+        """saveSessionState must NOT persist a generated-but-unanswered quiz
+        (quizStatus 'displayed', zero answers). Only in_progress + >=1 answer is stored."""
+        js = APP_JS.read_text(encoding="utf-8")
+        sss_start = js.index("function saveSessionState")
+        sss_end = js.index("function clearSessionState", sss_start)
+        sss_body = js[sss_start:sss_end]
+        assert 'quizStatus !== "in_progress"' in sss_body, (
+            "saveSessionState must bail out unless quizStatus is in_progress"
+        )
+        assert "hasProgress" in sss_body, (
+            "saveSessionState must compute hasProgress from answers"
+        )
+        assert "answers.some" in sss_body, (
+            "saveSessionState must require >=1 non-empty answer before persisting"
+        )
+        assert "version: QUIZ_STORAGE_VERSION" in sss_body, (
+            "saveSessionState must stamp the storage version"
+        )
+
+    def test_version_mismatch_ignored_and_legacy_cleaned(self):
+        """loadActiveQuizState must ignore entries whose version != QUIZ_STORAGE_VERSION
+        and one-time cleanup must drop legacy keys that lack a version field."""
+        js = APP_JS.read_text(encoding="utf-8")
+        assert "QUIZ_STORAGE_VERSION = 2" in js, "QUIZ_STORAGE_VERSION must be 2"
+        assert "QUIZ_STORAGE_TTL_MS = 24 * 60 * 60 * 1000" in js, (
+            "Staleness TTL must align with backend expires_at (24h / 86400s)"
+        )
+        laqs_start = js.index("async function loadActiveQuizState")
+        laqs_end = js.index("function resumeActiveQuiz", laqs_start)
+        laqs_body = js[laqs_start:laqs_end]
+        assert "data.version !== QUIZ_STORAGE_VERSION" in laqs_body, (
+            "loadActiveQuizState must reject version mismatch"
+        )
+        assert "legacy" in laqs_body.lower(), (
+            "loadActiveQuizState must perform one-time legacy cleanup for keys without version"
+        )
+        assert "clearSessionState()" in laqs_body, (
+            "loadActiveQuizState must clear state on version mismatch / expiry / no progress"
+        )
+
+    def test_logout_abandons_in_progress_quiz_sessions(self, client):
+        """POST /api/auth/logout must abandon the student's in_progress quiz session(s)
+        BEFORE revoking the token, so no quiz stays 'in_progress' across logout/login."""
+        student_id, token, _cookies = register_and_login_student(client)
+
+        questions = [{
+            "question": "What is 2 + 2?",
+            "options": {"A": "3", "B": "4", "C": "5", "D": "6"},
+            "correct_answer": "B",
+            "explanation": "2+2=4",
+            "concept": "Arithmetic",
+            "difficulty": "Easy"
+        }]
+        session_id = f"sess_{uuid.uuid4().hex[:8]}"
+        created = create_quiz_session(
+            session_id=session_id,
+            student_id=student_id,
+            course_code="CS101",
+            course_name="Intro to CS",
+            topic_name="Algorithms",
+            questions=questions,
+        )
+        assert created["status"] == "in_progress"
+
+        resp = client.post(
+            "/api/auth/logout",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert resp.status_code == 200, f"Logout failed: {resp.text}"
+
+        # The in_progress session must now be abandoned
+        sess = get_quiz_session(session_id, student_id)
+        assert sess is not None, "Session should still exist after logout"
+        assert sess["status"] == "abandoned", (
+            f"Expected status 'abandoned' after logout, got {sess.get('status')!r}"
+        )
+
+    def test_per_user_isolation_clears_quiz_on_student_mismatch(self):
+        """loadActiveQuizState must clear session state when the stored quiz belongs to
+        a different student than the currently logged-in one (per-user isolation)."""
+        js = APP_JS.read_text(encoding="utf-8")
+        laqs_start = js.index("async function loadActiveQuizState")
+        laqs_end = js.index("function resumeActiveQuiz", laqs_start)
+        laqs_body = js[laqs_start:laqs_end]
+        assert "activeStudentId" in laqs_body, (
+            "loadActiveQuizState must resolve the active student id"
+        )
+        assert "data.currentQuiz.student_id !== activeStudentId" in laqs_body, (
+            "loadActiveQuizState must detect student_id mismatch"
+        )
+        assert "clearSessionState()" in laqs_body, (
+            "loadActiveQuizState must clear state on student mismatch"
+        )
