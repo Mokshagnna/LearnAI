@@ -1,0 +1,879 @@
+{
+  "timestamp": "2026-11-03 14:54:49",
+  "total_benchmark_duration_seconds": 220.74,
+  "scenarios": {
+    "scenario_1_initial_generation": {
+      "scenario": "Scenario 1: Initial Quiz Generation",
+      "description": "Baseline first-time quiz generation without retake context.",
+      "sample_size": 20,
+      "success_count": 20,
+      "failure_count": 0,
+      "timeout_count": 0,
+      "quota_failures": 0,
+      "failover_count": 0,
+      "replacement_attempts": 0,
+      "primary_provider": "groq",
+      "stats": {
+        "count": 20,
+        "min": 2.5644,
+        "max": 3.497,
+        "p50": 3.146,
+        "p95": 3.4866,
+        "mean": 3.0263
+      },
+      "records": [
+        {
+          "req_index": 1,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.2996,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 2,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.7842,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 3,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.7045,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 4,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.4866,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 5,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.7595,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 6,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.8027,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 7,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.6192,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 8,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.5929,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 9,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.6269,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 10,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.2234,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 11,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.5644,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 12,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.497,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 13,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.2591,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 14,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.8565,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 15,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.4789,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 16,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.3883,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 17,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.2249,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 18,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.9775,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 19,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.2343,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 20,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.146,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0
+        }
+      ]
+    },
+    "scenario_2_retake_generation": {
+      "scenario": "Scenario 2: Retake Quiz Generation",
+      "description": "Retake quiz generation with student history retrieval and novelty evaluation.",
+      "sample_size": 20,
+      "success_count": 20,
+      "failure_count": 0,
+      "timeout_count": 0,
+      "quota_failures": 0,
+      "failover_count": 0,
+      "replacement_attempts": 0,
+      "primary_provider": "groq",
+      "stats": {
+        "count": 20,
+        "min": 2.8264,
+        "max": 3.6977,
+        "p50": 3.2972,
+        "p95": 3.5906,
+        "mean": 3.2743
+      },
+      "records": [
+        {
+          "req_index": 1,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.0312,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 2,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.3693,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 3,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.1865,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 4,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.2079,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 5,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.0809,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 6,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.5283,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 7,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.5906,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 8,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.8264,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 9,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.3193,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 10,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.1383,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 11,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.1757,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 12,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.3152,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 13,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.3107,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 14,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.0274,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 15,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.5465,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 16,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.4894,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 17,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.2972,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 18,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.1035,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 19,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.2444,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        },
+        {
+          "req_index": 20,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.6977,
+          "provider_used": "groq",
+          "is_fallback": false,
+          "question_count": 10,
+          "novelty_repairs": 0,
+          "attempt_number": 2
+        }
+      ]
+    },
+    "scenario_3_provider_failover": {
+      "scenario": "Scenario 3: Provider Failover",
+      "description": "Primary provider (Groq) fails with 503; system seamlessly fails over to NVIDIA NIM.",
+      "sample_size": 10,
+      "success_count": 10,
+      "failure_count": 0,
+      "timeout_count": 0,
+      "quota_failures": 0,
+      "failover_count": 10,
+      "replacement_attempts": 0,
+      "provider_used": "nvidia",
+      "stats": {
+        "count": 10,
+        "min": 4.1339,
+        "max": 4.6352,
+        "p50": 4.302,
+        "p95": 4.6352,
+        "mean": 4.3686
+      },
+      "records": [
+        {
+          "req_index": 1,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.4338,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 2,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.1339,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 3,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.302,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 4,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.5699,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 5,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.139,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 6,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.1744,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 7,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.5411,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 8,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.6012,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 9,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.6352,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        },
+        {
+          "req_index": 10,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.1555,
+          "provider_used": "nvidia",
+          "is_fallback": false,
+          "failover_occurred": true,
+          "question_count": 10
+        }
+      ]
+    },
+    "scenario_4_selective_replacement": {
+      "scenario": "Scenario 4: Selective Replacement",
+      "description": "Initial generation returns 8 valid and 2 flawed questions; selective replacement recovers set to 10/10.",
+      "sample_size": 10,
+      "success_count": 10,
+      "failure_count": 0,
+      "timeout_count": 0,
+      "quota_failures": 0,
+      "failover_count": 0,
+      "replacement_attempts": 0,
+      "provider_used": "groq",
+      "stats": {
+        "count": 10,
+        "min": 3.9898,
+        "max": 4.5725,
+        "p50": 4.1542,
+        "p95": 4.5725,
+        "mean": 4.2239
+      },
+      "records": [
+        {
+          "req_index": 1,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.0472,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 2,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.9972,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 3,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.1991,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 4,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.9898,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 5,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.2113,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 6,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.4917,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 7,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.1048,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 8,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.1542,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 9,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.4715,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        },
+        {
+          "req_index": 10,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 4.5725,
+          "provider_used": "groq",
+          "question_count": 10,
+          "novelty_repairs": 0
+        }
+      ]
+    },
+    "scenario_5_quota_exhaustion_and_recovery": {
+      "scenario": "Scenario 5: Quota Exhaustion & Recovery",
+      "description": "Provider quota exhaustion triggers immediate fast-skip; reset enables instantaneous recovery.",
+      "sample_size": 10,
+      "exhaustion_requests": 5,
+      "recovery_requests": 5,
+      "fast_skip_verified": true,
+      "exhaustion_stats": {
+        "count": 5,
+        "min": 0.4854,
+        "max": 0.5641,
+        "p50": 0.546,
+        "p95": 0.5641,
+        "mean": 0.5344
+      },
+      "recovery_stats": {
+        "count": 5,
+        "min": 0.1019,
+        "max": 0.1063,
+        "p50": 0.1042,
+        "p95": 0.1063,
+        "mean": 0.1043
+      },
+      "records": [
+        {
+          "phase": "exhaustion",
+          "req_index": 1,
+          "status_code": 429,
+          "success": false,
+          "e2e_latency": 0.5292,
+          "is_fast_skip": true,
+          "quota_failure": true
+        },
+        {
+          "phase": "exhaustion",
+          "req_index": 2,
+          "status_code": 429,
+          "success": false,
+          "e2e_latency": 0.4854,
+          "is_fast_skip": true,
+          "quota_failure": true
+        },
+        {
+          "phase": "exhaustion",
+          "req_index": 3,
+          "status_code": 429,
+          "success": false,
+          "e2e_latency": 0.5475,
+          "is_fast_skip": true,
+          "quota_failure": true
+        },
+        {
+          "phase": "exhaustion",
+          "req_index": 4,
+          "status_code": 429,
+          "success": false,
+          "e2e_latency": 0.5641,
+          "is_fast_skip": true,
+          "quota_failure": true
+        },
+        {
+          "phase": "exhaustion",
+          "req_index": 5,
+          "status_code": 429,
+          "success": false,
+          "e2e_latency": 0.546,
+          "is_fast_skip": true,
+          "quota_failure": true
+        },
+        {
+          "phase": "recovery",
+          "req_index": 6,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 0.1063,
+          "is_fast_skip": false,
+          "quota_failure": false
+        },
+        {
+          "phase": "recovery",
+          "req_index": 7,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 0.1019,
+          "is_fast_skip": false,
+          "quota_failure": false
+        },
+        {
+          "phase": "recovery",
+          "req_index": 8,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 0.1042,
+          "is_fast_skip": false,
+          "quota_failure": false
+        },
+        {
+          "phase": "recovery",
+          "req_index": 9,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 0.1053,
+          "is_fast_skip": false,
+          "quota_failure": false
+        },
+        {
+          "phase": "recovery",
+          "req_index": 10,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 0.1036,
+          "is_fast_skip": false,
+          "quota_failure": false
+        }
+      ]
+    },
+    "scenario_6_concurrency": {
+      "scenario": "Scenario 6: Concurrent Requests",
+      "description": "5 concurrent requests tested against single-worker supported workload capacity.",
+      "sample_size": 5,
+      "concurrency_level": 5,
+      "total_batch_duration_sec": 3.1285,
+      "success_count": 5,
+      "failure_count": 0,
+      "stats": {
+        "count": 5,
+        "min": 2.7127,
+        "max": 3.1266,
+        "p50": 3.0072,
+        "p95": 3.1266,
+        "mean": 2.9744
+      },
+      "records": [
+        {
+          "req_index": 4,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 2.7127,
+          "quiz_id": "3a03da7e-1e90-4315-b9e5-7c8b5eb2dcba",
+          "question_count": 10
+        },
+        {
+          "req_index": 5,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.0001,
+          "quiz_id": "8f69fc96-0dc4-4731-9685-43a1d974c7bc",
+          "question_count": 10
+        },
+        {
+          "req_index": 2,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.0072,
+          "quiz_id": "d83af798-82c0-49e0-b38e-dbfde7bb3350",
+          "question_count": 10
+        },
+        {
+          "req_index": 1,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.0255,
+          "quiz_id": "e334bacb-549b-49c3-9a8a-a4363eb61a71",
+          "question_count": 10
+        },
+        {
+          "req_index": 3,
+          "status_code": 200,
+          "success": true,
+          "e2e_latency": 3.1266,
+          "quiz_id": "04db7fbe-4b14-499c-8ee0-69e09777af32",
+          "question_count": 10
+        }
+      ]
+    }
+  }
+}

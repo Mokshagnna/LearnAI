@@ -1,0 +1,1172 @@
+{
+  "timestamp": 1793695005.3846014,
+  "summary": [
+    {
+      "run": 1,
+      "course": "22MT103",
+      "topic": "Matrices",
+      "retake": false,
+      "latency_sec": 6.27,
+      "provider": "groq",
+      "is_fallback": false,
+      "question_count": 10
+    },
+    {
+      "run": 2,
+      "course": "22MT103",
+      "topic": "Matrices",
+      "retake": true,
+      "latency_sec": 20.58,
+      "provider": "groq",
+      "is_fallback": false,
+      "question_count": 10
+    },
+    {
+      "run": 3,
+      "course": "22MT103",
+      "topic": "Applications of Matrices",
+      "retake": false,
+      "latency_sec": 9.27,
+      "provider": "groq",
+      "is_fallback": false,
+      "question_count": 10
+    },
+    {
+      "run": 4,
+      "course": "22AM301",
+      "topic": "Losss Function",
+      "retake": false,
+      "latency_sec": 6.13,
+      "provider": "groq",
+      "is_fallback": false,
+      "question_count": 10
+    },
+    {
+      "run": 5,
+      "course": "22AM301",
+      "topic": "Regularization Methods-Dropout, Drop Connect, Batch",
+      "retake": false,
+      "latency_sec": 6.94,
+      "provider": "groq",
+      "is_fallback": false,
+      "question_count": 10
+    }
+  ],
+  "quizzes": [
+    {
+      "run_index": 1,
+      "course_code": "22MT103",
+      "course_name": "Linear Algebra And Ordinary Differential Equations",
+      "topic": "Matrices",
+      "retake": false,
+      "latency_seconds": 6.27,
+      "provider_used": "groq",
+      "is_fallback": false,
+      "question_count": 10,
+      "questions": [
+        {
+          "index": 1,
+          "id": 0,
+          "question": "Which of the following best describes a matrix?",
+          "options": {
+            "A": "A rectangular array of numbers arranged in rows and columns",
+            "B": "A single number representing a linear transformation",
+            "C": "A set of vectors that are linearly independent",
+            "D": "A function that maps scalars to vectors"
+          },
+          "correct_answer": "A",
+          "difficulty": "Easy",
+          "concept": "Definition of matrix",
+          "explanation": "A matrix is defined as a rectangular array of numbers organized by rows and columns.",
+          "option_explanations": {
+            "A": "A matrix is defined as a rectangular array of numbers organized by rows and columns.",
+            "B": "Option B ('A single number representing a linear transformation') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('A set of vectors that are linearly independent') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('A function that maps scalars to vectors') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 2,
+          "id": 1,
+          "question": "The order of a matrix is expressed as:",
+          "options": {
+            "A": "Number of rows only",
+            "B": "Rows \u00d7 columns",
+            "C": "Number of columns only",
+            "D": "Rows + columns"
+          },
+          "correct_answer": "B",
+          "difficulty": "Easy",
+          "concept": "Definition of matrix",
+          "explanation": "The order (size) of a matrix is given by the number of rows followed by the number of columns, written as m\u00d7n.",
+          "option_explanations": {
+            "A": "Option A ('Number of rows only') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "The order (size) of a matrix is given by the number of rows followed by the number of columns, written as m\u00d7n.",
+            "C": "Option C ('Number of columns only') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Rows + columns') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 3,
+          "id": 2,
+          "question": "A square matrix with all entries equal to zero is called:",
+          "options": {
+            "A": "Identity matrix",
+            "B": "Diagonal matrix",
+            "C": "Zero (or null) matrix",
+            "D": "Scalar matrix"
+          },
+          "correct_answer": "C",
+          "difficulty": "Easy",
+          "concept": "Types of matrices",
+          "explanation": "A matrix whose every entry is zero is termed the zero or null matrix.",
+          "option_explanations": {
+            "A": "Option A ('Identity matrix') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('Diagonal matrix') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "A matrix whose every entry is zero is termed the zero or null matrix.",
+            "D": "Option D ('Scalar matrix') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 4,
+          "id": 3,
+          "question": "Which of the following matrices is symmetric?",
+          "options": {
+            "A": "[[1,2],[3,4]]",
+            "B": "[[0,1],[-1,0]]",
+            "C": "[[5,0],[0,5]]",
+            "D": "[[2,7],[7,2]]"
+          },
+          "correct_answer": "D",
+          "difficulty": "Easy",
+          "concept": "Types of matrices",
+          "explanation": "A symmetric matrix equals its transpose; only option D satisfies A^T = A.",
+          "option_explanations": {
+            "A": "Option A ('[[1,2],[3,4]]') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option D for the valid approach.",
+            "B": "Option B ('[[0,1],[-1,0]]') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option D for the valid approach.",
+            "C": "Option C ('[[5,0],[0,5]]') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option D for the valid approach.",
+            "D": "A symmetric matrix equals its transpose; only option D satisfies A^T = A."
+          }
+        },
+        {
+          "index": 5,
+          "id": 4,
+          "question": "If A=[[1,2],[3,4]] and B=[[0,1],[-1,0]], what is the product AB?",
+          "options": {
+            "A": "[[-2,1],[-4,3]]",
+            "B": "[[2,-1],[4,-3]]",
+            "C": "[[1,0],[0,1]]",
+            "D": "[[0,1],[-1,0]]"
+          },
+          "correct_answer": "A",
+          "difficulty": "Medium",
+          "concept": "Algebra of matrices",
+          "explanation": "Multiplying A by B gives [[1\u00b70+2\u00b7(-1),1\u00b71+2\u00b70],[3\u00b70+4\u00b7(-1),3\u00b71+4\u00b70]] = [[-2,1],[-4,3]].",
+          "option_explanations": {
+            "A": "Multiplying A by B gives [[1\u00b70+2\u00b7(-1),1\u00b71+2\u00b70],[3\u00b70+4\u00b7(-1),3\u00b71+4\u00b70]] = [[-2,1],[-4,3]].",
+            "B": "Option B ('[[2,-1],[4,-3]]') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('[[1,0],[0,1]]') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('[[0,1],[-1,0]]') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 6,
+          "id": 5,
+          "question": "Find the determinant of the matrix [[2,0,1],[-1,3,2],[4,5,0]].",
+          "options": {
+            "A": "-12",
+            "B": "24",
+            "C": "-37",
+            "D": "0"
+          },
+          "correct_answer": "C",
+          "difficulty": "Medium",
+          "concept": "Algebra of matrices",
+          "explanation": "det = 2(3\u00b70-2\u00b75) -0(-1\u00b70-2\u00b74) +1(-1\u00b75-3\u00b74) = -20-17 = -37.",
+          "option_explanations": {
+            "A": "Option A ('-12') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('24') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "det = 2(3\u00b70-2\u00b75) -0(-1\u00b70-2\u00b74) +1(-1\u00b75-3\u00b74) = -20-17 = -37.",
+            "D": "Option D ('0') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 7,
+          "id": 6,
+          "question": "The set of all m\u00d7n real matrices forms a vector space under which operations?",
+          "options": {
+            "A": "Matrix multiplication and scalar addition",
+            "B": "Matrix addition and scalar multiplication",
+            "C": "Matrix transpose and determinant",
+            "D": "Matrix inversion and scalar division"
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Definition of matrix",
+          "explanation": "Vector space axioms are satisfied with matrix addition and multiplication by real scalars.",
+          "option_explanations": {
+            "A": "Option A ('Matrix multiplication and scalar addition') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Vector space axioms are satisfied with matrix addition and multiplication by real scalars.",
+            "C": "Option C ('Matrix transpose and determinant') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Matrix inversion and scalar division') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 8,
+          "id": 7,
+          "question": "If a 3\u00d73 matrix A has det(A)=0, which statement is always true?",
+          "options": {
+            "A": "A is symmetric",
+            "B": "A is not invertible",
+            "C": "A has three distinct eigenvalues",
+            "D": "A is orthogonal"
+          },
+          "correct_answer": "B",
+          "difficulty": "Hard",
+          "concept": "Algebra of matrices",
+          "explanation": "A zero determinant implies the matrix is singular, i.e., non\u2011invertible.",
+          "option_explanations": {
+            "A": "Option A ('A is symmetric') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "A zero determinant implies the matrix is singular, i.e., non\u2011invertible.",
+            "C": "Option C ('A has three distinct eigenvalues') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('A is orthogonal') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 9,
+          "id": 8,
+          "question": "Which statement about idempotent matrices (A^2 = A) is false?",
+          "options": {
+            "A": "All eigenvalues are either 0 or 1",
+            "B": "The trace equals the rank of the matrix",
+            "C": "The matrix is always diagonalizable",
+            "D": "The zero matrix is idempotent"
+          },
+          "correct_answer": "C",
+          "difficulty": "Hard",
+          "concept": "Types of matrices",
+          "explanation": "Idempotent matrices need not be diagonalizable; they can be defective.",
+          "option_explanations": {
+            "A": "Option A ('All eigenvalues are either 0 or 1') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('The trace equals the rank of the matrix') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "Idempotent matrices need not be diagonalizable; they can be defective.",
+            "D": "Option D ('The zero matrix is idempotent') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 10,
+          "id": 9,
+          "question": "Let A be a 2\u00d72 matrix such that A^2 = I but A \u2260 I and A \u2260 -I. Which set could be the eigenvalues of A?",
+          "options": {
+            "A": "{2, -2}",
+            "B": "{0, 1}",
+            "C": "{1, -1}",
+            "D": "{i, -i}"
+          },
+          "correct_answer": "C",
+          "difficulty": "Hard",
+          "concept": "Algebra of matrices",
+          "explanation": "If A^2 = I, eigenvalues \u03bb satisfy \u03bb^2 = 1, so \u03bb = \u00b11; excluding both equal gives the set {1, -1}.",
+          "option_explanations": {
+            "A": "Option A ('{2, -2}') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('{0, 1}') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "If A^2 = I, eigenvalues \u03bb satisfy \u03bb^2 = 1, so \u03bb = \u00b11; excluding both equal gives the set {1, -1}.",
+            "D": "Option D ('{i, -i}') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        }
+      ]
+    },
+    {
+      "run_index": 2,
+      "course_code": "22MT103",
+      "course_name": "Linear Algebra And Ordinary Differential Equations",
+      "topic": "Matrices",
+      "retake": true,
+      "latency_seconds": 20.58,
+      "provider_used": "groq",
+      "is_fallback": false,
+      "question_count": 10,
+      "questions": [
+        {
+          "index": 1,
+          "id": 0,
+          "question": "Which of the following best defines a matrix in linear algebra?",
+          "options": {
+            "A": "A rectangular array of numbers arranged in rows and columns",
+            "B": "A single numerical value representing a system of equations",
+            "C": "A set of vectors that span a vector space",
+            "D": "A function that maps one vector to another"
+          },
+          "correct_answer": "A",
+          "difficulty": "Easy",
+          "concept": "Definition of matrix",
+          "explanation": "A matrix is fundamentally defined as a rectangular array of elements (numbers, symbols, or expressions) organized in rows and columns.",
+          "option_explanations": {
+            "A": "A matrix is fundamentally defined as a rectangular array of elements (numbers, symbols, or expressions) organized in rows and columns.",
+            "B": "Option B ('A single numerical value representing a system of equations') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('A set of vectors that span a vector space') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('A function that maps one vector to another') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 2,
+          "id": 1,
+          "question": "What is the order of a matrix that has 3 rows and 4 columns?",
+          "options": {
+            "A": "4 x 3",
+            "B": "3 x 4",
+            "C": "7 x 1",
+            "D": "12 x 1"
+          },
+          "correct_answer": "B",
+          "difficulty": "Easy",
+          "concept": "Definition of matrix",
+          "explanation": "The order of a matrix is denoted as (number of rows) x (number of columns). Therefore, a matrix with 3 rows and 4 columns has an order of 3 x 4.",
+          "option_explanations": {
+            "A": "Option A ('4 x 3') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "The order of a matrix is denoted as (number of rows) x (number of columns). Therefore, a matrix with 3 rows and 4 columns has an order of 3 x 4.",
+            "C": "Option C ('7 x 1') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('12 x 1') is incorrect. In the study of Definition of matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 3,
+          "id": 2,
+          "question": "Which type of matrix has all elements equal to zero?",
+          "options": {
+            "A": "Identity Matrix",
+            "B": "Diagonal Matrix",
+            "C": "Zero Matrix",
+            "D": "Unit Matrix"
+          },
+          "correct_answer": "C",
+          "difficulty": "Easy",
+          "concept": "Types of matrices",
+          "explanation": "A Zero Matrix (or Null Matrix) is a matrix in which every element is zero. It is denoted by O or 0.",
+          "option_explanations": {
+            "A": "Option A ('Identity Matrix') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('Diagonal Matrix') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "A Zero Matrix (or Null Matrix) is a matrix in which every element is zero. It is denoted by O or 0.",
+            "D": "Option D ('Unit Matrix') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 4,
+          "id": 3,
+          "question": "A square matrix is called a Diagonal Matrix if:",
+          "options": {
+            "A": "All its elements are equal to 1",
+            "B": "All its elements are equal to 0",
+            "C": "All elements other than those on the principal diagonal are zero",
+            "D": "The sum of elements in each row is zero"
+          },
+          "correct_answer": "C",
+          "difficulty": "Easy",
+          "concept": "Types of matrices",
+          "explanation": "In a Diagonal Matrix, all non-diagonal elements (i.e., elements where row index != column index) are zero, while diagonal elements can be any value.",
+          "option_explanations": {
+            "A": "Option A ('All its elements are equal to 1') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('All its elements are equal to 0') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "In a Diagonal Matrix, all non-diagonal elements (i.e., elements where row index != column index) are zero, while diagonal elements can be any value.",
+            "D": "Option D ('The sum of elements in each row is zero') is incorrect. In the study of Types of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 5,
+          "id": 4,
+          "question": "If A is an m x n matrix and B is an n x p matrix, what is the order of the product matrix AB?",
+          "options": {
+            "A": "m x p",
+            "B": "n x n",
+            "C": "m x n",
+            "D": "p x m"
+          },
+          "correct_answer": "A",
+          "difficulty": "Medium",
+          "concept": "Algebra of matrices",
+          "explanation": "For matrix multiplication to be defined, the number of columns in the first matrix (n) must equal the number of rows in the second matrix (n). The resulting matrix has the number of rows of the first matrix (m) and the number of columns of the second matrix (p), resulting in an m x p matrix.",
+          "option_explanations": {
+            "A": "For matrix multiplication to be defined, the number of columns in the first matrix (n) must equal the number of rows in the second matrix (n). The resulting matrix has the number of rows of the first matrix (m) and the number of columns of the second matrix (p), resulting in an m x p matrix.",
+            "B": "Option B ('n x n') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('m x n') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('p x m') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 6,
+          "id": 5,
+          "question": "Which of the following properties is NOT generally true for matrix multiplication?",
+          "options": {
+            "A": "Associative Property: (AB)C = A(BC)",
+            "B": "Distributive Property: A(B + C) = AB + AC",
+            "C": "Commutative Property: AB = BA",
+            "D": "Existence of Identity: AI = IA = A"
+          },
+          "correct_answer": "C",
+          "difficulty": "Medium",
+          "concept": "Algebra of matrices",
+          "explanation": "Matrix multiplication is generally non-commutative, meaning AB is not necessarily equal to BA. The other properties (associative, distributive, and identity) hold for matrix multiplication.",
+          "option_explanations": {
+            "A": "Option A ('Associative Property: (AB)C = A(BC)') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('Distributive Property: A(B + C) = AB + AC') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "Matrix multiplication is generally non-commutative, meaning AB is not necessarily equal to BA. The other properties (associative, distributive, and identity) hold for matrix multiplication.",
+            "D": "Option D ('Existence of Identity: AI = IA = A') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 7,
+          "id": 6,
+          "question": "If A is a 2x2 matrix and k is a scalar, how is the product kA calculated?",
+          "options": {
+            "A": "Multiply k by the determinant of A",
+            "B": "Multiply k by each element of A",
+            "C": "Add k to each element of A",
+            "D": "Multiply k by the trace of A"
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Algebra of matrices",
+          "explanation": "Scalar multiplication involves multiplying every individual element of the matrix by the scalar value k. If A = [[a, b], [c, d]], then kA = [[ka, kb], [kc, kd]].",
+          "option_explanations": {
+            "A": "Option A ('Multiply k by the determinant of A') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Scalar multiplication involves multiplying every individual element of the matrix by the scalar value k. If A = [[a, b], [c, d]], then kA = [[ka, kb], [kc, kd]].",
+            "C": "Option C ('Add k to each element of A') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Multiply k by the trace of A') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 8,
+          "id": 7,
+          "question": "Consider two matrices A (2x3) and B (3x2). Which of the following statements is true regarding their products?",
+          "options": {
+            "A": "Both AB and BA are defined and are equal",
+            "B": "AB is defined (2x2) and BA is defined (3x3), but AB \u2260 BA generally",
+            "C": "AB is defined but BA is not defined",
+            "D": "BA is defined but AB is not defined"
+          },
+          "correct_answer": "B",
+          "difficulty": "Hard",
+          "concept": "Algebra of matrices",
+          "explanation": "AB is defined because the inner dimensions match (3=3), resulting in a 2x2 matrix. BA is defined because the inner dimensions match (2=2), resulting in a 3x3 matrix. Since the resulting orders are different, they cannot be equal, and matrix multiplication is non-commutative.",
+          "option_explanations": {
+            "A": "Option A ('Both AB and BA are defined and are equal') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "AB is defined because the inner dimensions match (3=3), resulting in a 2x2 matrix. BA is defined because the inner dimensions match (2=2), resulting in a 3x3 matrix. Since the resulting orders are different, they cannot be equal, and matrix multiplication is non-commutative.",
+            "C": "Option C ('AB is defined but BA is not defined') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('BA is defined but AB is not defined') is incorrect. In the study of Algebra of matrices, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 9,
+          "id": 8,
+          "question": "Which of the following matrices is an example of a row matrix?",
+          "options": {
+            "A": "A matrix with 3 rows and 1 column",
+            "B": "A matrix with 2 rows and 2 columns",
+            "C": "A matrix with 1 row and 3 columns",
+            "D": "A matrix with 4 rows and 4 columns"
+          },
+          "correct_answer": "C",
+          "difficulty": "Easy",
+          "concept": "Definition of matrix",
+          "explanation": "A row matrix is a matrix that has only one row. In this case, the correct answer is a matrix with 1 row and 3 columns.",
+          "option_explanations": {
+            "A": "Option A ('A matrix with 3 rows and 1 column') is incorrect. In the study of Row matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('A matrix with 2 rows and 2 columns') is incorrect. In the study of Row matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "A row matrix is a matrix that has only one row. In this case, the correct answer is a matrix with 1 row and 3 columns.",
+            "D": "Option D ('A matrix with 4 rows and 4 columns') is incorrect. In the study of Row matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 10,
+          "id": 9,
+          "question": "What is the term used to describe a matrix with the same number of rows and columns?",
+          "options": {
+            "A": "Row matrix",
+            "B": "Column matrix",
+            "C": "Square matrix",
+            "D": "Rectangular matrix"
+          },
+          "correct_answer": "C",
+          "difficulty": "Easy",
+          "concept": "Definition of matrix",
+          "explanation": "A square matrix is one where the number of rows is equal to the number of columns. In this case, the correct answer is a matrix with the same number of rows and columns.",
+          "option_explanations": {
+            "A": "Option A ('Row matrix') is incorrect. In the study of Square matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('Column matrix') is incorrect. In the study of Square matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "A square matrix is one where the number of rows is equal to the number of columns. In this case, the correct answer is a matrix with the same number of rows and columns.",
+            "D": "Option D ('Rectangular matrix') is incorrect. In the study of Square matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        }
+      ]
+    },
+    {
+      "run_index": 3,
+      "course_code": "22MT103",
+      "course_name": "Linear Algebra And Ordinary Differential Equations",
+      "topic": "Applications of Matrices",
+      "retake": false,
+      "latency_seconds": 9.27,
+      "provider_used": "groq",
+      "is_fallback": false,
+      "question_count": 10,
+      "questions": [
+        {
+          "index": 1,
+          "id": 0,
+          "question": "Consider the system: 2x + 3y = 7, 4x + 6y = 14. Which statement about its consistency is correct?",
+          "options": {
+            "A": "The system is inconsistent (no solution)",
+            "B": "The system has infinitely many solutions",
+            "C": "The system has a unique solution",
+            "D": "The system is contradictory because the constants differ"
+          },
+          "correct_answer": "B",
+          "difficulty": "Easy",
+          "concept": "Consistency of system of linear equations, Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method and Gauss Jordan method",
+          "explanation": "Both equations are multiples of each other, leading to a single independent equation and infinitely many solutions.",
+          "option_explanations": {
+            "A": "Option A ('The system is inconsistent (no solution)') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Both equations are multiples of each other, leading to a single independent equation and infinitely many solutions.",
+            "C": "Option C ('The system has a unique solution') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('The system is contradictory because the constants differ') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 2,
+          "id": 1,
+          "question": "Solve using Gauss elimination:  x + 2y = 5, 3x - y = 4. What is the value of y?",
+          "options": {
+            "A": "1",
+            "B": "2",
+            "C": "3",
+            "D": "4"
+          },
+          "correct_answer": "A",
+          "difficulty": "Easy",
+          "concept": "Consistency of system of linear equations, Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method and Gauss Jordan method",
+          "explanation": "Eliminate x: multiply first equation by 3 and subtract second gives 7y=7, so y=1.",
+          "option_explanations": {
+            "A": "Eliminate x: multiply first equation by 3 and subtract second gives 7y=7, so y=1.",
+            "B": "Option B ('2') is incorrect. In the study of Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('3') is incorrect. In the study of Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('4') is incorrect. In the study of Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 3,
+          "id": 2,
+          "question": "For matrix A=[[0,1],[-2,3]], what is the characteristic polynomial p(\u03bb)?",
+          "options": {
+            "A": "\u03bb^2-3\u03bb+2",
+            "B": "\u03bb^2-3\u03bb-2",
+            "C": "\u03bb^2+3\u03bb+2",
+            "D": "\u03bb^2+3\u03bb-2"
+          },
+          "correct_answer": "A",
+          "difficulty": "Easy",
+          "concept": "Cayley-Hamilton theorem (without proof), Power of a matrix, Inverse of a matrix",
+          "explanation": "det(\u03bbI\u2011A)=|\u03bb  -1; 2  \u03bb\u20113|=\u03bb(\u03bb\u20113)+2=\u03bb^2\u20113\u03bb+2.",
+          "option_explanations": {
+            "A": "det(\u03bbI\u2011A)=|\u03bb  -1; 2  \u03bb\u20113|=\u03bb(\u03bb\u20113)+2=\u03bb^2\u20113\u03bb+2.",
+            "B": "Option B ('\u03bb^2-3\u03bb-2') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('\u03bb^2+3\u03bb+2') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('\u03bb^2+3\u03bb-2') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 4,
+          "id": 3,
+          "question": "Given A=[[2,0],[0,3]], compute A^2.",
+          "options": {
+            "A": "[[4,0],[0,9]]",
+            "B": "[[2,0],[0,3]]",
+            "C": "[[8,0],[0,12]]",
+            "D": "[[4,0],[0,6]]"
+          },
+          "correct_answer": "A",
+          "difficulty": "Easy",
+          "concept": "Cayley-Hamilton theorem (without proof), Power of a matrix, Inverse of a matrix",
+          "explanation": "Squaring a diagonal matrix squares each diagonal entry: 2^2=4, 3^2=9.",
+          "option_explanations": {
+            "A": "Squaring a diagonal matrix squares each diagonal entry: 2^2=4, 3^2=9.",
+            "B": "Option B ('[[2,0],[0,3]]') is incorrect. In the study of Power of a matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('[[8,0],[0,12]]') is incorrect. In the study of Power of a matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('[[4,0],[0,6]]') is incorrect. In the study of Power of a matrix, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 5,
+          "id": 4,
+          "question": "For the augmented matrix \\[ [1 2 | 5]; [2 4 | k] \\], the system is consistent only if:",
+          "options": {
+            "A": "k=10",
+            "B": "k\u226010",
+            "C": "k=5",
+            "D": "k can be any real number"
+          },
+          "correct_answer": "A",
+          "difficulty": "Medium",
+          "concept": "Consistency of system of linear equations, Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method and Gauss Jordan method",
+          "explanation": "Second row is twice the first; consistency requires the constant term also double: k=2\u00b75=10.",
+          "option_explanations": {
+            "A": "Second row is twice the first; consistency requires the constant term also double: k=2\u00b75=10.",
+            "B": "Option B ('k\u226010') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('k=5') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('k can be any real number') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 6,
+          "id": 5,
+          "question": "Let A=[[1,1],[1,1]]. Using the Cayley\u2011Hamilton theorem, compute A^3.",
+          "options": {
+            "A": "[[2,2],[2,2]]",
+            "B": "[[3,3],[3,3]]",
+            "C": "[[4,4],[4,4]]",
+            "D": "[[5,5],[5,5]]"
+          },
+          "correct_answer": "C",
+          "difficulty": "Medium",
+          "concept": "Cayley-Hamilton theorem (without proof), Power of a matrix, Inverse of a matrix",
+          "explanation": "Characteristic polynomial \u03bb^2\u20112\u03bb=0 \u21d2 A^2=2A. Then A^3=A\u00b7A^2= A\u00b72A=2A^2=2\u00b72A=4A=[[4,4],[4,4]].",
+          "option_explanations": {
+            "A": "Option A ('[[2,2],[2,2]]') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('[[3,3],[3,3]]') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "Characteristic polynomial \u03bb^2\u20112\u03bb=0 \u21d2 A^2=2A. Then A^3=A\u00b7A^2= A\u00b72A=2A^2=2\u00b72A=4A=[[4,4],[4,4]].",
+            "D": "Option D ('[[5,5],[5,5]]') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 7,
+          "id": 6,
+          "question": "A beam\u2019s stiffness matrix K=[[12,-6],[-6,12]] (N\u00b7m). The natural frequencies are proportional to the square roots of eigenvalues. Which eigenvalue gives the higher frequency?",
+          "options": {
+            "A": "6",
+            "B": "12",
+            "C": "18",
+            "D": "24"
+          },
+          "correct_answer": "C",
+          "difficulty": "Medium",
+          "concept": "Strength of materials and strength of beams using Eigen value and Eigen vectors",
+          "explanation": "Eigenvalues of K are 6 and 18; larger eigenvalue (18) yields higher natural frequency.",
+          "option_explanations": {
+            "A": "Option A ('6') is incorrect. In the study of Strength of materials and strength of beams using Eigen value and Eigen vectors, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('12') is incorrect. In the study of Strength of materials and strength of beams using Eigen value and Eigen vectors, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "Eigenvalues of K are 6 and 18; larger eigenvalue (18) yields higher natural frequency.",
+            "D": "Option D ('24') is incorrect. In the study of Strength of materials and strength of beams using Eigen value and Eigen vectors, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 8,
+          "id": 7,
+          "question": "A rectangular beam has stiffness matrix S=[[20,5],[5,15]]. Find a unit eigenvector corresponding to the larger eigenvalue.",
+          "options": {
+            "A": "[1/\u221a2, 1/\u221a2]",
+            "B": "[3/\u221a10, 1/\u221a10]",
+            "C": "[1/\u221a5, 2/\u221a5]",
+            "D": "[2/\u221a5, 1/\u221a5]"
+          },
+          "correct_answer": "C",
+          "difficulty": "Hard",
+          "concept": "Strength of materials and strength of beams using Eigen value and Eigen vectors",
+          "explanation": "Larger eigenvalue \u224823.09; solving (S\u2011\u03bbI)v=0 gives v proportional to [1,2]; normalized gives [1/\u221a5,2/\u221a5].",
+          "option_explanations": {
+            "A": "Option A ('[1/\u221a2, 1/\u221a2]') is incorrect. In the study of Strength of materials and strength of beams using Eigen value and Eigen vectors, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('[3/\u221a10, 1/\u221a10]') is incorrect. In the study of Strength of materials and strength of beams using Eigen value and Eigen vectors, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "Larger eigenvalue \u224823.09; solving (S\u2011\u03bbI)v=0 gives v proportional to [1,2]; normalized gives [1/\u221a5,2/\u221a5].",
+            "D": "Option D ('[2/\u221a5, 1/\u221a5]') is incorrect. In the study of Strength of materials and strength of beams using Eigen value and Eigen vectors, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 9,
+          "id": 8,
+          "question": "Using the Cayley\u2011Hamilton theorem, express A^4 for A=[[0,1],[-1,0]] without direct multiplication. What is A^4?",
+          "options": {
+            "A": "[[1,0],[0,1]]",
+            "B": "[[0,-1],[1,0]]",
+            "C": "[[\u20111,0],[0,\u20111]]",
+            "D": "[[0,1],[\u20111,0]]"
+          },
+          "correct_answer": "A",
+          "difficulty": "Hard",
+          "concept": "Cayley-Hamilton theorem (without proof), Power of a matrix, Inverse of a matrix",
+          "explanation": "Characteristic polynomial \u03bb^2+1=0 \u21d2 A^2=\u2011I. Then A^4=(A^2)^2=(\u2011I)^2=I=[[1,0],[0,1]].",
+          "option_explanations": {
+            "A": "Characteristic polynomial \u03bb^2+1=0 \u21d2 A^2=\u2011I. Then A^4=(A^2)^2=(\u2011I)^2=I=[[1,0],[0,1]].",
+            "B": "Option B ('[[0,-1],[1,0]]') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('[[\u20111,0],[0,\u20111]]') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('[[0,1],[\u20111,0]]') is incorrect. In the study of Cayley-Hamilton theorem (without proof), this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 10,
+          "id": 9,
+          "question": "For the system  x+2y\u2011z=3, 2x+4y\u20112z=6, 3x+6y\u20113z=9, describe its solution set.",
+          "options": {
+            "A": "Unique solution (x,y,z)=(0,0,0)",
+            "B": "No solution (inconsistent)",
+            "C": "Infinitely many solutions forming a line",
+            "D": "Infinitely many solutions forming a plane"
+          },
+          "correct_answer": "C",
+          "difficulty": "Hard",
+          "concept": "Consistency of system of linear equations, Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method and Gauss Jordan method",
+          "explanation": "All three equations are multiples; rank=1 < variables=3, giving one free parameter \u2192 line of solutions.",
+          "option_explanations": {
+            "A": "Option A ('Unique solution (x,y,z)=(0,0,0)') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('No solution (inconsistent)') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "All three equations are multiples; rank=1 < variables=3, giving one free parameter \u2192 line of solutions.",
+            "D": "Option D ('Infinitely many solutions forming a plane') is incorrect. In the study of Consistency of system of linear equations, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        }
+      ]
+    },
+    {
+      "run_index": 4,
+      "course_code": "22AM301",
+      "course_name": "Deep Learning",
+      "topic": "Losss Function",
+      "retake": false,
+      "latency_seconds": 6.13,
+      "provider_used": "groq",
+      "is_fallback": false,
+      "question_count": 10,
+      "questions": [
+        {
+          "index": 1,
+          "id": 0,
+          "question": "Which of the following is a common loss function used for binary classification tasks in neural networks?",
+          "options": {
+            "A": "Mean Squared Error",
+            "B": "Cross-Entropy Loss",
+            "C": "Hinge Loss",
+            "D": "Kullback-Leibler Divergence"
+          },
+          "correct_answer": "B",
+          "difficulty": "Easy",
+          "concept": "Losss Function",
+          "explanation": "Cross-entropy loss is the standard choice for binary classification because it directly measures the difference between predicted probabilities and true labels.",
+          "option_explanations": {
+            "A": "Option A ('Mean Squared Error') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Cross-entropy loss is the standard choice for binary classification because it directly measures the difference between predicted probabilities and true labels.",
+            "C": "Option C ('Hinge Loss') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Kullback-Leibler Divergence') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 2,
+          "id": 1,
+          "question": "Which of the following is NOT a typical data augmentation technique for image data?",
+          "options": {
+            "A": "Random horizontal flip",
+            "B": "Random Gaussian noise addition",
+            "C": "Random cropping",
+            "D": "Random image sharpening"
+          },
+          "correct_answer": "D",
+          "difficulty": "Easy",
+          "concept": "Improving the training process \u2013 Dataset Augmentation",
+          "explanation": "Image sharpening is rarely used as augmentation; the other options are common transformations that preserve label semantics.",
+          "option_explanations": {
+            "A": "Option A ('Random horizontal flip') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option D for the valid approach.",
+            "B": "Option B ('Random Gaussian noise addition') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option D for the valid approach.",
+            "C": "Option C ('Random cropping') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option D for the valid approach.",
+            "D": "Image sharpening is rarely used as augmentation; the other options are common transformations that preserve label semantics."
+          }
+        },
+        {
+          "index": 3,
+          "id": 2,
+          "question": "Which of the following best describes noise robustness in a neural network?",
+          "options": {
+            "A": "Ability to generalize to unseen data",
+            "B": "Ability to maintain performance when input data contains noise",
+            "C": "Ability to reduce training time",
+            "D": "Ability to increase model size"
+          },
+          "correct_answer": "B",
+          "difficulty": "Easy",
+          "concept": "Noise Robustness",
+          "explanation": "Noise robustness refers to a model\u2019s capacity to keep accurate predictions even when the input is corrupted by noise.",
+          "option_explanations": {
+            "A": "Option A ('Ability to generalize to unseen data') is incorrect. In the study of Noise Robustness, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Noise robustness refers to a model\u2019s capacity to keep accurate predictions even when the input is corrupted by noise.",
+            "C": "Option C ('Ability to reduce training time') is incorrect. In the study of Noise Robustness, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Ability to increase model size') is incorrect. In the study of Noise Robustness, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 4,
+          "id": 3,
+          "question": "In regression tasks, which loss function is most appropriate?",
+          "options": {
+            "A": "Cross-Entropy Loss",
+            "B": "Mean Absolute Error",
+            "C": "Hinge Loss",
+            "D": "Kullback-Leibler Divergence"
+          },
+          "correct_answer": "B",
+          "difficulty": "Easy",
+          "concept": "Losss Function",
+          "explanation": "Mean Absolute Error directly measures the average absolute difference between predictions and targets, making it suitable for regression.",
+          "option_explanations": {
+            "A": "Option A ('Cross-Entropy Loss') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Mean Absolute Error directly measures the average absolute difference between predictions and targets, making it suitable for regression.",
+            "C": "Option C ('Hinge Loss') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Kullback-Leibler Divergence') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 5,
+          "id": 4,
+          "question": "Consider a multi-class classification problem with 10 classes. Which loss function is most suitable for training a softmax classifier?",
+          "options": {
+            "A": "Mean Squared Error",
+            "B": "Categorical Cross-Entropy",
+            "C": "Binary Cross-Entropy",
+            "D": "Hinge Loss"
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Losss Function",
+          "explanation": "Categorical cross-entropy pairs with softmax outputs to penalize incorrect class probabilities in multi-class settings.",
+          "option_explanations": {
+            "A": "Option A ('Mean Squared Error') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Categorical cross-entropy pairs with softmax outputs to penalize incorrect class probabilities in multi-class settings.",
+            "C": "Option C ('Binary Cross-Entropy') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Hinge Loss') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 6,
+          "id": 5,
+          "question": "Which augmentation strategy helps a model become invariant to small translations of the input image?",
+          "options": {
+            "A": "Random horizontal flip",
+            "B": "Random cropping",
+            "C": "Random rotation",
+            "D": "Random scaling"
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Improving the training process \u2013 Dataset Augmentation",
+          "explanation": "Random cropping effectively simulates small translations, encouraging the model to focus on local features.",
+          "option_explanations": {
+            "A": "Option A ('Random horizontal flip') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Random cropping effectively simulates small translations, encouraging the model to focus on local features.",
+            "C": "Option C ('Random rotation') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Random scaling') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 7,
+          "id": 6,
+          "question": "When augmenting a dataset for a text classification task, which technique is most appropriate?",
+          "options": {
+            "A": "Random word deletion",
+            "B": "Random image rotation",
+            "C": "Random audio pitch shift",
+            "D": "Random color jitter"
+          },
+          "correct_answer": "A",
+          "difficulty": "Medium",
+          "concept": "Improving the training process \u2013 Dataset Augmentation",
+          "explanation": "Random word deletion preserves the text\u2019s semantics while increasing variability, unlike image or audio augmentations.",
+          "option_explanations": {
+            "A": "Random word deletion preserves the text\u2019s semantics while increasing variability, unlike image or audio augmentations.",
+            "B": "Option B ('Random image rotation') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('Random audio pitch shift') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('Random color jitter') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 8,
+          "id": 7,
+          "question": "Which training technique explicitly adds noise to the inputs during training to improve robustness?",
+          "options": {
+            "A": "Dropout",
+            "B": "Batch Normalization",
+            "C": "Data Augmentation with Gaussian noise",
+            "D": "Early Stopping"
+          },
+          "correct_answer": "C",
+          "difficulty": "Medium",
+          "concept": "Noise Robustness",
+          "explanation": "Adding Gaussian noise to inputs during training forces the network to learn representations that are stable under perturbations.",
+          "option_explanations": {
+            "A": "Option A ('Dropout') is incorrect. In the study of Noise Robustness, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "B": "Option B ('Batch Normalization') is incorrect. In the study of Noise Robustness, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach.",
+            "C": "Adding Gaussian noise to inputs during training forces the network to learn representations that are stable under perturbations.",
+            "D": "Option D ('Early Stopping') is incorrect. In the study of Noise Robustness, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option C for the valid approach."
+          }
+        },
+        {
+          "index": 9,
+          "id": 8,
+          "question": "Suppose you have a regression model predicting house prices. You observe that the model overfits to outliers. Which loss function modification can mitigate this?",
+          "options": {
+            "A": "Switch from Mean Squared Error to Mean Absolute Error",
+            "B": "Switch from Mean Absolute Error to Mean Squared Error",
+            "C": "Add L2 regularization to the loss",
+            "D": "Use Cross-Entropy Loss"
+          },
+          "correct_answer": "A",
+          "difficulty": "Hard",
+          "concept": "Losss Function",
+          "explanation": "MAE is less sensitive to extreme errors, reducing the influence of outliers compared to MSE.",
+          "option_explanations": {
+            "A": "MAE is less sensitive to extreme errors, reducing the influence of outliers compared to MSE.",
+            "B": "Option B ('Switch from Mean Absolute Error to Mean Squared Error') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('Add L2 regularization to the loss') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('Use Cross-Entropy Loss') is incorrect. In the study of Losss Function, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 10,
+          "id": 9,
+          "question": "You are training a CNN on a small dataset of 200 images. Which augmentation pipeline would most effectively increase the diversity of the training set while preserving label semantics?",
+          "options": {
+            "A": "Random horizontal flip, random crop, random color jitter, random Gaussian noise addition",
+            "B": "Random vertical flip, random rotation by 180 degrees, random scaling",
+            "C": "Random cropping only",
+            "D": "Random image sharpening, random contrast adjustment, random brightness increase"
+          },
+          "correct_answer": "A",
+          "difficulty": "Hard",
+          "concept": "Improving the training process \u2013 Dataset Augmentation",
+          "explanation": "All transformations in option A maintain the class label while providing diverse visual variations.",
+          "option_explanations": {
+            "A": "All transformations in option A maintain the class label while providing diverse visual variations.",
+            "B": "Option B ('Random vertical flip, random rotation by 180 degrees, random scaling') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('Random cropping only') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('Random image sharpening, random contrast adjustment, random brightness increase') is incorrect. In the study of Improving the training process \u2013 Dataset Augmentation, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        }
+      ]
+    },
+    {
+      "run_index": 5,
+      "course_code": "22AM301",
+      "course_name": "Deep Learning",
+      "topic": "Regularization Methods-Dropout, Drop Connect, Batch",
+      "retake": false,
+      "latency_seconds": 6.94,
+      "provider_used": "groq",
+      "is_fallback": false,
+      "question_count": 10,
+      "questions": [
+        {
+          "index": 1,
+          "id": 0,
+          "question": "In the context of Dropout regularization, what happens to the weights of the neurons that are 'dropped out' during a specific training iteration?",
+          "options": {
+            "A": "Their weights are set to zero for that iteration, effectively removing them from the network.",
+            "B": "Their weights are multiplied by a large penalty factor to discourage their use.",
+            "C": "Their weights are frozen and do not receive any gradient updates.",
+            "D": "Their weights are randomly reset to small values to prevent overfitting."
+          },
+          "correct_answer": "A",
+          "difficulty": "Easy",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "Dropout works by randomly setting the output of certain neurons to zero during training. This is mathematically equivalent to setting their effective connection weights to zero for that specific forward and backward pass, preventing co-adaptation.",
+          "option_explanations": {
+            "A": "Dropout works by randomly setting the output of certain neurons to zero during training. This is mathematically equivalent to setting their effective connection weights to zero for that specific forward and backward pass, preventing co-adaptation.",
+            "B": "Option B ('Their weights are multiplied by a large penalty factor to discourage their use.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('Their weights are frozen and do not receive any gradient updates.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('Their weights are randomly reset to small values to prevent overfitting.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 2,
+          "id": 1,
+          "question": "What is the primary purpose of applying Batch Normalization to the inputs of a neural network layer?",
+          "options": {
+            "A": "To reduce the vanishing gradient problem by normalizing the activations.",
+            "B": "To standardize the distribution of inputs to have zero mean and unit variance.",
+            "C": "To increase the number of parameters in the model for better capacity.",
+            "D": "To eliminate the need for weight initialization strategies."
+          },
+          "correct_answer": "B",
+          "difficulty": "Easy",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "Batch Normalization normalizes the inputs to each layer by scaling and shifting them so that the batch of inputs has a mean of 0 and a standard deviation of 1. This stabilizes the learning process and allows for higher learning rates.",
+          "option_explanations": {
+            "A": "Option A ('To reduce the vanishing gradient problem by normalizing the activations.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Batch Normalization normalizes the inputs to each layer by scaling and shifting them so that the batch of inputs has a mean of 0 and a standard deviation of 1. This stabilizes the learning process and allows for higher learning rates.",
+            "C": "Option C ('To increase the number of parameters in the model for better capacity.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('To eliminate the need for weight initialization strategies.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 3,
+          "id": 2,
+          "question": "How does Drop Connect differ from standard Dropout in terms of what is randomly removed?",
+          "options": {
+            "A": "Drop Connect removes entire layers, while Dropout removes individual neurons.",
+            "B": "Drop Connect removes specific weight connections (edges), while Dropout removes entire neuron outputs.",
+            "C": "Drop Connect removes input features, while Dropout removes output features.",
+            "D": "Drop Connect removes biases, while Dropout removes weights."
+          },
+          "correct_answer": "B",
+          "difficulty": "Easy",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "Standard Dropout randomly deactivates entire neurons (setting their output to zero). Drop Connect, on the other hand, randomly deactivates specific weight connections (edges) between neurons, offering a finer-grained level of regularization.",
+          "option_explanations": {
+            "A": "Option A ('Drop Connect removes entire layers, while Dropout removes individual neurons.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Standard Dropout randomly deactivates entire neurons (setting their output to zero). Drop Connect, on the other hand, randomly deactivates specific weight connections (edges) between neurons, offering a finer-grained level of regularization.",
+            "C": "Option C ('Drop Connect removes input features, while Dropout removes output features.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Drop Connect removes biases, while Dropout removes weights.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 4,
+          "id": 3,
+          "question": "Which of the following is a key advantage of using Batch Normalization during training?",
+          "options": {
+            "A": "It allows the use of higher learning rates without diverging.",
+            "B": "It completely eliminates the need for backpropagation.",
+            "C": "It reduces the computational cost of matrix multiplications.",
+            "D": "It guarantees that the model will converge to the global minimum."
+          },
+          "correct_answer": "A",
+          "difficulty": "Easy",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "By normalizing the inputs to each layer, Batch Normalization reduces internal covariate shift. This makes the loss landscape smoother, allowing the optimizer to take larger steps (higher learning rates) without oscillating or diverging.",
+          "option_explanations": {
+            "A": "By normalizing the inputs to each layer, Batch Normalization reduces internal covariate shift. This makes the loss landscape smoother, allowing the optimizer to take larger steps (higher learning rates) without oscillating or diverging.",
+            "B": "Option B ('It completely eliminates the need for backpropagation.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "C": "Option C ('It reduces the computational cost of matrix multiplications.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach.",
+            "D": "Option D ('It guarantees that the model will converge to the global minimum.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option A for the valid approach."
+          }
+        },
+        {
+          "index": 5,
+          "id": 4,
+          "question": "In a Dropout layer with a keep probability of 0.5, how should the weights be scaled during the inference (testing) phase to maintain the expected value of the network?",
+          "options": {
+            "A": "Multiply the weights by 0.5.",
+            "B": "Multiply the weights by 2.0.",
+            "C": "Keep the weights unchanged.",
+            "D": "Divide the weights by 0.5."
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "During training, each neuron is active with probability 0.5, so the expected contribution is halved. To compensate for this scaling during inference (when all neurons are active), the weights (or activations) must be multiplied by 1/0.5 = 2.0 to preserve the same expected output magnitude.",
+          "option_explanations": {
+            "A": "Option A ('Multiply the weights by 0.5.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "During training, each neuron is active with probability 0.5, so the expected contribution is halved. To compensate for this scaling during inference (when all neurons are active), the weights (or activations) must be multiplied by 1/0.5 = 2.0 to preserve the same expected output magnitude.",
+            "C": "Option C ('Keep the weights unchanged.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Divide the weights by 0.5.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 6,
+          "id": 5,
+          "question": "Why is Batch Normalization considered to have a regularizing effect, even though it is primarily designed for optimization?",
+          "options": {
+            "A": "It adds L2 penalty to the loss function automatically.",
+            "B": "The noise introduced by using mini-batch statistics acts as a form of regularization.",
+            "C": "It reduces the number of parameters in the network.",
+            "D": "It forces the weights to be sparse."
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "Batch Normalization uses the mean and variance of the current mini-batch, which are noisy estimates of the true population statistics. This stochastic noise in the normalization parameters acts as a regularizer, similar to how Dropout introduces noise, helping to prevent overfitting.",
+          "option_explanations": {
+            "A": "Option A ('It adds L2 penalty to the loss function automatically.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Batch Normalization uses the mean and variance of the current mini-batch, which are noisy estimates of the true population statistics. This stochastic noise in the normalization parameters acts as a regularizer, similar to how Dropout introduces noise, helping to prevent overfitting.",
+            "C": "Option C ('It reduces the number of parameters in the network.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('It forces the weights to be sparse.') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 7,
+          "id": 6,
+          "question": "If a neural network suffers from 'co-adaptation' of features, which regularization technique is most directly designed to mitigate this specific issue?",
+          "options": {
+            "A": "Batch Normalization",
+            "B": "Dropout",
+            "C": "L2 Regularization",
+            "D": "Early Stopping"
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "Co-adaptation occurs when neurons become dependent on the presence of other specific neurons. Dropout prevents this by randomly dropping neurons, forcing the network to learn redundant, robust representations that do not rely on any single neuron being present.",
+          "option_explanations": {
+            "A": "Option A ('Batch Normalization') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Co-adaptation occurs when neurons become dependent on the presence of other specific neurons. Dropout prevents this by randomly dropping neurons, forcing the network to learn redundant, robust representations that do not rely on any single neuron being present.",
+            "C": "Option C ('L2 Regularization') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('Early Stopping') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 8,
+          "id": 7,
+          "question": "In the context of Drop Connect, if the probability of keeping a connection is $p$, what is the expected number of active connections per neuron if it has $N$ incoming connections?",
+          "options": {
+            "A": "$N$",
+            "B": "$N \\times p$",
+            "C": "$N / p$",
+            "D": "$N \\times (1-p)$"
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "Since each of the $N$ connections is independently kept with probability $p$, the expected number of active connections is the sum of the probabilities for each connection, which is $N \\times p$.",
+          "option_explanations": {
+            "A": "Option A ('$N$') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Since each of the $N$ connections is independently kept with probability $p$, the expected number of active connections is the sum of the probabilities for each connection, which is $N \\times p$.",
+            "C": "Option C ('$N / p$') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('$N \\times (1-p)$') is incorrect. In the study of Regularization Methods-Dropout, Drop connect, Batch normalization, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 9,
+          "id": 8,
+          "question": "When Dropout is applied to a fully connected layer during training, which of the following best describes the change in the network\u2019s effective capacity?",
+          "options": {
+            "A": "The capacity increases because the network learns to rely on more features.",
+            "B": "The capacity decreases because the network must learn to perform well with a subset of its units active.",
+            "C": "The capacity remains unchanged; Dropout only affects training speed.",
+            "D": "The capacity fluctuates randomly during each epoch."
+          },
+          "correct_answer": "B",
+          "difficulty": "Medium",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "Dropout randomly removes units during training, forcing the network to learn redundant representations. This reduces the effective capacity because the model must perform well even when many units are inactive.",
+          "option_explanations": {
+            "A": "Option A ('The capacity increases because the network learns to rely on more features.') is incorrect. In the study of Regularization Methods-Dropout, Drop Connect, Batch, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Dropout randomly removes units during training, forcing the network to learn redundant representations. This reduces the effective capacity because the model must perform well even when many units are inactive.",
+            "C": "Option C ('The capacity remains unchanged; Dropout only affects training speed.') is incorrect. In the study of Regularization Methods-Dropout, Drop Connect, Batch, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('The capacity fluctuates randomly during each epoch.') is incorrect. In the study of Regularization Methods-Dropout, Drop Connect, Batch, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        },
+        {
+          "index": 10,
+          "id": 9,
+          "question": "In Drop Connect, the probability of keeping a connection is p. Which statement correctly describes how the expected weight update magnitude compares to that of standard Dropout?",
+          "options": {
+            "A": "It is larger because connections are dropped rather than units.",
+            "B": "It is smaller because fewer weights are updated per iteration.",
+            "C": "It is the same as Dropout because both use the same keep probability.",
+            "D": "It depends on the activation function used."
+          },
+          "correct_answer": "B",
+          "difficulty": "Hard",
+          "concept": "Regularization Methods-Dropout, Drop connect, Batch normalization",
+          "explanation": "Drop Connect drops individual weights, so on average fewer weights receive gradient updates in each batch. This reduces the magnitude of weight updates compared to Dropout, which drops entire units but still updates all remaining weights.",
+          "option_explanations": {
+            "A": "Option A ('It is larger because connections are dropped rather than units.') is incorrect. In the study of Regularization Methods-Dropout, Drop Connect, Batch, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "B": "Drop Connect drops individual weights, so on average fewer weights receive gradient updates in each batch. This reduces the magnitude of weight updates compared to Dropout, which drops entire units but still updates all remaining weights.",
+            "C": "Option C ('It is the same as Dropout because both use the same keep probability.') is incorrect. In the study of Regularization Methods-Dropout, Drop Connect, Batch, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach.",
+            "D": "Option D ('It depends on the activation function used.') is incorrect. In the study of Regularization Methods-Dropout, Drop Connect, Batch, this option represents an alternative or common misconception that does not satisfy the problem criteria. Refer to Option B for the valid approach."
+          }
+        }
+      ]
+    }
+  ]
+}

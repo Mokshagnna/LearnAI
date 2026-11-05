@@ -1,0 +1,147 @@
+{
+  "step1": {
+    "name": "Start local backend with staging safeguards",
+    "status": "PASS",
+    "evidence": "Server active at http://127.0.0.1:8000, DB=staging_gate1.db, is_prod=False"
+  },
+  "step2": {
+    "name": "Open actual frontend in browser",
+    "status": "PASS",
+    "evidence": "Document title: 'LearnAI'"
+  },
+  "step3": {
+    "name": "Register or log in using dedicated staging test credentials",
+    "status": "PASS",
+    "evidence": "Registered stu_id=stu_d76157a56e2dde376383c5f5, token present=True, setup visible=True"
+  },
+  "step4": {
+    "name": "Verify authentication and session creation",
+    "status": "PASS",
+    "evidence": "Student name badge: 'Audit Student'"
+  },
+  "step5": {
+    "name": "Select topic and difficulty",
+    "status": "PASS",
+    "evidence": "Selected topic='Inverse of a Matrix', difficulty='None'"
+  },
+  "step6": {
+    "name": "Request quiz generation through deterministic mock provider",
+    "status": "PASS",
+    "evidence": "Quiz container visible: True"
+  },
+  "step7": {
+    "name": "Verify generated questions appear in real UI",
+    "status": "PASS",
+    "evidence": "Q1 text: 'What is the necessary and sufficient condition for a square matrix A t...'"
+  },
+  "step8": {
+    "name": "Verify question count",
+    "status": "PASS",
+    "evidence": "total_q=10, progressText='Question 1 of 10'"
+  },
+  "step9": {
+    "name": "Verify question text and answer options",
+    "status": "PASS",
+    "evidence": "Options count=4"
+  },
+  "step10": {
+    "name": "Verify code-aware question rendering",
+    "status": "PASS",
+    "evidence": "Code block present on Question 3: True"
+  },
+  "step11": {
+    "name": "Verify mathematical expressions and KaTeX rendering",
+    "status": "PASS",
+    "evidence": "KaTeX classes / math rendering present on Q9: True"
+  },
+  "step12": {
+    "name": "Verify no answer key or metadata exposed before submission",
+    "status": "PASS",
+    "evidence": "correct_answer/explanation exposed in client DOM or quiz object: False"
+  },
+  "step13": {
+    "name": "Select answers",
+    "status": "PASS",
+    "evidence": "Option A selected class applied on Q9: True"
+  },
+  "step14": {
+    "name": "Navigate between questions",
+    "status": "PASS",
+    "evidence": "Navigated back to Q8: 'What is the relationship between the eigenvalues o...'"
+  },
+  "step15": {
+    "name": "Verify answer persistence when navigating backward and forward",
+    "status": "PASS",
+    "evidence": "Q8 persisted=True, Q9 persisted=True"
+  },
+  "step16": {
+    "name": "Submit complete quiz",
+    "status": "PASS",
+    "evidence": "Submit button was 'Submit Quiz', Result section visible: True"
+  },
+  "step17": {
+    "name": "Verify server-side grading",
+    "status": "PASS",
+    "evidence": "Score display: '10 / 10'"
+  },
+  "step18": {
+    "name": "Verify final score and answer review",
+    "status": "PASS",
+    "evidence": "Review question items rendered=10"
+  },
+  "step19": {
+    "name": "Verify topic mastery or progress updates",
+    "status": "PASS",
+    "evidence": "topic_mastery row: level=advanced, attempts=1, score=1.0"
+  },
+  "step20": {
+    "name": "Generate a retake",
+    "status": "PASS",
+    "evidence": "Retake button clicked, quiz section visible: True"
+  },
+  "step21": {
+    "name": "Verify retake uses intended novelty logic",
+    "status": "PASS",
+    "evidence": "Attempt badge text: 'Attempt #2 \u2022 ADVANCED'"
+  },
+  "step22": {
+    "name": "Verify first retake question differs from original",
+    "status": "PASS",
+    "evidence": "Original Q1: 'What is the necessary and sufficien...', Retake Q1: 'How does elementary row switching a...'"
+  },
+  "step23": {
+    "name": "Complete the retake",
+    "status": "PASS",
+    "evidence": "Completed all 10 retake questions, results rendered: True"
+  },
+  "step24": {
+    "name": "Submit the retake",
+    "status": "PASS",
+    "evidence": "Retake submitted successfully"
+  },
+  "step25": {
+    "name": "Verify retake grading and result display",
+    "status": "PASS",
+    "evidence": "Retake score display: '10 / 10'"
+  },
+  "step26": {
+    "name": "Verify session status transitions",
+    "status": "PASS",
+    "evidence": "Sessions in DB: [('f32cfa03-5956-4202-bc51-d62044b9b1ec', 'completed'), ('3cc3eec4-3a29-44a1-9898-9c497df27d70', 'completed')]"
+  },
+  "step27": {
+    "name": "Verify no duplicate quiz attempts created",
+    "status": "PASS",
+    "evidence": "Attempts in DB: [('03381cb2-34b2-49be-98d0-861dc37dc222', 10, 10), ('558ec037-b8c0-4bd7-99e0-a715be55d4ce', 10, 10)]"
+  },
+  "step28": {
+    "name": "Verify refresh does not corrupt session state",
+    "status": "PASS",
+    "evidence": "Student ID in localStorage after reload: stu_d76157a56e2dde376383c5f5"
+  },
+  "step29": {
+    "name": "Verify logout and session invalidation",
+    "status": "PASS",
+    "evidence": "token_after_logout=None, login_visible=True"
+  }
+}

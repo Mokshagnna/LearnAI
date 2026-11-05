@@ -1,0 +1,420 @@
+
+=======================================================================
+RUN 1 | 22MT103 | Topic: 'Matrices' | Retake: False | Latency: 6.27s
+=======================================================================
+
+[Q1] (Easy) Concept: Definition of matrix
+Question: Which of the following best describes a matrix?
+  A: A rectangular array of numbers arranged in rows and columns [CORRECT]
+  B: A single number representing a linear transformation
+  C: A set of vectors that are linearly independent
+  D: A function that maps scalars to vectors
+Explanation: A matrix is defined as a rectangular array of numbers organized by rows and columns.
+
+[Q2] (Easy) Concept: Definition of matrix
+Question: The order of a matrix is expressed as:
+  A: Number of rows only
+  B: Rows × columns [CORRECT]
+  C: Number of columns only
+  D: Rows + columns
+Explanation: The order (size) of a matrix is given by the number of rows followed by the number of columns, written as m×n.
+
+[Q3] (Easy) Concept: Types of matrices
+Question: A square matrix with all entries equal to zero is called:
+  A: Identity matrix
+  B: Diagonal matrix
+  C: Zero (or null) matrix [CORRECT]
+  D: Scalar matrix
+Explanation: A matrix whose every entry is zero is termed the zero or null matrix.
+
+[Q4] (Easy) Concept: Types of matrices
+Question: Which of the following matrices is symmetric?
+  A: [[1,2],[3,4]]
+  B: [[0,1],[-1,0]]
+  C: [[5,0],[0,5]]
+  D: [[2,7],[7,2]] [CORRECT]
+Explanation: A symmetric matrix equals its transpose; only option D satisfies A^T = A.
+
+[Q5] (Medium) Concept: Algebra of matrices
+Question: If A=[[1,2],[3,4]] and B=[[0,1],[-1,0]], what is the product AB?
+  A: [[-2,1],[-4,3]] [CORRECT]
+  B: [[2,-1],[4,-3]]
+  C: [[1,0],[0,1]]
+  D: [[0,1],[-1,0]]
+Explanation: Multiplying A by B gives [[1·0+2·(-1),1·1+2·0],[3·0+4·(-1),3·1+4·0]] = [[-2,1],[-4,3]].
+
+[Q6] (Medium) Concept: Algebra of matrices
+Question: Find the determinant of the matrix [[2,0,1],[-1,3,2],[4,5,0]].
+  A: -12
+  B: 24
+  C: -37 [CORRECT]
+  D: 0
+Explanation: det = 2(3·0-2·5) -0(-1·0-2·4) +1(-1·5-3·4) = -20-17 = -37.
+
+[Q7] (Medium) Concept: Definition of matrix
+Question: The set of all m×n real matrices forms a vector space under which operations?
+  A: Matrix multiplication and scalar addition
+  B: Matrix addition and scalar multiplication [CORRECT]
+  C: Matrix transpose and determinant
+  D: Matrix inversion and scalar division
+Explanation: Vector space axioms are satisfied with matrix addition and multiplication by real scalars.
+
+[Q8] (Hard) Concept: Algebra of matrices
+Question: If a 3×3 matrix A has det(A)=0, which statement is always true?
+  A: A is symmetric
+  B: A is not invertible [CORRECT]
+  C: A has three distinct eigenvalues
+  D: A is orthogonal
+Explanation: A zero determinant implies the matrix is singular, i.e., non‑invertible.
+
+[Q9] (Hard) Concept: Types of matrices
+Question: Which statement about idempotent matrices (A^2 = A) is false?
+  A: All eigenvalues are either 0 or 1
+  B: The trace equals the rank of the matrix
+  C: The matrix is always diagonalizable [CORRECT]
+  D: The zero matrix is idempotent
+Explanation: Idempotent matrices need not be diagonalizable; they can be defective.
+
+[Q10] (Hard) Concept: Algebra of matrices
+Question: Let A be a 2×2 matrix such that A^2 = I but A ≠ I and A ≠ -I. Which set could be the eigenvalues of A?
+  A: {2, -2}
+  B: {0, 1}
+  C: {1, -1} [CORRECT]
+  D: {i, -i}
+Explanation: If A^2 = I, eigenvalues λ satisfy λ^2 = 1, so λ = ±1; excluding both equal gives the set {1, -1}.
+
+=======================================================================
+RUN 2 | 22MT103 | Topic: 'Matrices' | Retake: True | Latency: 20.58s
+=======================================================================
+
+[Q1] (Easy) Concept: Definition of matrix
+Question: Which of the following best defines a matrix in linear algebra?
+  A: A rectangular array of numbers arranged in rows and columns [CORRECT]
+  B: A single numerical value representing a system of equations
+  C: A set of vectors that span a vector space
+  D: A function that maps one vector to another
+Explanation: A matrix is fundamentally defined as a rectangular array of elements (numbers, symbols, or expressions) organized in rows and columns.
+
+[Q2] (Easy) Concept: Definition of matrix
+Question: What is the order of a matrix that has 3 rows and 4 columns?
+  A: 4 x 3
+  B: 3 x 4 [CORRECT]
+  C: 7 x 1
+  D: 12 x 1
+Explanation: The order of a matrix is denoted as (number of rows) x (number of columns). Therefore, a matrix with 3 rows and 4 columns has an order of 3 x 4.
+
+[Q3] (Easy) Concept: Types of matrices
+Question: Which type of matrix has all elements equal to zero?
+  A: Identity Matrix
+  B: Diagonal Matrix
+  C: Zero Matrix [CORRECT]
+  D: Unit Matrix
+Explanation: A Zero Matrix (or Null Matrix) is a matrix in which every element is zero. It is denoted by O or 0.
+
+[Q4] (Easy) Concept: Types of matrices
+Question: A square matrix is called a Diagonal Matrix if:
+  A: All its elements are equal to 1
+  B: All its elements are equal to 0
+  C: All elements other than those on the principal diagonal are zero [CORRECT]
+  D: The sum of elements in each row is zero
+Explanation: In a Diagonal Matrix, all non-diagonal elements (i.e., elements where row index != column index) are zero, while diagonal elements can be any value.
+
+[Q5] (Medium) Concept: Algebra of matrices
+Question: If A is an m x n matrix and B is an n x p matrix, what is the order of the product matrix AB?
+  A: m x p [CORRECT]
+  B: n x n
+  C: m x n
+  D: p x m
+Explanation: For matrix multiplication to be defined, the number of columns in the first matrix (n) must equal the number of rows in the second matrix (n). The resulting matrix has the number of rows of the first matrix (m) and the number of columns of the second matrix (p), resulting in an m x p matrix.
+
+[Q6] (Medium) Concept: Algebra of matrices
+Question: Which of the following properties is NOT generally true for matrix multiplication?
+  A: Associative Property: (AB)C = A(BC)
+  B: Distributive Property: A(B + C) = AB + AC
+  C: Commutative Property: AB = BA [CORRECT]
+  D: Existence of Identity: AI = IA = A
+Explanation: Matrix multiplication is generally non-commutative, meaning AB is not necessarily equal to BA. The other properties (associative, distributive, and identity) hold for matrix multiplication.
+
+[Q7] (Medium) Concept: Algebra of matrices
+Question: If A is a 2x2 matrix and k is a scalar, how is the product kA calculated?
+  A: Multiply k by the determinant of A
+  B: Multiply k by each element of A [CORRECT]
+  C: Add k to each element of A
+  D: Multiply k by the trace of A
+Explanation: Scalar multiplication involves multiplying every individual element of the matrix by the scalar value k. If A = [[a, b], [c, d]], then kA = [[ka, kb], [kc, kd]].
+
+[Q8] (Hard) Concept: Algebra of matrices
+Question: Consider two matrices A (2x3) and B (3x2). Which of the following statements is true regarding their products?
+  A: Both AB and BA are defined and are equal
+  B: AB is defined (2x2) and BA is defined (3x3), but AB ≠ BA generally [CORRECT]
+  C: AB is defined but BA is not defined
+  D: BA is defined but AB is not defined
+Explanation: AB is defined because the inner dimensions match (3=3), resulting in a 2x2 matrix. BA is defined because the inner dimensions match (2=2), resulting in a 3x3 matrix. Since the resulting orders are different, they cannot be equal, and matrix multiplication is non-commutative.
+
+[Q9] (Easy) Concept: Definition of matrix
+Question: Which of the following matrices is an example of a row matrix?
+  A: A matrix with 3 rows and 1 column
+  B: A matrix with 2 rows and 2 columns
+  C: A matrix with 1 row and 3 columns [CORRECT]
+  D: A matrix with 4 rows and 4 columns
+Explanation: A row matrix is a matrix that has only one row. In this case, the correct answer is a matrix with 1 row and 3 columns.
+
+[Q10] (Easy) Concept: Definition of matrix
+Question: What is the term used to describe a matrix with the same number of rows and columns?
+  A: Row matrix
+  B: Column matrix
+  C: Square matrix [CORRECT]
+  D: Rectangular matrix
+Explanation: A square matrix is one where the number of rows is equal to the number of columns. In this case, the correct answer is a matrix with the same number of rows and columns.
+
+=======================================================================
+RUN 3 | 22MT103 | Topic: 'Applications of Matrices' | Retake: False | Latency: 9.27s
+=======================================================================
+
+[Q1] (Easy) Concept: Consistency of system of linear equations, Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method and Gauss Jordan method
+Question: Consider the system: 2x + 3y = 7, 4x + 6y = 14. Which statement about its consistency is correct?
+  A: The system is inconsistent (no solution)
+  B: The system has infinitely many solutions [CORRECT]
+  C: The system has a unique solution
+  D: The system is contradictory because the constants differ
+Explanation: Both equations are multiples of each other, leading to a single independent equation and infinitely many solutions.
+
+[Q2] (Easy) Concept: Consistency of system of linear equations, Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method and Gauss Jordan method
+Question: Solve using Gauss elimination:  x + 2y = 5, 3x - y = 4. What is the value of y?
+  A: 1 [CORRECT]
+  B: 2
+  C: 3
+  D: 4
+Explanation: Eliminate x: multiply first equation by 3 and subtract second gives 7y=7, so y=1.
+
+[Q3] (Easy) Concept: Cayley-Hamilton theorem (without proof), Power of a matrix, Inverse of a matrix
+Question: For matrix A=[[0,1],[-2,3]], what is the characteristic polynomial p(λ)?
+  A: λ^2-3λ+2 [CORRECT]
+  B: λ^2-3λ-2
+  C: λ^2+3λ+2
+  D: λ^2+3λ-2
+Explanation: det(λI‑A)=|λ  -1; 2  λ‑3|=λ(λ‑3)+2=λ^2‑3λ+2.
+
+[Q4] (Easy) Concept: Cayley-Hamilton theorem (without proof), Power of a matrix, Inverse of a matrix
+Question: Given A=[[2,0],[0,3]], compute A^2.
+  A: [[4,0],[0,9]] [CORRECT]
+  B: [[2,0],[0,3]]
+  C: [[8,0],[0,12]]
+  D: [[4,0],[0,6]]
+Explanation: Squaring a diagonal matrix squares each diagonal entry: 2^2=4, 3^2=9.
+
+[Q5] (Medium) Concept: Consistency of system of linear equations, Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method and Gauss Jordan method
+Question: For the augmented matrix \[ [1 2 | 5]; [2 4 | k] \], the system is consistent only if:
+  A: k=10 [CORRECT]
+  B: k≠10
+  C: k=5
+  D: k can be any real number
+Explanation: Second row is twice the first; consistency requires the constant term also double: k=2·5=10.
+
+[Q6] (Medium) Concept: Cayley-Hamilton theorem (without proof), Power of a matrix, Inverse of a matrix
+Question: Let A=[[1,1],[1,1]]. Using the Cayley‑Hamilton theorem, compute A^3.
+  A: [[2,2],[2,2]]
+  B: [[3,3],[3,3]]
+  C: [[4,4],[4,4]] [CORRECT]
+  D: [[5,5],[5,5]]
+Explanation: Characteristic polynomial λ^2‑2λ=0 ⇒ A^2=2A. Then A^3=A·A^2= A·2A=2A^2=2·2A=4A=[[4,4],[4,4]].
+
+[Q7] (Medium) Concept: Strength of materials and strength of beams using Eigen value and Eigen vectors
+Question: A beam’s stiffness matrix K=[[12,-6],[-6,12]] (N·m). The natural frequencies are proportional to the square roots of eigenvalues. Which eigenvalue gives the higher frequency?
+  A: 6
+  B: 12
+  C: 18 [CORRECT]
+  D: 24
+Explanation: Eigenvalues of K are 6 and 18; larger eigenvalue (18) yields higher natural frequency.
+
+[Q8] (Hard) Concept: Strength of materials and strength of beams using Eigen value and Eigen vectors
+Question: A rectangular beam has stiffness matrix S=[[20,5],[5,15]]. Find a unit eigenvector corresponding to the larger eigenvalue.
+  A: [1/√2, 1/√2]
+  B: [3/√10, 1/√10]
+  C: [1/√5, 2/√5] [CORRECT]
+  D: [2/√5, 1/√5]
+Explanation: Larger eigenvalue ≈23.09; solving (S‑λI)v=0 gives v proportional to [1,2]; normalized gives [1/√5,2/√5].
+
+[Q9] (Hard) Concept: Cayley-Hamilton theorem (without proof), Power of a matrix, Inverse of a matrix
+Question: Using the Cayley‑Hamilton theorem, express A^4 for A=[[0,1],[-1,0]] without direct multiplication. What is A^4?
+  A: [[1,0],[0,1]] [CORRECT]
+  B: [[0,-1],[1,0]]
+  C: [[‑1,0],[0,‑1]]
+  D: [[0,1],[‑1,0]]
+Explanation: Characteristic polynomial λ^2+1=0 ⇒ A^2=‑I. Then A^4=(A^2)^2=(‑I)^2=I=[[1,0],[0,1]].
+
+[Q10] (Hard) Concept: Consistency of system of linear equations, Solution of system of linear equations having unique solution and involving not more than three variables by Gauss elimination method and Gauss Jordan method
+Question: For the system  x+2y‑z=3, 2x+4y‑2z=6, 3x+6y‑3z=9, describe its solution set.
+  A: Unique solution (x,y,z)=(0,0,0)
+  B: No solution (inconsistent)
+  C: Infinitely many solutions forming a line [CORRECT]
+  D: Infinitely many solutions forming a plane
+Explanation: All three equations are multiples; rank=1 < variables=3, giving one free parameter → line of solutions.
+
+=======================================================================
+RUN 4 | 22AM301 | Topic: 'Losss Function' | Retake: False | Latency: 6.13s
+=======================================================================
+
+[Q1] (Easy) Concept: Losss Function
+Question: Which of the following is a common loss function used for binary classification tasks in neural networks?
+  A: Mean Squared Error
+  B: Cross-Entropy Loss [CORRECT]
+  C: Hinge Loss
+  D: Kullback-Leibler Divergence
+Explanation: Cross-entropy loss is the standard choice for binary classification because it directly measures the difference between predicted probabilities and true labels.
+
+[Q2] (Easy) Concept: Improving the training process – Dataset Augmentation
+Question: Which of the following is NOT a typical data augmentation technique for image data?
+  A: Random horizontal flip
+  B: Random Gaussian noise addition
+  C: Random cropping
+  D: Random image sharpening [CORRECT]
+Explanation: Image sharpening is rarely used as augmentation; the other options are common transformations that preserve label semantics.
+
+[Q3] (Easy) Concept: Noise Robustness
+Question: Which of the following best describes noise robustness in a neural network?
+  A: Ability to generalize to unseen data
+  B: Ability to maintain performance when input data contains noise [CORRECT]
+  C: Ability to reduce training time
+  D: Ability to increase model size
+Explanation: Noise robustness refers to a model’s capacity to keep accurate predictions even when the input is corrupted by noise.
+
+[Q4] (Easy) Concept: Losss Function
+Question: In regression tasks, which loss function is most appropriate?
+  A: Cross-Entropy Loss
+  B: Mean Absolute Error [CORRECT]
+  C: Hinge Loss
+  D: Kullback-Leibler Divergence
+Explanation: Mean Absolute Error directly measures the average absolute difference between predictions and targets, making it suitable for regression.
+
+[Q5] (Medium) Concept: Losss Function
+Question: Consider a multi-class classification problem with 10 classes. Which loss function is most suitable for training a softmax classifier?
+  A: Mean Squared Error
+  B: Categorical Cross-Entropy [CORRECT]
+  C: Binary Cross-Entropy
+  D: Hinge Loss
+Explanation: Categorical cross-entropy pairs with softmax outputs to penalize incorrect class probabilities in multi-class settings.
+
+[Q6] (Medium) Concept: Improving the training process – Dataset Augmentation
+Question: Which augmentation strategy helps a model become invariant to small translations of the input image?
+  A: Random horizontal flip
+  B: Random cropping [CORRECT]
+  C: Random rotation
+  D: Random scaling
+Explanation: Random cropping effectively simulates small translations, encouraging the model to focus on local features.
+
+[Q7] (Medium) Concept: Improving the training process – Dataset Augmentation
+Question: When augmenting a dataset for a text classification task, which technique is most appropriate?
+  A: Random word deletion [CORRECT]
+  B: Random image rotation
+  C: Random audio pitch shift
+  D: Random color jitter
+Explanation: Random word deletion preserves the text’s semantics while increasing variability, unlike image or audio augmentations.
+
+[Q8] (Medium) Concept: Noise Robustness
+Question: Which training technique explicitly adds noise to the inputs during training to improve robustness?
+  A: Dropout
+  B: Batch Normalization
+  C: Data Augmentation with Gaussian noise [CORRECT]
+  D: Early Stopping
+Explanation: Adding Gaussian noise to inputs during training forces the network to learn representations that are stable under perturbations.
+
+[Q9] (Hard) Concept: Losss Function
+Question: Suppose you have a regression model predicting house prices. You observe that the model overfits to outliers. Which loss function modification can mitigate this?
+  A: Switch from Mean Squared Error to Mean Absolute Error [CORRECT]
+  B: Switch from Mean Absolute Error to Mean Squared Error
+  C: Add L2 regularization to the loss
+  D: Use Cross-Entropy Loss
+Explanation: MAE is less sensitive to extreme errors, reducing the influence of outliers compared to MSE.
+
+[Q10] (Hard) Concept: Improving the training process – Dataset Augmentation
+Question: You are training a CNN on a small dataset of 200 images. Which augmentation pipeline would most effectively increase the diversity of the training set while preserving label semantics?
+  A: Random horizontal flip, random crop, random color jitter, random Gaussian noise addition [CORRECT]
+  B: Random vertical flip, random rotation by 180 degrees, random scaling
+  C: Random cropping only
+  D: Random image sharpening, random contrast adjustment, random brightness increase
+Explanation: All transformations in option A maintain the class label while providing diverse visual variations.
+
+=======================================================================
+RUN 5 | 22AM301 | Topic: 'Regularization Methods-Dropout, Drop Connect, Batch' | Retake: False | Latency: 6.94s
+=======================================================================
+
+[Q1] (Easy) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: In the context of Dropout regularization, what happens to the weights of the neurons that are 'dropped out' during a specific training iteration?
+  A: Their weights are set to zero for that iteration, effectively removing them from the network. [CORRECT]
+  B: Their weights are multiplied by a large penalty factor to discourage their use.
+  C: Their weights are frozen and do not receive any gradient updates.
+  D: Their weights are randomly reset to small values to prevent overfitting.
+Explanation: Dropout works by randomly setting the output of certain neurons to zero during training. This is mathematically equivalent to setting their effective connection weights to zero for that specific forward and backward pass, preventing co-adaptation.
+
+[Q2] (Easy) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: What is the primary purpose of applying Batch Normalization to the inputs of a neural network layer?
+  A: To reduce the vanishing gradient problem by normalizing the activations.
+  B: To standardize the distribution of inputs to have zero mean and unit variance. [CORRECT]
+  C: To increase the number of parameters in the model for better capacity.
+  D: To eliminate the need for weight initialization strategies.
+Explanation: Batch Normalization normalizes the inputs to each layer by scaling and shifting them so that the batch of inputs has a mean of 0 and a standard deviation of 1. This stabilizes the learning process and allows for higher learning rates.
+
+[Q3] (Easy) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: How does Drop Connect differ from standard Dropout in terms of what is randomly removed?
+  A: Drop Connect removes entire layers, while Dropout removes individual neurons.
+  B: Drop Connect removes specific weight connections (edges), while Dropout removes entire neuron outputs. [CORRECT]
+  C: Drop Connect removes input features, while Dropout removes output features.
+  D: Drop Connect removes biases, while Dropout removes weights.
+Explanation: Standard Dropout randomly deactivates entire neurons (setting their output to zero). Drop Connect, on the other hand, randomly deactivates specific weight connections (edges) between neurons, offering a finer-grained level of regularization.
+
+[Q4] (Easy) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: Which of the following is a key advantage of using Batch Normalization during training?
+  A: It allows the use of higher learning rates without diverging. [CORRECT]
+  B: It completely eliminates the need for backpropagation.
+  C: It reduces the computational cost of matrix multiplications.
+  D: It guarantees that the model will converge to the global minimum.
+Explanation: By normalizing the inputs to each layer, Batch Normalization reduces internal covariate shift. This makes the loss landscape smoother, allowing the optimizer to take larger steps (higher learning rates) without oscillating or diverging.
+
+[Q5] (Medium) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: In a Dropout layer with a keep probability of 0.5, how should the weights be scaled during the inference (testing) phase to maintain the expected value of the network?
+  A: Multiply the weights by 0.5.
+  B: Multiply the weights by 2.0. [CORRECT]
+  C: Keep the weights unchanged.
+  D: Divide the weights by 0.5.
+Explanation: During training, each neuron is active with probability 0.5, so the expected contribution is halved. To compensate for this scaling during inference (when all neurons are active), the weights (or activations) must be multiplied by 1/0.5 = 2.0 to preserve the same expected output magnitude.
+
+[Q6] (Medium) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: Why is Batch Normalization considered to have a regularizing effect, even though it is primarily designed for optimization?
+  A: It adds L2 penalty to the loss function automatically.
+  B: The noise introduced by using mini-batch statistics acts as a form of regularization. [CORRECT]
+  C: It reduces the number of parameters in the network.
+  D: It forces the weights to be sparse.
+Explanation: Batch Normalization uses the mean and variance of the current mini-batch, which are noisy estimates of the true population statistics. This stochastic noise in the normalization parameters acts as a regularizer, similar to how Dropout introduces noise, helping to prevent overfitting.
+
+[Q7] (Medium) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: If a neural network suffers from 'co-adaptation' of features, which regularization technique is most directly designed to mitigate this specific issue?
+  A: Batch Normalization
+  B: Dropout [CORRECT]
+  C: L2 Regularization
+  D: Early Stopping
+Explanation: Co-adaptation occurs when neurons become dependent on the presence of other specific neurons. Dropout prevents this by randomly dropping neurons, forcing the network to learn redundant, robust representations that do not rely on any single neuron being present.
+
+[Q8] (Medium) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: In the context of Drop Connect, if the probability of keeping a connection is $p$, what is the expected number of active connections per neuron if it has $N$ incoming connections?
+  A: $N$
+  B: $N \times p$ [CORRECT]
+  C: $N / p$
+  D: $N \times (1-p)$
+Explanation: Since each of the $N$ connections is independently kept with probability $p$, the expected number of active connections is the sum of the probabilities for each connection, which is $N \times p$.
+
+[Q9] (Medium) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: When Dropout is applied to a fully connected layer during training, which of the following best describes the change in the network’s effective capacity?
+  A: The capacity increases because the network learns to rely on more features.
+  B: The capacity decreases because the network must learn to perform well with a subset of its units active. [CORRECT]
+  C: The capacity remains unchanged; Dropout only affects training speed.
+  D: The capacity fluctuates randomly during each epoch.
+Explanation: Dropout randomly removes units during training, forcing the network to learn redundant representations. This reduces the effective capacity because the model must perform well even when many units are inactive.
+
+[Q10] (Hard) Concept: Regularization Methods-Dropout, Drop connect, Batch normalization
+Question: In Drop Connect, the probability of keeping a connection is p. Which statement correctly describes how the expected weight update magnitude compares to that of standard Dropout?
+  A: It is larger because connections are dropped rather than units.
+  B: It is smaller because fewer weights are updated per iteration. [CORRECT]
+  C: It is the same as Dropout because both use the same keep probability.
+  D: It depends on the activation function used.
+Explanation: Drop Connect drops individual weights, so on average fewer weights receive gradient updates in each batch. This reduces the magnitude of weight updates compared to Dropout, which drops entire units but still updates all remaining weights.

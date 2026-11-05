@@ -1,0 +1,55 @@
+{
+  "timestamp": "2026-11-03 23:49:52",
+  "total_external_calls": 3,
+  "results": {
+    "groq": {
+      "provider": "groq",
+      "model": "openai/gpt-oss-20b",
+      "quota_before": true,
+      "external_calls": 1,
+      "http_status": 200,
+      "success": true,
+      "latency_sec": 5.201,
+      "parse_success": true,
+      "question_count": 5,
+      "tokens": {
+        "prompt": 197,
+        "completion": 2318,
+        "total": 2515
+      },
+      "error": null,
+      "response_preview": "{\"questions\":[{\"question\":\"Which of the following is the formula for the inverse of a 2x2 matrix [[a,b],[c,d]]?\",\"options\":[\"A) 1/(ad-bc) [[d,-b],[-c,",
+      "quota_after": true
+    },
+    "nvidia": {
+      "provider": "nvidia",
+      "model": "meta/llama-3.1-8b-instruct",
+      "quota_before": true,
+      "external_calls": 1,
+      "http_status": 410,
+      "success": false,
+      "latency_sec": 0.0,
+      "parse_success": false,
+      "question_count": 0,
+      "tokens": {},
+      "error": "APIStatusError: Error code: 410 - {'type': 'about:blank', 'title': 'Gone', 'status': 410, 'detail': \"The model 'meta/llama-3.1-8b-instruct' has reached its end of life on 2026-08-26T09:00:00Z and is no longer availab",
+      "response_preview": null,
+      "quota_after": true
+    },
+    "gemini": {
+      "provider": "gemini",
+      "model": "gemini-3.8-flash",
+      "quota_before": true,
+      "external_calls": 1,
+      "http_status": 503,
+      "success": false,
+      "latency_sec": 0.0,
+      "parse_success": false,
+      "question_count": 0,
+      "tokens": {},
+      "error": "ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}",
+      "response_preview": null,
+      "quota_after": true
+    }
+  }
+}
