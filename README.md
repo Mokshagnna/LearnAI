@@ -1,4 +1,4 @@
-# LearnAI
+# Agentic-AI Notes to Quiz Generator
 
 Syllabus-grounded adaptive quiz platform powered by multi-provider AI inference.
 
@@ -42,63 +42,59 @@ LearnAI generates 10-question multiple-choice quizzes from a structured universi
 - **Deterministic Scoring** — Answers are graded server-side by exact string match. Correct answers are never sent to the client until after submission.
 - **Quiz Session Persistence** — Active quizzes are stored in the database. Navigating between tabs, refreshing the page, or closing and reopening the browser restores the in-progress quiz. Logout abandons all active sessions.
 
----
-
 ## How It Works
 
-```
- ┌─────────────┐     ┌──────────────────┐     ┌───────────────────┐
- │  Select      │     │  Upload Notes    │     │  Student          │
- │  Course +    │     │  (PDF/DOCX/PPTX) │     │  Dashboard        │
- │  Topic       │     │                  │     │                   │
- └──────┬───────┘     └────────┬─────────┘     └───────────────────┘
-        │                      │
-        │    ┌─────────────────┘
-        ▼    ▼
- ┌──────────────────┐
- │  POST /api/quiz/  │
- │  generate         │
- │                   │
- │  1. Auth guard    │
- │  2. Curriculum    │
- │     validation    │
- │  3. Notes context │
- │     (TF-IDF)      │
- │  4. Adaptive      │
- │     difficulty    │
- │  5. Novelty       │
- │     exclusion     │
- │  6. Provider      │
- │     chain ────────┼──▶ Groq → Cloudflare → NVIDIA → Gemini
- │  7. Validate &    │
- │     repair        │
- │  8. Persist       │
- │     session to DB │
- └────────┬──────────┘
-          ▼
- ┌──────────────────┐
- │  Answer 10 MCQs   │  ◀── Survives refresh, tab switch, navigation
- └────────┬──────────┘
-          ▼
- ┌──────────────────┐
- │  POST /api/quiz/  │
- │  submit           │
- │                   │
- │  1. Deterministic │
- │     scoring       │
- │  2. Concept &     │
- │     difficulty    │
- │     breakdown     │
- │  3. AI-generated  │
- │     feedback      │
- │  4. Update topic  │
- │     mastery       │
- └────────┬──────────┘
-          ▼
- ┌──────────────────┐
- │  Results +        │
- │  Dashboard update │
- └───────────────────┘
+```mermaid
+flowchart TD
+    A["Select course and topic<br/>R22 syllabus"]:::input
+    B["Upload notes<br/>PDF / DOCX / PPTX"]:::input
+
+    A --> G
+    B --> G
+
+    subgraph G["POST /api/quiz/generate"]
+        direction TB
+        G1["1. Auth guard"] --> G2["2. Curriculum validation"]
+        G2 --> G3["3. Notes context (TF-IDF)"]
+        G3 --> G4["4. Adaptive difficulty"]
+        G4 --> G5["5. Novelty exclusion"]
+        G5 --> G6["6. AI provider chain"]
+        G6 --> G7["7. Validate and repair"]
+        G7 --> G8["8. Persist session to DB"]
+    end
+
+    subgraph P["Provider fallback order"]
+        direction LR
+        P1["Groq"] --> P2["Cloudflare"] --> P3["NVIDIA"] --> P4["Gemini"]
+    end
+
+    G6 -.-> P1
+
+    G --> Q["Student answers 10 MCQs<br/>Progress survives refresh, tab switch and navigation"]:::input
+
+    Q --> S
+
+    subgraph S["POST /api/quiz/submit"]
+        direction TB
+        S1["1. Deterministic scoring"] --> S2["2. Concept and difficulty breakdown"]
+        S2 --> S3["3. AI-generated feedback"]
+        S3 --> S4["4. Update topic mastery"]
+    end
+
+    S --> R["Results"]:::input
+    R --> D["Student Dashboard"]:::final
+
+    class G1,G2,G3,G4,G5,G7,G8,S1,S2,S3,S4 step
+    class G6,P1,P2,P3,P4 key
+
+    classDef input fill:#E8F3EC,stroke:#1F7A52,stroke-width:1.5px,color:#0F172A
+    classDef step fill:#FFFFFF,stroke:#94A3B8,color:#0F172A
+    classDef key fill:#FFF7E6,stroke:#D97706,stroke-width:1.5px,color:#0F172A
+    classDef final fill:#14452F,stroke:#14452F,color:#FFFFFF
+
+    style G fill:#F8FAFC,stroke:#14452F,stroke-width:2px,color:#0F172A
+    style S fill:#F8FAFC,stroke:#14452F,stroke-width:2px,color:#0F172A
+    style P fill:#FFFBF0,stroke:#F5D9A8,color:#0F172A
 ```
 
 **Provider fallback chain.** The orchestrator iterates through `PROVIDER_ORDER` (default: `groq,cloudflare`). Each provider gets a per-request timeout budget. If a provider fails, is rate-limited, or is in a cooldown window, it is skipped and the next provider is tried. An overall 40-second deadline caps the entire generation cycle including novelty repair. If all providers fail, an error is returned to the user; there is no fake or mock fallback.
