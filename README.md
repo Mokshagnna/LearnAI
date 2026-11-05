@@ -924,15 +924,4 @@ services:
 - **GitHub:** https://github.com/Mokshagnna/LearnAI
 - **Live App:** https://learnai-fzgd.onrender.com
 - **Branch:** `main`
-- **Program:** B.Tech CSE — Artificial Intelligence and Machine Learning
-- **Institution:** VFSTR Deemed to be University
-- **Department:** ACSE (School of Computing and Informatics)
-- **Curriculum:** R22 Regulation
 
-**Team:**
-- T. Naga Venkata Mallikharjuna (241FA18272)
-- B. Venkata Sai Ganapathi Naidu (241FA18476)
-- Sk. Irshad Vali (241FA18473)
-- G. Mokshagnna (241FA18302)
-
-**Supervisor:** Ms. I. Leela Priya, M.Tech., Assistant Professor, Dept. of ACSE
