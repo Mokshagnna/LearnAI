@@ -82,6 +82,13 @@ class TestFrontendApiUrlResolution:
         assert self._eval_app_js(expr_localhost) == ""
         assert self._eval_app_js(expr_ip) == ""
 
+    def test_fastapi_direct_serving_port_8001_uses_relative_path(self):
+        """When frontend is directly served by FastAPI on port 8001, relative paths are used."""
+        expr_ip = "getApiBaseUrl({ hostname: '127.0.0.1', port: '8001', protocol: 'http:' })"
+        expr_localhost = "getApiBaseUrl({ hostname: 'localhost', port: '8001', protocol: 'http:' })"
+        assert self._eval_app_js(expr_ip) == ""
+        assert self._eval_app_js(expr_localhost) == ""
+
     def test_production_render_domain_uses_relative_path(self):
         """When frontend is on production domain (e.g. Render), relative paths are preserved."""
         expr_render = "getApiBaseUrl({ hostname: 'learnai.onrender.com', port: '', protocol: 'https:' })"
@@ -103,6 +110,33 @@ class TestFrontendApiUrlResolution:
         )
         """
         assert self._eval_app_js(expr) == "https://staging-api.learnai.com"
+
+    def test_explicit_localstorage_override_takes_precedence(self):
+        """Explicit localStorage.learnai_api_base_url overrides auto-detection."""
+        expr = """
+        getApiBaseUrl(
+            { hostname: 'localhost', port: '5500', protocol: 'http:' },
+            { localStorage: { getItem: function(k) { return k === 'learnai_api_base_url' ? 'https://local-override.example.com/' : null; } } }
+        )
+        """
+        assert self._eval_app_js(expr) == "https://local-override.example.com"
+
+    def test_explicit_dev_server_flag_routes_to_fastapi_8000(self):
+        """When explicit dev server flag is set on custom port, API base resolves to http://127.0.0.1:8000."""
+        expr_window = """
+        getApiBaseUrl(
+            { hostname: 'localhost', port: '9999', protocol: 'http:' },
+            { LEARNAI_DEV_SERVER: true }
+        )
+        """
+        expr_ls = """
+        getApiBaseUrl(
+            { hostname: 'localhost', port: '9999', protocol: 'http:' },
+            { localStorage: { getItem: function(k) { return k === 'learnai_dev_server' ? 'true' : null; } } }
+        )
+        """
+        assert self._eval_app_js(expr_window) == "http://127.0.0.1:8000"
+        assert self._eval_app_js(expr_ls) == "http://127.0.0.1:8000"
 
     def test_api_url_construction(self):
         """apiUrl correctly constructs full or relative paths for all endpoints."""

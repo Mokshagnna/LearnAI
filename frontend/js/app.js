@@ -22,15 +22,22 @@ function getApiBaseUrl(loc = (typeof window !== "undefined" ? window.location : 
     const port = String(loc.port || "");
     const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname.endsWith(".local");
 
-    // When running on a separate local frontend development server (e.g. port 5500, 3000)
-    // that is distinct from the FastAPI server port (8000), route API requests to FastAPI at http://127.0.0.1:8000.
-    if (isLocalhost && port !== "8000" && port !== "") {
+    // Standalone frontend development servers (e.g. VS Code Live Server on 5500, Vite/CRA on 3000/5173,
+    // or an explicitly configured dev server flag) route API requests to the standalone FastAPI server.
+    const isExplicitDevServer = Boolean(
+      (win && win.LEARNAI_DEV_SERVER) ||
+      (win && win.localStorage && (function() { try { return win.localStorage.getItem("learnai_dev_server") === "1" || win.localStorage.getItem("learnai_dev_server") === "true"; } catch (_) { return false; } })())
+    );
+    const KNOWN_FRONTEND_DEV_PORTS = ["5500", "5501", "3000", "5173", "4173"];
+    const isKnownDevPort = KNOWN_FRONTEND_DEV_PORTS.indexOf(port) !== -1;
+
+    if (isLocalhost && (isExplicitDevServer || isKnownDevPort)) {
       return "http://127.0.0.1:8000";
     }
   }
 
-  // In production (e.g. Render) or when served directly by FastAPI on port 8000,
-  // use same-origin relative paths (empty base prefix).
+  // When served directly by FastAPI (e.g. port 8000, isolated test port 8001, or any custom port)
+  // or in production (e.g. Render / custom domains), use same-origin relative paths (empty base prefix).
   return "";
 }
 
