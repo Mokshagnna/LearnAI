@@ -109,6 +109,7 @@ let authToken = (typeof localStorage !== "undefined" && localStorage.getItem) ? 
 let authSessionPromise = null;
 var expandedReviewCourseId = null;
 var lastDashboardData = null;
+let lastCompletedResult = null;
 
 // ── Student Authentication & Session Management ──────────────────────────────
 function isTokenExpired(token, bufferSeconds = 30) {
@@ -1552,6 +1553,8 @@ function clearSessionState() {
   answers = [];
   currentIndex = 0;
   activeNotesSessionId = null;
+  const banner = $("activeQuizBanner");
+  if (banner) banner.classList.add("hidden");
 }
 
 function hasActiveQuiz() {
@@ -1569,31 +1572,33 @@ function hasActiveQuiz() {
   }
 }
 
-let restoreSessionPromise = null;
-
-async function restoreSessionState() {
-  if (restoreSessionPromise) {
-    return restoreSessionPromise;
+function updateActiveQuizBanner(quiz) {
+  const banner = $("activeQuizBanner");
+  const details = $("activeQuizBannerDetails");
+  if (!banner) return;
+  if (!quiz || !Array.isArray(quiz.questions) || quiz.questions.length === 0) {
+    banner.classList.add("hidden");
+    return;
   }
-  restoreSessionPromise = (async () => {
-    try {
-      // 1. In-memory fast path: If active quiz is already in-memory, render immediately
-      if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
-        currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
-        currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
-        if (activeCourseCode) {
-          if ($("course")) $("course").value = activeCourseCode;
-          populateTopicDropdown(activeCourseCode);
-          if ($("topic") && activeTopicName) {
-            $("topic").value = activeTopicName;
-          }
-        }
-        renderQuizHeader(currentQuiz);
-        renderQuestion();
-        showScreen("quizSection");
-        saveSessionState();
-        return true;
-      }
+  const courseCode = quiz.course_code || activeCourseCode || "Course";
+  const topic = quiz.topic || activeTopicName || "Topic";
+  const qNum = (currentIndex || 0) + 1;
+  const qTotal = quiz.questions.length;
+  if (details) {
+    details.textContent = `${courseCode} — ${topic} (Question ${qNum} of ${qTotal})`;
+  }
+  banner.classList.remove("hidden");
+}
+
+async function loadActiveQuizState() {
+  try {
+    // 1. In-memory fast path
+    if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
+      currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
+      currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
+      updateActiveQuizBanner(currentQuiz);
+      return true;
+    }
 
     let raw = null;
     try {
@@ -1606,16 +1611,11 @@ async function restoreSessionState() {
       try { data = JSON.parse(raw); } catch (e) {}
     }
 
-    // 2. Authoritative backend fallback if client storage snapshot is missing
+    // 2. Authoritative backend check if storage snapshot is missing
     if (!data || !data.currentQuiz || !Array.isArray(data.currentQuiz.questions) || data.currentQuiz.questions.length === 0) {
       if (typeof fetch === "function") {
         try {
-          const headers = {};
-          if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-          const res = await fetch(apiUrl("/api/quiz/active"), {
-            headers: headers,
-            credentials: "include"
-          });
+          const res = await authenticatedFetch("/api/quiz/active");
           if (res.ok && res.status === 200) {
             const activeBackendQuiz = await res.json();
             if (activeBackendQuiz && Array.isArray(activeBackendQuiz.questions) && activeBackendQuiz.questions.length > 0) {
@@ -1665,24 +1665,53 @@ async function restoreSessionState() {
       activeNotesSessionId = data.activeNotesSessionId || null;
       activeStudyMaterialId = data.activeStudyMaterialId || currentQuiz.study_material_id || null;
 
-      // Safely reflect dropdown values without triggering destructive change events
-      if (activeCourseCode) {
-        if ($("course")) $("course").value = activeCourseCode;
-        populateTopicDropdown(activeCourseCode);
-        if ($("topic") && activeTopicName) {
-          $("topic").value = activeTopicName;
-        }
-      }
-
-      renderQuizHeader(currentQuiz);
-      renderQuestion();
-      showScreen("quizSection");
-      saveSessionState();
+      updateActiveQuizBanner(currentQuiz);
       return true;
     }
+  } catch (err) {
+    console.warn("[QUIZ] Failed to load active quiz state:", err);
+    clearSessionState();
+  }
+  const banner = $("activeQuizBanner");
+  if (banner) banner.classList.add("hidden");
+  return false;
+}
+
+function resumeActiveQuiz() {
+  if (!currentQuiz || !Array.isArray(currentQuiz.questions) || currentQuiz.questions.length === 0) {
+    return false;
+  }
+  currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
+  currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
+  if (activeCourseCode) {
+    if ($("course")) $("course").value = activeCourseCode;
+    populateTopicDropdown(activeCourseCode);
+    if ($("topic") && activeTopicName) {
+      $("topic").value = activeTopicName;
+    }
+  }
+  renderQuizHeader(currentQuiz);
+  renderQuestion();
+  showScreen("quizSection");
+  saveSessionState();
+  return true;
+}
+
+let restoreSessionPromise = null;
+
+async function restoreSessionState() {
+  if (restoreSessionPromise) {
+    return restoreSessionPromise;
+  }
+  restoreSessionPromise = (async () => {
+    try {
+      const hasActive = await loadActiveQuizState();
+      if (hasActive) {
+        resumeActiveQuiz();
+        return true;
+      }
     } catch (err) {
       console.warn("[QUIZ] Failed to restore session state:", err);
-      clearSessionState();
     } finally {
       restoreSessionPromise = null;
     }
@@ -1947,6 +1976,66 @@ $("prevBtn").addEventListener("click", () => {
   }
 });
 
+$("exitQuizBtn")?.addEventListener("click", async () => {
+  if (confirm("Exit quiz and change topic? Your unfinished quiz progress will be discarded.")) {
+    const sId = currentQuiz ? (currentQuiz.quiz_id || currentQuiz.session_id) : null;
+    if (sId) {
+      try {
+        await authenticatedFetch("/api/quiz/abandon", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sId })
+        });
+      } catch (e) {
+        console.warn("[QUIZ] Failed to abandon quiz on server:", e);
+      }
+    }
+    clearSessionState();
+    showScreen("setup");
+    if ($("setupMsg")) $("setupMsg").textContent = "";
+  }
+});
+
+$("resumeActiveQuizBtn")?.addEventListener("click", () => {
+  resumeActiveQuiz();
+});
+
+$("discardActiveQuizBtn")?.addEventListener("click", async () => {
+  if (confirm("Discard this unfinished quiz and choose another topic?")) {
+    const sId = currentQuiz ? (currentQuiz.quiz_id || currentQuiz.session_id) : null;
+    if (sId) {
+      try {
+        await authenticatedFetch("/api/quiz/abandon", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sId })
+        });
+      } catch (e) {
+        console.warn("[QUIZ] Failed to abandon quiz on server:", e);
+      }
+    }
+    clearSessionState();
+    const banner = $("activeQuizBanner");
+    if (banner) banner.classList.add("hidden");
+  }
+});
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === "learnai_result_sync" && e.newValue) {
+      try {
+        const syncData = JSON.parse(e.newValue);
+        if (syncData && syncData.student_id === getStudentId()) {
+          clearSessionState();
+        }
+      } catch (err) {}
+    }
+    if (e.key === "learnai_active_quiz" && !e.newValue) {
+      clearSessionState();
+    }
+  });
+}
+
 $("nextBtn").addEventListener("click", async () => {
   if (!answers[currentIndex]) {
     const alertEl = $("quizAlert");
@@ -2029,7 +2118,7 @@ function goToHome() {
     return;
   }
   if (isGenerating) return;
-  clearSessionState();
+  lastCompletedResult = null;
   showScreen("setup");
   $("setupMsg").textContent = "";
 }
@@ -2090,12 +2179,42 @@ function clearResultDisplay() {
 }
 
 // ── Core Quiz Generation (First Attempt & Retake) ────────────────────────────
-async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null, notesSessionId = null, studyMaterialId = null) {
+async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null, notesSessionId = null, studyMaterialId = null, overrideAbandonSessionIds = null) {
   if (isGenerating) return;
+  let abandonSessionIds = null;
+  if (Array.isArray(overrideAbandonSessionIds)) {
+    abandonSessionIds = overrideAbandonSessionIds;
+  } else if (typeof overrideAbandonSessionIds === "string" && overrideAbandonSessionIds) {
+    abandonSessionIds = [overrideAbandonSessionIds];
+  }
+  let abandonSessionId = (abandonSessionIds && abandonSessionIds.length === 1) ? abandonSessionIds[0] : null;
+
   if (!isRetake && hasActiveQuiz()) {
-    console.log("[QUIZ] Active quiz already in progress; restoring existing session.");
-    restoreSessionState();
-    return;
+    if (!abandonSessionIds) {
+      const activeCourse = (currentQuiz && currentQuiz.course_code) || activeCourseCode;
+      const activeTopic = (currentQuiz && currentQuiz.topic) || activeTopicName;
+      const isSameTopic = (activeCourse === courseCode && activeTopic === topic);
+
+      if (isSameTopic) {
+        const resumeChoice = confirm("You have an unfinished quiz in progress for " + topic + ".\n\nClick OK to resume your existing quiz.\nClick Cancel to discard it and generate a fresh one.");
+        if (resumeChoice) {
+          restoreSessionState();
+          return;
+        } else {
+          const sId = (currentQuiz && (currentQuiz.quiz_id || currentQuiz.session_id)) || null;
+          abandonSessionIds = sId ? [sId] : null;
+          abandonSessionId = sId;
+        }
+      } else {
+        const discardChoice = confirm("You have an unfinished quiz in progress for " + (activeTopic || "another topic") + ".\n\nDiscard it and start a new quiz for " + topic + "?");
+        if (!discardChoice) {
+          return;
+        }
+        const sId = (currentQuiz && (currentQuiz.quiz_id || currentQuiz.session_id)) || null;
+        abandonSessionIds = sId ? [sId] : null;
+        abandonSessionId = sId;
+      }
+    }
   }
   isGenerating = true;
 
@@ -2167,7 +2286,9 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
       topic: topic,
       topic_id: activeTopicId || undefined,
       student_id: getStudentId() || undefined,
-      retake: isRetake
+      retake: isRetake,
+      abandon_session_id: abandonSessionId || undefined,
+      abandon_session_ids: abandonSessionIds || undefined
     };
     if (activeNotesSessionId) {
       quizPayload.notes_session_id = activeNotesSessionId;
@@ -2190,6 +2311,33 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
     const data = await res.json();
 
     if (!res.ok) {
+      if (res.status === 409 && data && data.detail && typeof data.detail === "object") {
+        const activeInfo = data.detail;
+        const activeSessions = Array.isArray(activeInfo.active_sessions) ? activeInfo.active_sessions : [];
+
+        if (activeSessions.length > 1) {
+          const sessionList = activeSessions.map(s => "• " + (s.course_code ? (s.course_code + " - ") : "") + s.topic).join("\n");
+          const msg = "You have " + activeSessions.length + " unfinished quiz sessions in progress:\n\n" + sessionList + "\n\nDiscard ALL listed unfinished quizzes and start a new quiz for " + (courseCode ? (courseCode + " - ") : "") + topic + "?\n\nClick OK to discard all listed quizzes and proceed.\nClick Cancel to keep your existing quizzes.";
+          const confirmMulti = confirm(msg);
+          if (confirmMulti) {
+            const allIds = activeSessions.map(s => s.session_id);
+            return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId, allIds);
+          } else {
+            return;
+          }
+        } else {
+          const conflictSessionId = activeInfo.active_session_id;
+          const conflictTopic = activeInfo.topic || "another topic";
+          const conflictCourse = activeInfo.course_code || "";
+          const resumeConflict = confirm("You already have an active quiz session in progress for " + (conflictCourse ? (conflictCourse + " - ") : "") + conflictTopic + ".\n\nClick OK to resume your active quiz.\nClick Cancel to discard it and create this new quiz.");
+          if (resumeConflict) {
+            await restoreSessionState();
+            return;
+          } else {
+            return await startQuizGeneration(courseCode, topic, isRetake, topicId, activeNotesSessionId, activeStudyMaterialId, [conflictSessionId]);
+          }
+        }
+      }
       const errMsg = (data && data.detail)
         ? (typeof data.detail === "object" ? (data.detail.message || "Quiz generation is temporarily unavailable. Please try again shortly.") : data.detail)
         : "Quiz generation is temporarily unavailable. Please try again shortly.";
@@ -2524,6 +2672,14 @@ async function submitQuiz() {
     clearSessionState();
     studyMaterialsCacheTime = 0;
     materialTopicsCache.clear();
+    lastCompletedResult = data;
+    try {
+      localStorage.setItem("learnai_result_sync", JSON.stringify({
+        student_id: getStudentId(),
+        session_id: data.session_id,
+        timestamp: Date.now()
+      }));
+    } catch (e) {}
     showResult(data);
   } catch (e) {
     clearTimeout(timeoutId);
@@ -3949,18 +4105,33 @@ async function handlePracticeNav() {
     return;
   }
   if (isGenerating) return;
-  if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
-    renderQuizHeader(currentQuiz);
-    renderQuestion();
-    showScreen("quizSection");
-    saveSessionState();
+  const curScreen = (typeof getCurrentScreen === "function") ? getCurrentScreen() : null;
+  if (curScreen === "quizSection" && currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
     return;
   }
-  const restored = await restoreSessionState();
-  if (!restored) {
+  const hasActive = await loadActiveQuizState();
+  if (hasActive) {
     showScreen("setup");
     if ($("setupMsg")) $("setupMsg").textContent = "";
+    return;
   }
+  if (lastCompletedResult) {
+    showResult(lastCompletedResult);
+    return;
+  }
+  try {
+    const compRes = await authenticatedFetch("/api/quiz/completed/latest");
+    if (compRes.ok && compRes.status === 200) {
+      const compData = await compRes.json();
+      if (compData && compData.score !== undefined) {
+        lastCompletedResult = compData;
+        showResult(compData);
+        return;
+      }
+    }
+  } catch (e) {}
+  showScreen("setup");
+  if ($("setupMsg")) $("setupMsg").textContent = "";
 }
 
 $("navPracticeBtn")?.addEventListener("click", handlePracticeNav);
@@ -5598,9 +5769,25 @@ async function handleLoginSubmit(e) {
     setAuthBtnLoading("loginSubmitBtn", false, "Login");
 
     await loadCourses();
-    const restored = await restoreSessionState();
-    if (!restored) {
+    const hasActive = await loadActiveQuizState();
+    if (hasActive) {
       showScreen("setup");
+    } else {
+      let restoredCompleted = false;
+      try {
+        const compRes = await authenticatedFetch("/api/quiz/completed/latest");
+        if (compRes.ok && compRes.status === 200) {
+          const compData = await compRes.json();
+          if (compData && compData.score !== undefined) {
+            lastCompletedResult = compData;
+            showResult(compData);
+            restoredCompleted = true;
+          }
+        }
+      } catch (e) {}
+      if (!restoredCompleted) {
+        showScreen("setup");
+      }
     }
   } catch (err) {
     console.error("[AUTH] Login error:", err);
@@ -5964,6 +6151,7 @@ async function handleLogout() {
   currentUser = null;
   authToken = null;
   studentId = null;
+  lastCompletedResult = null;
 
   if (typeof localStorage !== "undefined" && localStorage.removeItem) {
     localStorage.removeItem("learnai_auth_token");
@@ -5972,6 +6160,7 @@ async function handleLogout() {
     localStorage.removeItem("learnai_user_name");
     localStorage.removeItem("learnai_active_quiz");
     localStorage.removeItem("learnai_session_state");
+    localStorage.removeItem("learnai_result_sync");
   }
 
   clearSessionState();
@@ -6055,17 +6244,6 @@ async function initApp() {
     });
   }
 
-  // Pre-check: if no stored auth indicator or cookie, immediately show login screen without verification delay
-  const storedToken = typeof localStorage !== "undefined" ? localStorage.getItem("learnai_auth_token") : null;
-  const sessionActive = typeof localStorage !== "undefined" ? localStorage.getItem("learnai_session_active") : null;
-  const hasPossibleCookie = typeof document !== "undefined" && (document.cookie || "").includes("learnai_session");
-
-  if (!storedToken && !sessionActive && !hasPossibleCookie) {
-    showScreen("loginSection");
-    loadCourses().catch(() => {});
-    return;
-  }
-
   // Session present or checking: display session verification state
   showScreen("authCheckingSection");
   $("authCheckingSpinner")?.classList.remove("hidden");
@@ -6075,23 +6253,41 @@ async function initApp() {
 
   if (sessionResult.status === "authenticated") {
     await loadCourses();
-    const restored = await restoreSessionState();
+    const hasActive = await loadActiveQuizState();
+
+    let restoredResult = false;
+    if (hasActive) {
+      showScreen("setup");
+    } else {
+      try {
+        const compRes = await authenticatedFetch("/api/quiz/completed/latest");
+        if (compRes.ok && compRes.status === 200) {
+          const compData = await compRes.json();
+          if (compData && compData.score !== undefined) {
+            lastCompletedResult = compData;
+            showResult(compData);
+            restoredResult = true;
+          }
+        }
+      } catch (e) {
+        console.debug("[QUIZ] Failed to restore completed quiz on init:", e);
+      }
+      if (!restoredResult) {
+        showScreen("setup");
+      }
+    }
 
     // Initialize base history state if not already present
     if (typeof window !== "undefined" && window.history && !window.history.state) {
       try {
-        window.history.replaceState({ screen: restored ? "quizSection" : "setup" }, "");
+        window.history.replaceState({ screen: restoredResult ? "resultSection" : "setup" }, "");
       } catch (e) {
         // Ignore if sandbox restricts replaceState
       }
     }
 
-    if (!restored) {
-      showScreen("setup");
-    }
-
     // If no active quiz was restored, check URL parameters
-    if (!restored && typeof window !== "undefined" && window.location && window.location.search) {
+    if (!hasActive && !restoredResult && typeof window !== "undefined" && window.location && window.location.search) {
       try {
         const params = new URLSearchParams(window.location.search);
         const urlCourse = params.get("course");
@@ -6154,27 +6350,37 @@ if (typeof window !== "undefined" && typeof document !== "undefined" && typeof r
   initApp();
 }
 
+const _learnAiExports = {
+  getApiBaseUrl,
+  apiUrl,
+  setLastCompletedResult: (r) => { lastCompletedResult = r; },
+  getLastCompletedResult: () => lastCompletedResult,
+  isTokenExpired,
+  escapeHtml,
+  LearnAICodeRenderer,
+  LearnAIMathRenderer,
+  populateTopicDropdown,
+  setCurriculum: (c) => { curriculum = c; },
+  getCurriculum: () => curriculum,
+  setLastExtractionResult: (r) => { lastExtractionResult = r; },
+  getLastExtractionResult: () => lastExtractionResult,
+  checkSessionStatus,
+  hasActiveQuiz,
+  loadActiveQuizState,
+  resumeActiveQuiz,
+  restoreSessionState,
+  saveSessionState,
+  clearSessionState,
+  handlePracticeNav,
+  initPasswordToggles,
+  resetPasswordToggles,
+  initApp
+};
+
+if (typeof window !== "undefined") {
+  window.LearnAIApp = _learnAiExports;
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = {
-    getApiBaseUrl,
-    apiUrl,
-    isTokenExpired,
-    escapeHtml,
-    LearnAICodeRenderer,
-    LearnAIMathRenderer,
-    populateTopicDropdown,
-    setCurriculum: (c) => { curriculum = c; },
-    getCurriculum: () => curriculum,
-    setLastExtractionResult: (r) => { lastExtractionResult = r; },
-    getLastExtractionResult: () => lastExtractionResult,
-    checkSessionStatus,
-    hasActiveQuiz,
-    restoreSessionState,
-    saveSessionState,
-    clearSessionState,
-    handlePracticeNav,
-    initPasswordToggles,
-    resetPasswordToggles,
-    initApp
-  };
+  module.exports = _learnAiExports;
 }

@@ -700,8 +700,8 @@ def get_or_create_student(student_id: Optional[str] = None, conn: Optional[sqlit
                 "UPDATE students SET last_active = ? WHERE id = ?",
                 (now, sid)
             )
-            conn.commit()
             if close_conn:
+                conn.commit()
                 conn.close()
             return sid
         else:
@@ -709,8 +709,8 @@ def get_or_create_student(student_id: Optional[str] = None, conn: Optional[sqlit
                 "INSERT INTO students (id, created_at, last_active) VALUES (?, ?, ?)",
                 (sid, now, now)
             )
-            conn.commit()
             if close_conn:
+                conn.commit()
                 conn.close()
             logger.info("Registered student: %s", sid)
             return sid
@@ -720,8 +720,8 @@ def get_or_create_student(student_id: Optional[str] = None, conn: Optional[sqlit
         "INSERT INTO students (id, created_at, last_active) VALUES (?, ?, ?)",
         (new_id, now, now)
     )
-    conn.commit()
     if close_conn:
+        conn.commit()
         conn.close()
     logger.info("Created new student: %s", new_id)
     return new_id
@@ -779,8 +779,8 @@ def create_quiz_session(
         expires_at
     ))
 
-    conn.commit()
     if close_conn:
+        conn.commit()
         conn.close()
 
     logger.info(
@@ -1144,8 +1144,108 @@ def format_attempt_result(
         "details": details,
         "analysis": analysis,
         "student_id": attempt["student_id"],
+        "session_id": session.get("id") or attempt.get("session_id"),
+        "completed_at": attempt.get("created_at") or session.get("submitted_at"),
+        "course_code": session.get("course_code") or attempt.get("course_code"),
+        "topic": session.get("topic_name") or attempt.get("topic_name"),
         "is_duplicate_submission": True
     }
+
+
+def get_latest_completed_attempt_for_student(
+    student_id: str,
+    conn: Optional[sqlite3.Connection] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve the latest valid completed quiz attempt for a student using an INNER JOIN with quiz_sessions.
+    Guarantees that the session exists and was transitioned to 'completed'.
+    Returns None if no completed attempt exists.
+    """
+    from services.db.base import translate_placeholders
+
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    try:
+        cursor = conn.cursor()
+        query = """
+            SELECT a.*, s.course_code AS session_course_code, s.course_name AS session_course_name,
+                   s.topic_name AS session_topic_name, s.questions_snapshot, s.submitted_at
+            FROM quiz_attempts a
+            INNER JOIN quiz_sessions s ON a.session_id = s.id
+            WHERE a.student_id = ?
+              AND s.student_id = ?
+              AND s.status = 'completed'
+            ORDER BY a.created_at DESC, a.id DESC
+            LIMIT 1
+        """
+        cursor.execute(query, (student_id, student_id))
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        attempt = dict(row)
+        attempt["quiz_data"] = parse_json_safely(attempt.get("quiz_data"), default={})
+        attempt["difficulty_accuracy"] = parse_json_safely(attempt.get("difficulty_accuracy"), default={})
+        attempt["concept_accuracy"] = parse_json_safely(attempt.get("concept_accuracy"), default={})
+        attempt["weak_concepts"] = parse_json_safely(attempt.get("weak_concepts"), default=[])
+        attempt["strong_concepts"] = parse_json_safely(attempt.get("strong_concepts"), default=[])
+
+        session = {
+            "id": attempt.get("session_id"),
+            "course_code": attempt.get("session_course_code") or attempt.get("course_code"),
+            "course_name": attempt.get("session_course_name") or attempt.get("course_name"),
+            "topic_name": attempt.get("session_topic_name") or attempt.get("topic_name"),
+            "questions": parse_json_safely(attempt.get("questions_snapshot"), default=[]),
+            "submitted_at": attempt.get("submitted_at"),
+            "status": "completed"
+        }
+
+        result = format_attempt_result(attempt, session, conn=conn)
+        result["session_id"] = attempt.get("session_id")
+        result["completed_at"] = attempt.get("created_at") or attempt.get("submitted_at")
+        result["course_code"] = session["course_code"]
+        result["topic"] = session["topic_name"]
+        return result
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def abandon_quiz_session(
+    session_id: str,
+    student_id: str,
+    conn: Optional[sqlite3.Connection] = None
+) -> bool:
+    """
+    Explicitly transition an in-progress quiz session to 'abandoned'.
+    Validates student ownership and status.
+    Returns True if session was abandoned, False otherwise.
+    """
+    from services.db.base import translate_placeholders
+
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    try:
+        cursor = conn.cursor()
+        query = """
+            UPDATE quiz_sessions
+            SET status = 'abandoned'
+            WHERE id = ? AND student_id = ? AND status = 'in_progress'
+        """
+        cursor.execute(query, (session_id, student_id))
+        affected = cursor.rowcount if hasattr(cursor, "rowcount") else 0
+        if close_conn:
+            conn.commit()
+        return affected > 0
+    finally:
+        if close_conn:
+            conn.close()
 
 
 def submit_quiz_atomic(

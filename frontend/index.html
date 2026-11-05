@@ -11,7 +11,7 @@
 <title>Agentic-AI Notes to Quiz Generator</title>
 
 <link rel="stylesheet" href="vendor/katex/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css'">
-<link rel="stylesheet" href="css/style.css?v=2.5.0">
+<link rel="stylesheet" href="css/style.css?v=2.6.0">
 <script>
   try {
     var _tok = localStorage.getItem('learnai_auth_token') || localStorage.getItem('learnai_session_active');
@@ -454,6 +454,20 @@
 
   <section id="setup" class="card hero-card hidden">
 
+    <div id="activeQuizBanner" class="active-quiz-banner hidden" role="region" aria-label="Active quiz resumption">
+      <div class="active-quiz-banner-content">
+        <span class="active-quiz-icon" aria-hidden="true">&#9201;</span>
+        <div class="active-quiz-text">
+          <strong>You have an unfinished quiz in progress</strong>
+          <span id="activeQuizBannerDetails">Loading active quiz details...</span>
+        </div>
+      </div>
+      <div class="active-quiz-actions">
+        <button id="resumeActiveQuizBtn" type="button" class="btn-primary btn-sm">Resume Quiz</button>
+        <button id="discardActiveQuizBtn" type="button" class="btn-secondary btn-sm">Discard &amp; Change Topic</button>
+      </div>
+    </div>
+
     <h1>Choose a course and topic</h1>
 
     <p>Select a course, choose a syllabus topic, and Agentic-AI Notes to Quiz Generator will generate a fresh 10-question quiz.</p>
@@ -637,6 +651,8 @@
       <div class="nav-row">
 
         <button id="prevBtn" class="secondary" aria-label="Previous question">Previous</button>
+
+        <button id="exitQuizBtn" type="button" class="secondary" aria-label="Exit quiz and change topic">Exit Quiz &amp; Change Topic</button>
 
         <button id="nextBtn" aria-label="Next question">Next</button>
 
@@ -1552,7 +1568,7 @@
 
 
 
-<script src="js/app.js?v=2.5.0"></script>
+<script src="js/app.js?v=2.6.0"></script>
 
 </body>
 

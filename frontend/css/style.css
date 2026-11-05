@@ -5138,12 +5138,72 @@ button.btn-icon-danger:active:not(:disabled),
   text-align: center;
 }
 
+/* Neutralized so auth checking is never bypassed before /api/auth/me */
 html.unauthenticated #authCheckingSection {
-  display: none !important;
+  /* controlled by JS showScreen */
 }
 
 html.unauthenticated #loginSection {
-  display: block !important;
+  /* controlled by JS showScreen */
+}
+
+.active-quiz-banner {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #2563eb;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.active-quiz-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.active-quiz-icon {
+  font-size: 22px;
+}
+
+.active-quiz-text strong {
+  display: block;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.active-quiz-text span {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.active-quiz-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-sm {
+  padding: 6px 12px !important;
+  font-size: 13px !important;
+  height: auto !important;
+}
+
+#exitQuizBtn {
+  border: 1px solid #cbd5e1;
+  color: #64748b;
+  background: transparent;
+}
+
+#exitQuizBtn:hover {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fca5a5;
 }
 
 .auth-loading-state {

@@ -66,6 +66,8 @@ from services.database import (
 
     get_quiz_session,
     get_active_quiz_session_for_student,
+    get_latest_completed_attempt_for_student,
+    abandon_quiz_session,
 
     submit_quiz_atomic,
 
@@ -351,6 +353,9 @@ class QuizRequest(BaseModel):
     # generates curriculum-only practice and must NOT claim notes grounding.
     practice_mode: str = Field(default="notes_grounded", max_length=50)
 
+    abandon_session_id: str | None = Field(default=None, max_length=100)
+    abandon_session_ids: list[str] | None = Field(default=None)
+
 
 
 class RegisterRequest(BaseModel):
@@ -387,6 +392,10 @@ class ResetPasswordRequest(BaseModel):
 
     confirm_password: str = Field(..., min_length=8, max_length=128)
 
+
+
+class AbandonRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=100)
 
 
 class SubmitRequest(BaseModel):
@@ -1693,57 +1702,117 @@ def create_quiz(req: QuizRequest, request: Request):
 
 
 
+    conn = get_connection()
     try:
+        is_mysql = getattr(conn, "_is_mysql", False) or getattr(conn, "dialect", None) == "mysql"
+        if is_mysql:
+            cur_lock = conn.cursor()
+            cur_lock.execute("SELECT id FROM students WHERE id = %s FOR UPDATE", (student_id,))
+        else:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+
+        from services.db.base import translate_placeholders
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        cursor = conn.cursor()
+        active_query = (
+            "SELECT id, course_code, topic_name, expires_at FROM quiz_sessions "
+            "WHERE student_id = ? AND status = 'in_progress' AND expires_at > ? "
+            "ORDER BY created_at DESC"
+        )
+        cursor.execute(active_query, (student_id, now_iso))
+        active_sessions = cursor.fetchall()
+
+        active_list = []
+        active_id_set = set()
+        for s in active_sessions:
+            sid = s[0] if isinstance(s, (tuple, list)) else s["id"]
+            ccode = s[1] if isinstance(s, (tuple, list)) else s["course_code"]
+            ctopic = s[2] if isinstance(s, (tuple, list)) else s["topic_name"]
+            active_list.append({"session_id": sid, "course_code": ccode, "topic": ctopic})
+            active_id_set.add(sid)
+
+        if active_sessions:
+            confirmed_ids = set()
+            if req.abandon_session_ids:
+                confirmed_ids = {str(sid).strip() for sid in req.abandon_session_ids if sid and str(sid).strip()}
+            elif req.abandon_session_id and str(req.abandon_session_id).strip():
+                confirmed_ids = {str(req.abandon_session_id).strip()}
+
+            # Strict validation: confirmed IDs must exactly match all active sessions
+            if not confirmed_ids or confirmed_ids != active_id_set:
+                first_active = active_list[0]
+                if is_mysql:
+                    conn.rollback()
+                else:
+                    conn.execute("ROLLBACK")
+                num_sessions = len(active_list)
+                plural = "s" if num_sessions > 1 else ""
+                conflict_msg = f"You have {num_sessions} active quiz session{plural} in progress."
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": conflict_msg,
+                        "active_session_id": first_active["session_id"],
+                        "course_code": first_active["course_code"],
+                        "topic": first_active["topic"],
+                        "active_sessions": active_list,
+                        "total_active": num_sessions
+                    }
+                )
+
+            # Abandon ONLY the explicitly confirmed active session IDs for this student
+            placeholders = ", ".join(["?"] * len(confirmed_ids))
+            abandon_query = (
+                f"UPDATE quiz_sessions SET status = 'abandoned' "
+                f"WHERE student_id = ? AND status = 'in_progress' AND id IN ({placeholders})"
+            )
+            cursor.execute(abandon_query, [student_id] + list(confirmed_ids))
 
         create_quiz_session(
-
             session_id=quiz_id,
-
             student_id=student_id,
-
             course_code=course["code"],
-
             course_name=course["name"],
-
             topic_name=topic["name"],
-
-            questions=quiz["questions"],  # trusted server snapshot with answers & explanations
-
+            questions=quiz["questions"],
             recommended_difficulty=quiz.get("recommended_difficulty", "mixed"),
-
             adaptive_metadata={
-
                 **(quiz.get("adaptive_metadata") or {}),
-
                 "adaptive_explanation": quiz.get("adaptive_explanation"),
-
                 "attempt_number": quiz.get("attempt_number", 1),
-
                 "novel_count": quiz.get("novel_count", len(public_questions)),
-
                 "provider_used": quiz.get("provider_used", "unknown"),
-
                 "is_fallback": quiz.get("is_fallback", False),
-
                 "study_material_id": req.study_material_id,
-
                 "notes_session_id": req.notes_session_id,
-
                 "topic_id": topic.get("id")
-
-            }
-
+            },
+            conn=conn
         )
-
+        if is_mysql:
+            conn.commit()
+        else:
+            conn.execute("COMMIT")
+    except HTTPException:
+        raise
     except Exception as e:
-
+        try:
+            if getattr(conn, "_is_mysql", False):
+                conn.rollback()
+            else:
+                conn.execute("ROLLBACK")
+        except Exception:
+            pass
         duration = time.perf_counter() - t_start
-
         metrics.record_quiz_failure("all", duration)
-
         logger.error(f"[ENDPOINT FAILED] /api/quiz/generate failed to persist quiz session {quiz_id}: {e}", exc_info=True)
-
         raise HTTPException(status_code=500, detail="Failed to persist quiz session. Please try again.")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 
@@ -1845,6 +1914,29 @@ def create_quiz(req: QuizRequest, request: Request):
 
 
 
+@app.get("/api/quiz/completed/latest")
+def get_latest_completed_quiz_endpoint(request: Request):
+    """
+    Retrieve the latest completed quiz attempt for the authenticated student.
+    Returns 204 No Content if no completed quiz exists.
+    """
+    student_id = get_authenticated_student_id(request)
+    result = get_latest_completed_attempt_for_student(student_id)
+    if not result:
+        return Response(status_code=204)
+    return result
+
+
+@app.post("/api/quiz/abandon")
+def abandon_quiz_endpoint(req: AbandonRequest, request: Request):
+    """
+    Explicitly abandon an active in-progress quiz session for the authenticated student.
+    """
+    student_id = get_authenticated_student_id(request)
+    success = abandon_quiz_session(req.session_id, student_id)
+    return {"success": success, "status": "abandoned" if success else "not_found", "session_id": req.session_id}
+
+
 @app.get("/api/quiz/active")
 def get_active_quiz_endpoint(request: Request):
     """
@@ -1854,7 +1946,7 @@ def get_active_quiz_endpoint(request: Request):
     student_id = get_authenticated_student_id(request)
     session = get_active_quiz_session_for_student(student_id)
     if not session or session.get("status") != "in_progress":
-        return JSONResponse(status_code=204, content=None)
+        return Response(status_code=204)
 
     public_questions = []
     for i, q in enumerate(session.get("questions", [])):
