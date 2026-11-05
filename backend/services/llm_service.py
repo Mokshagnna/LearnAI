@@ -218,6 +218,7 @@ def build_selective_replacement_prompt(
     concept_str = ", ".join(concepts) if concepts else topic_name
     disallowed_str = f"\nNEGATIVE CONSTRAINT: Absolutely do NOT generate questions on competing topics ({', '.join(disallowed_topics)})." if disallowed_topics else ""
     diff_req_str = ", ".join(missing_difficulties) if missing_difficulties else "Medium"
+    ask_count = max(needed + 1, 2)
 
     accepted_texts = [q.get("question", "") for q in preserved_questions if q.get("question")]
     accepted_block = "\n".join(f"  - [ALREADY ACCEPTED]: {t}" for t in accepted_texts[:10]) if accepted_texts else "None."
@@ -228,6 +229,23 @@ def build_selective_replacement_prompt(
     history_texts = [q.get("question", "") for q in history_questions[:8] if q.get("question")]
     history_block = "\n".join(f"  - [PRIOR ATTEMPT]: {t}" for t in history_texts) if history_texts else "None."
 
+    has_academic_rejections = any(
+        (r.get("category") == "ACADEMIC") or
+        ("arithmetic" in (r.get("reason") or "").lower()) or
+        ("hallucination" in (r.get("reason") or "").lower())
+        for r in rejected_records
+    )
+
+    academic_remedy_block = ""
+    if has_academic_rejections:
+        academic_remedy_block = """
+CRITICAL ACADEMIC & MATHEMATICAL RIGOR CORRECTION:
+- Previous candidate questions were rejected by academic verification due to arithmetic errors, false equality statements, or contradictory explanations.
+- Every arithmetic calculation, formula evaluation, and equality chain (e.g. A = B = C) in both questions and explanations MUST be 100% mathematically correct.
+- Self-check: Never assert false equalities (such as claiming 2 = 0.25^2 or 15 - 4 = 7). Verify that every expression evaluates to the identical mathematical result.
+- Exactly ONE option must be conceptually and mathematically defensible; all distractors must be strictly incorrect.
+"""
+
     return f"""You are an expert academic AI quiz generator for {course_code} - {course_name}.
 Selected Topic: {topic_name}
 Authorized Syllabus Concepts: {concept_str}
@@ -236,7 +254,7 @@ STRICT TOPIC MANDATE: Every question must test ONLY '{topic_name}'.
 {disallowed_str}
 
 We have already accepted {len(preserved_questions)} valid questions for this quiz.
-We need EXACTLY {needed} additional replacement multiple-choice questions for '{topic_name}' testing different angles/learning objectives to complete the requested set.
+We need at least {needed} additional replacement multiple-choice questions for '{topic_name}' testing different angles/learning objectives to complete the requested set.
 Required difficulty distribution for replacements: {diff_req_str}.
 
 CRITICAL: Do NOT duplicate or rephrase any of these already accepted questions:
@@ -244,12 +262,17 @@ CRITICAL: Do NOT duplicate or rephrase any of these already accepted questions:
 
 CRITICAL: Do NOT repeat the errors or topics of these rejected questions:
 {rejected_block}
-
+{academic_remedy_block}
 CRITICAL: Do NOT duplicate questions from the student's prior attempts:
 {history_block}
 
+ACADEMIC & MATHEMATICAL RIGOR (MANDATORY):
+- EXACTLY ONE DEFENSIBLE ANSWER: Exactly one option must satisfy the problem statement.
+- CALCULATION & ARITHMETIC RIGOR: Every arithmetic step in questions and explanations must be 100% mathematically correct. Verify all basic calculations.
+- THEOREMS & DEFINITIONS: Adhere strictly to proven academic theorems and verified syllabus definitions.
+
 REQUIREMENTS:
-- Return EXACTLY {needed} questions strictly assessing '{topic_name}'.
+- Return {ask_count} candidate questions strictly assessing '{topic_name}'.
 - Each question must have 4 distinct options (A, B, C, D) with non-empty text.
 - Exactly ONE option must be mathematically and conceptually correct.
 - Valid correct_answer letter (A, B, C, or D).

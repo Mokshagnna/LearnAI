@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
 from starlette.middleware.gzip import GZipMiddleware
 
 from services.notes_extractor import (
@@ -65,6 +65,7 @@ from services.database import (
     create_quiz_session,
 
     get_quiz_session,
+    get_active_quiz_session_for_student,
 
     submit_quiz_atomic,
 
@@ -603,7 +604,7 @@ def refresh_auth_session(request: Request):
 
 @app.post("/api/auth/register", status_code=201)
 
-def handle_register(req: RegisterRequest, request: Request):
+def handle_register(req: RegisterRequest, request: Request, response: Response):
 
     """
 
@@ -647,6 +648,18 @@ def handle_register(req: RegisterRequest, request: Request):
 
         )
 
+        if "token" in result:
+            is_secure = (request.url.scheme == "https") or is_production_mode()
+            response.set_cookie(
+                key="learnai_session",
+                value=result["token"],
+                max_age=DEFAULT_TOKEN_TTL_SECONDS,
+                httponly=True,
+                secure=is_secure,
+                samesite="lax",
+                path="/"
+            )
+
         return result
 
     except ValueError as e:
@@ -671,7 +684,7 @@ def handle_register(req: RegisterRequest, request: Request):
 
 @app.post("/api/auth/login")
 
-def handle_login(req: LoginRequest, request: Request):
+def handle_login(req: LoginRequest, request: Request, response: Response):
 
     """
 
@@ -711,6 +724,18 @@ def handle_login(req: LoginRequest, request: Request):
 
         )
 
+        if "token" in result:
+            is_secure = (request.url.scheme == "https") or is_production_mode()
+            response.set_cookie(
+                key="learnai_session",
+                value=result["token"],
+                max_age=DEFAULT_TOKEN_TTL_SECONDS,
+                httponly=True,
+                secure=is_secure,
+                samesite="lax",
+                path="/"
+            )
+
         return result
 
     except ValueError:
@@ -731,11 +756,11 @@ def handle_login(req: LoginRequest, request: Request):
 
 @app.post("/api/auth/logout")
 
-def handle_logout(request: Request):
+def handle_logout(request: Request, response: Response):
 
     """
 
-    Revoke current authenticated session token on logout.
+    Revoke current authenticated session token and clear HttpOnly cookie on logout.
 
     """
 
@@ -744,6 +769,15 @@ def handle_logout(request: Request):
     if token:
 
         logout_student(token)
+
+    is_secure = (request.url.scheme == "https") or is_production_mode()
+    response.delete_cookie(
+        key="learnai_session",
+        path="/",
+        httponly=True,
+        secure=is_secure,
+        samesite="lax"
+    )
 
     return {"success": True, "message": "Logged out successfully."}
 
@@ -1753,6 +1787,8 @@ def create_quiz(req: QuizRequest, request: Request):
 
         "quiz_id": quiz_id,
 
+        "session_id": quiz_id,
+
         "attempt_id": quiz.get("attempt_id", quiz_id),
 
         "attempt_number": quiz.get("attempt_number", 1),
@@ -1807,6 +1843,43 @@ def create_quiz(req: QuizRequest, request: Request):
 
     }
 
+
+
+@app.get("/api/quiz/active")
+def get_active_quiz_endpoint(request: Request):
+    """
+    Retrieve the currently active in-progress quiz session for the authenticated student.
+    Returns 204 No Content if no active session exists.
+    """
+    student_id = get_authenticated_student_id(request)
+    session = get_active_quiz_session_for_student(student_id)
+    if not session or session.get("status") != "in_progress":
+        return JSONResponse(status_code=204, content=None)
+
+    public_questions = []
+    for i, q in enumerate(session.get("questions", [])):
+        public_questions.append({
+            "id": i,
+            "question": q["question"],
+            "options": q["options"],
+            "difficulty": q.get("difficulty", "Medium"),
+            "concept": q.get("concept", "General")
+        })
+
+    return {
+        "session_id": session["id"],
+        "quiz_id": session["id"],
+        "student_id": session["student_id"],
+        "course_code": session["course_code"],
+        "subject": session["course_name"],
+        "topic": session["topic_name"],
+        "status": session["status"],
+        "recommended_difficulty": session.get("recommended_difficulty", "mixed"),
+        "adaptive_metadata": session.get("adaptive_metadata"),
+        "created_at": session["created_at"],
+        "expires_at": session["expires_at"],
+        "questions": public_questions
+    }
 
 
 @app.get("/api/quiz/session/{session_id}")

@@ -115,15 +115,27 @@ function isTokenExpired(token, bufferSeconds = 30) {
 }
 
 async function ensureAuthSession(forceRefresh = false) {
-  if (!studentId && typeof localStorage !== "undefined" && localStorage.getItem) {
+  if (currentUser && currentUser.student_id) {
+    studentId = currentUser.student_id;
+  } else if (!studentId && typeof localStorage !== "undefined" && localStorage.getItem) {
     studentId = localStorage.getItem("learnai_student_id") || null;
   }
   if (!authToken && typeof localStorage !== "undefined" && localStorage.getItem) {
     authToken = localStorage.getItem("learnai_auth_token") || null;
   }
 
+  const hasRegisteredSession = Boolean(
+    (currentUser && currentUser.student_id) ||
+    (typeof localStorage !== "undefined" && localStorage.getItem("learnai_session_active"))
+  );
+
   // If we already have a valid unexpired token and are not forcing renewal, return it
   if (!forceRefresh && authToken && studentId && !isTokenExpired(authToken)) {
+    return { token: authToken, studentId: studentId };
+  }
+
+  // If a registered session is active and studentId exists, do not mint an anonymous identity
+  if (hasRegisteredSession && studentId && !forceRefresh) {
     return { token: authToken, studentId: studentId };
   }
 
@@ -141,15 +153,21 @@ async function ensureAuthSession(forceRefresh = false) {
       if (typeof fetch === "function") {
         const res = await fetch(apiUrl("/api/auth/session"), {
           method: "POST",
-          headers: headers
+          headers: headers,
+          credentials: "include"
         });
         if (res.ok) {
           const data = await res.json();
+          // Never overwrite a registered student ID with a minted anonymous UUID
+          if (!currentUser || !currentUser.student_id) {
+            studentId = data.student_id;
+            if (typeof localStorage !== "undefined" && localStorage.setItem) {
+              localStorage.setItem("learnai_student_id", studentId);
+            }
+          }
           authToken = data.token;
-          studentId = data.student_id;
           if (typeof localStorage !== "undefined" && localStorage.setItem) {
             localStorage.setItem("learnai_auth_token", authToken);
-            localStorage.setItem("learnai_student_id", studentId);
           }
           return { token: authToken, studentId: studentId };
         } else {
@@ -189,6 +207,7 @@ async function authenticatedFetch(url, options = {}) {
   if (authToken && !isTokenExpired(authToken)) {
     options.headers["Authorization"] = `Bearer ${authToken}`;
   }
+  options.credentials = options.credentials || "include";
   let res = await fetch(resolvedUrl, options);
   if (res.status === 401) {
     console.warn("[AUTH] 401 Unauthorized received. Session expired or revoked.");
@@ -196,8 +215,13 @@ async function authenticatedFetch(url, options = {}) {
     authToken = null;
     if (typeof localStorage !== "undefined" && localStorage.removeItem) {
       localStorage.removeItem("learnai_auth_token");
+      localStorage.removeItem("learnai_session_active");
       localStorage.removeItem("learnai_student_id");
       localStorage.removeItem("learnai_user_name");
+    }
+    clearSessionState();
+    if (typeof document !== "undefined" && document.documentElement) {
+      document.documentElement.classList.add("unauthenticated");
     }
     showScreen("loginSection");
     showAuthMessage("loginMsg", "Your session has expired or was revoked. Please log in again.");
@@ -1480,61 +1504,156 @@ function showScreen(screenId, pushHistory = true) {
   }
 }
 
-// ── Session State Persistence across Browser Refresh ─────────────────────────
+// ── Session State Persistence across Navigation & Browser Refresh ───────────
 function saveSessionState() {
-  if (currentQuiz && currentQuiz.questions) {
-    sessionStorage.setItem("learnai_active_quiz", JSON.stringify({
+  if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
+    const state = {
       currentQuiz,
       currentIndex,
       answers,
-      activeCourseCode,
-      activeTopicName,
-      activeTopicId,
-      activeNotesSessionId,
-      activeStudyMaterialId
-    }));
+      activeCourseCode: activeCourseCode || currentQuiz.course_code,
+      activeTopicName: activeTopicName || currentQuiz.topic,
+      activeTopicId: activeTopicId || currentQuiz.topic_id || "",
+      activeNotesSessionId: activeNotesSessionId || null,
+      activeStudyMaterialId: activeStudyMaterialId || currentQuiz.study_material_id || null,
+      timestamp: Date.now()
+    };
+    try {
+      localStorage.setItem("learnai_active_quiz", JSON.stringify(state));
+    } catch (e) {}
+    try {
+      sessionStorage.setItem("learnai_active_quiz", JSON.stringify(state));
+    } catch (e) {}
   }
 }
 
 function clearSessionState() {
-  sessionStorage.removeItem("learnai_active_quiz");
+  try {
+    localStorage.removeItem("learnai_active_quiz");
+  } catch (e) {}
+  try {
+    sessionStorage.removeItem("learnai_active_quiz");
+  } catch (e) {}
+  currentQuiz = null;
+  answers = [];
+  currentIndex = 0;
   activeNotesSessionId = null;
 }
 
-function restoreSessionState() {
+function hasActiveQuiz() {
+  if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
+    return true;
+  }
   try {
-    const raw = sessionStorage.getItem("learnai_active_quiz");
+    const raw = (typeof localStorage !== "undefined" && localStorage.getItem("learnai_active_quiz")) ||
+                (typeof sessionStorage !== "undefined" && sessionStorage.getItem("learnai_active_quiz"));
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (data && data.currentQuiz && Array.isArray(data.currentQuiz.questions)) {
+    return Boolean(data && data.currentQuiz && Array.isArray(data.currentQuiz.questions) && data.currentQuiz.questions.length > 0);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function restoreSessionState() {
+  try {
+    // 1. In-memory fast path: If active quiz is already in-memory, render immediately
+    if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
+      currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
+      currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
+      renderQuizHeader(currentQuiz);
+      renderQuestion();
+      showScreen("quizSection");
+      saveSessionState();
+      return true;
+    }
+
+    let raw = null;
+    try {
+      raw = (typeof localStorage !== "undefined" && localStorage.getItem("learnai_active_quiz")) ||
+            (typeof sessionStorage !== "undefined" && sessionStorage.getItem("learnai_active_quiz"));
+    } catch (e) {}
+
+    let data = null;
+    if (raw) {
+      try { data = JSON.parse(raw); } catch (e) {}
+    }
+
+    // 2. Authoritative backend fallback if client storage snapshot is missing
+    if (!data || !data.currentQuiz || !Array.isArray(data.currentQuiz.questions) || data.currentQuiz.questions.length === 0) {
+      if (typeof fetch === "function") {
+        try {
+          const headers = {};
+          if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+          const res = await fetch(apiUrl("/api/quiz/active"), {
+            headers: headers,
+            credentials: "include"
+          });
+          if (res.ok && res.status === 200) {
+            const activeBackendQuiz = await res.json();
+            if (activeBackendQuiz && Array.isArray(activeBackendQuiz.questions) && activeBackendQuiz.questions.length > 0) {
+              data = {
+                currentQuiz: activeBackendQuiz,
+                currentIndex: 0,
+                answers: Array(activeBackendQuiz.questions.length).fill(""),
+                activeCourseCode: activeBackendQuiz.course_code,
+                activeTopicName: activeBackendQuiz.topic,
+                activeTopicId: activeBackendQuiz.topic_id || ""
+              };
+            }
+          }
+        } catch (beErr) {
+          console.debug("[QUIZ] Backend active session check skipped:", beErr);
+        }
+      }
+    }
+
+    if (data && data.currentQuiz && Array.isArray(data.currentQuiz.questions) && data.currentQuiz.questions.length > 0) {
+      // Validate student ownership
+      const activeStudentId = (currentUser && currentUser.student_id) || studentId;
+      if (activeStudentId && data.currentQuiz.student_id && data.currentQuiz.student_id !== activeStudentId) {
+        clearSessionState();
+        return false;
+      }
+      // Validate expiration
+      if (data.currentQuiz.expires_at) {
+        const expTime = new Date(data.currentQuiz.expires_at).getTime();
+        if (!isNaN(expTime) && Date.now() > expTime) {
+          clearSessionState();
+          return false;
+        }
+      }
+
       currentQuiz = data.currentQuiz;
-      currentIndex = data.currentIndex || 0;
-      answers = data.answers || Array(currentQuiz.questions.length).fill("");
+      currentQuiz.quiz_id = currentQuiz.quiz_id || currentQuiz.session_id;
+      currentQuiz.session_id = currentQuiz.session_id || currentQuiz.quiz_id;
+
+      currentIndex = (typeof data.currentIndex === "number" && data.currentIndex >= 0 && data.currentIndex < currentQuiz.questions.length)
+        ? data.currentIndex : 0;
+      answers = (Array.isArray(data.answers) && data.answers.length === currentQuiz.questions.length)
+        ? data.answers : Array(currentQuiz.questions.length).fill("");
       activeCourseCode = data.activeCourseCode || currentQuiz.course_code;
       activeTopicName = data.activeTopicName || currentQuiz.topic;
       activeTopicId = data.activeTopicId || currentQuiz.topic_id || "";
       activeNotesSessionId = data.activeNotesSessionId || null;
       activeStudyMaterialId = data.activeStudyMaterialId || currentQuiz.study_material_id || null;
 
-      // Restore select dropdowns
+      // Safely reflect dropdown values without triggering destructive change events
       if ($("course") && activeCourseCode) {
         $("course").value = activeCourseCode;
-        $("course").dispatchEvent(new Event("change"));
-        setTimeout(() => {
-          if ($("topic") && activeTopicName) {
-            $("topic").value = activeTopicName;
-          }
-        }, 50);
+      }
+      if ($("topic") && activeTopicName) {
+        $("topic").value = activeTopicName;
       }
 
-      // Restore quiz header cleanly
       renderQuizHeader(currentQuiz);
-
       renderQuestion();
       showScreen("quizSection");
+      saveSessionState();
       return true;
     }
   } catch (err) {
+    console.warn("[QUIZ] Failed to restore session state:", err);
     clearSessionState();
   }
   return false;
@@ -1796,6 +1915,7 @@ $("generateBtn").addEventListener("click", () => {
 $("prevBtn").addEventListener("click", () => {
   if (currentIndex > 0) {
     currentIndex--;
+    saveSessionState();
     renderQuestion();
   }
 });
@@ -1819,6 +1939,7 @@ $("nextBtn").addEventListener("click", async () => {
 
   if (currentIndex < currentQuiz.questions.length - 1) {
     currentIndex++;
+    saveSessionState();
     renderQuestion();
   } else {
     await submitQuiz();
@@ -1921,7 +2042,7 @@ function returnFromLoading() {
 }
 
 $("newTopicBtn").addEventListener("click", goToHome);
-$("brandLogo")?.addEventListener("click", goToHome);
+$("brandLogo")?.addEventListener("click", handlePracticeNav);
 $("loadingBackBtn")?.addEventListener("click", returnFromLoading);
 $("loadingCancelBtn")?.addEventListener("click", returnFromLoading);
 
@@ -1946,6 +2067,11 @@ function clearResultDisplay() {
 // ── Core Quiz Generation (First Attempt & Retake) ────────────────────────────
 async function startQuizGeneration(courseCode, topic, isRetake = false, topicId = null, notesSessionId = null, studyMaterialId = null) {
   if (isGenerating) return;
+  if (!isRetake && hasActiveQuiz()) {
+    console.log("[QUIZ] Active quiz already in progress; restoring existing session.");
+    restoreSessionState();
+    return;
+  }
   isGenerating = true;
 
   if (notesSessionId) {
@@ -2735,6 +2861,7 @@ async function openDashboard() {
     return;
   }
   if (isGenerating) return;
+  saveSessionState();
   expandedReviewCourseId = null;
   if (typeof window !== "undefined") window.expandedReviewCourseId = null;
   showScreen("dashboardSection");
@@ -3796,10 +3923,30 @@ async function selectAndPracticeTopic(courseCode, topicName, topicId = null) {
 }
 
 // ── Dashboard Navigation & Button Listeners ──────────────────────────────────
-$("navPracticeBtn")?.addEventListener("click", goToHome);
+async function handlePracticeNav() {
+  if (!currentUser && !localStorage.getItem("learnai_session_active")) {
+    showScreen("loginSection");
+    return;
+  }
+  if (isGenerating) return;
+  if (currentQuiz && Array.isArray(currentQuiz.questions) && currentQuiz.questions.length > 0) {
+    renderQuizHeader(currentQuiz);
+    renderQuestion();
+    showScreen("quizSection");
+    saveSessionState();
+    return;
+  }
+  const restored = await restoreSessionState();
+  if (!restored) {
+    showScreen("setup");
+    if ($("setupMsg")) $("setupMsg").textContent = "";
+  }
+}
+
+$("navPracticeBtn")?.addEventListener("click", handlePracticeNav);
 $("navDashboardBtn")?.addEventListener("click", openDashboard);
 $("viewDashboardFromResultBtn")?.addEventListener("click", openDashboard);
-$("dashboardStartQuizBtn")?.addEventListener("click", goToHome);
+$("dashboardStartQuizBtn")?.addEventListener("click", handlePracticeNav);
 $("dashboardRefreshBtn")?.addEventListener("click", loadDashboard);
 $("dashboardRetryBtn")?.addEventListener("click", loadDashboard);
 $("dashboardCourseFilter")?.addEventListener("change", onDashboardCourseFilterChange);
@@ -4776,6 +4923,7 @@ function initNotesUploaderListeners() {
 
   $("navNotesBtn")?.addEventListener("click", () => {
     if (isGenerating) return;
+    saveSessionState();
     showScreen("notesUploadSection");
   });
 
@@ -5317,14 +5465,15 @@ async function checkSessionStatus() {
     studentId = localStorage.getItem("learnai_student_id") || null;
   }
 
-  if (!authToken || isTokenExpired(authToken)) {
-    currentUser = null;
-    return { status: "unauthenticated" };
+  const headers = {};
+  if (authToken && !isTokenExpired(authToken)) {
+    headers["Authorization"] = `Bearer ${authToken}`;
   }
 
   try {
     const res = await fetch(apiUrl("/api/auth/me"), {
-      headers: { "Authorization": `Bearer ${authToken}` }
+      headers: headers,
+      credentials: "include"
     });
     if (res.ok) {
       const data = await res.json();
@@ -5332,14 +5481,28 @@ async function checkSessionStatus() {
         currentUser = data;
         studentId = data.student_id;
         updateUserDisplay(data.full_name || "Student");
+        if (typeof localStorage !== "undefined" && localStorage.setItem) {
+          localStorage.setItem("learnai_session_active", "1");
+          localStorage.setItem("learnai_student_id", studentId);
+          localStorage.setItem("learnai_user_name", data.full_name || "");
+        }
+        if (typeof document !== "undefined" && document.documentElement) {
+          document.documentElement.classList.remove("unauthenticated");
+        }
         return { status: "authenticated", user: data };
       }
     } else if (res.status === 401 || res.status === 403) {
       currentUser = null;
       if (typeof localStorage !== "undefined") {
         localStorage.removeItem("learnai_auth_token");
+        localStorage.removeItem("learnai_session_active");
         localStorage.removeItem("learnai_student_id");
+        localStorage.removeItem("learnai_user_name");
       }
+      if (typeof document !== "undefined" && document.documentElement) {
+        document.documentElement.classList.add("unauthenticated");
+      }
+      clearSessionState();
       authToken = null;
       studentId = null;
       return { status: "unauthenticated" };
@@ -5378,7 +5541,8 @@ async function handleLoginSubmit(e) {
     const res = await fetch(apiUrl("/api/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email, password: password })
+      body: JSON.stringify({ email: email, password: password }),
+      credentials: "include"
     });
 
     const data = await res.json();
@@ -5400,9 +5564,12 @@ async function handleLoginSubmit(e) {
     };
 
     if (typeof localStorage !== "undefined" && localStorage.setItem) {
-      localStorage.setItem("learnai_auth_token", authToken);
+      localStorage.setItem("learnai_session_active", "1");
       localStorage.setItem("learnai_student_id", studentId);
       localStorage.setItem("learnai_user_name", data.full_name || "");
+    }
+    if (typeof document !== "undefined" && document.documentElement) {
+      document.documentElement.classList.remove("unauthenticated");
     }
 
     updateUserDisplay(data.full_name);
@@ -5410,8 +5577,11 @@ async function handleLoginSubmit(e) {
     clearAuthMessage("loginMsg");
     setAuthBtnLoading("loginSubmitBtn", false, "Login");
 
-    // Redirect to Student Dashboard as required by specification
-    openDashboard();
+    await loadCourses();
+    const restored = await restoreSessionState();
+    if (!restored) {
+      showScreen("setup");
+    }
   } catch (err) {
     console.error("[AUTH] Login error:", err);
     showAuthMessage("loginMsg", "Connection error. Please check your internet connection.", "error");
@@ -5478,7 +5648,8 @@ async function handleRegisterSubmit(e) {
         email: email,
         password: password,
         confirm_password: confirmPassword
-      })
+      }),
+      credentials: "include"
     });
 
     let data = null;
@@ -5515,9 +5686,12 @@ async function handleRegisterSubmit(e) {
     };
 
     if (typeof localStorage !== "undefined" && localStorage.setItem) {
-      localStorage.setItem("learnai_auth_token", authToken);
+      localStorage.setItem("learnai_session_active", "1");
       localStorage.setItem("learnai_student_id", studentId);
       localStorage.setItem("learnai_user_name", data.full_name || "");
+    }
+    if (typeof document !== "undefined" && document.documentElement) {
+      document.documentElement.classList.remove("unauthenticated");
     }
 
     updateUserDisplay(data.full_name);
@@ -5651,27 +5825,113 @@ async function handleResetPasswordSubmit(e) {
   }
 }
 
-async function handleLogout() {
-  if (authToken) {
-    try {
-      await fetch(apiUrl("/api/auth/logout"), {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${authToken}` }
-      });
-    } catch (e) {
-      console.warn("[AUTH] Logout request failed:", e);
+
+// ── Password Visibility Toggle Implementation ───────────────────────────────
+const EYE_ICON_SVG = '<svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+const EYE_OFF_ICON_SVG = '<svg class="eye-off-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+
+function initPasswordToggles() {
+  if (typeof document === "undefined") return;
+  const toggleButtons = document.querySelectorAll(".password-toggle-btn");
+  toggleButtons.forEach(btn => {
+    // Avoid double-binding
+    if (btn.dataset.toggleBound === "true") return;
+    btn.dataset.toggleBound = "true";
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const targetId = btn.getAttribute("data-target");
+      const input = targetId ? document.getElementById(targetId) : null;
+      if (!input) return;
+
+      const isCurrentlyPassword = input.type === "password";
+      input.type = isCurrentlyPassword ? "text" : "password";
+      btn.innerHTML = isCurrentlyPassword ? EYE_OFF_ICON_SVG : EYE_ICON_SVG;
+      btn.setAttribute("aria-label", isCurrentlyPassword ? "Hide password" : "Show password");
+      btn.setAttribute("title", isCurrentlyPassword ? "Hide password" : "Show password");
+      btn.setAttribute("aria-pressed", isCurrentlyPassword ? "true" : "false");
+    });
+  });
+}
+
+function resetPasswordToggles() {
+  if (typeof document === "undefined") return;
+  const toggleButtons = document.querySelectorAll(".password-toggle-btn");
+  toggleButtons.forEach(btn => {
+    const targetId = btn.getAttribute("data-target");
+    const input = targetId ? document.getElementById(targetId) : null;
+    if (input) {
+      input.type = "password";
     }
+    btn.innerHTML = EYE_ICON_SVG;
+    btn.setAttribute("aria-label", "Show password");
+    btn.setAttribute("title", "Show password");
+    btn.setAttribute("aria-pressed", "false");
+  });
+}
+
+async function handleLogout() {
+  try {
+    const headers = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    await fetch(apiUrl("/api/auth/logout"), {
+      method: "POST",
+      headers: headers,
+      credentials: "include"
+    });
+  } catch (e) {
+    console.warn("[AUTH] Logout request failed:", e);
   }
 
+  // 1. Reset forms and clear input fields immediately
+  const formIds = ["loginForm", "registerForm", "forgotPasswordForm", "resetPasswordForm"];
+  formIds.forEach(fId => {
+    const f = $(fId);
+    if (f && typeof f.reset === "function") {
+      try { f.reset(); } catch (e) {}
+    }
+  });
+
+  const authFieldIds = [
+    "loginEmail", "loginPassword",
+    "registerName", "registerEmail", "registerPassword", "registerConfirmPassword",
+    "forgotEmail", "resetNewPassword", "resetConfirmPassword"
+  ];
+  authFieldIds.forEach(id => {
+    const el = $(id);
+    if (el) {
+      el.value = "";
+      el.defaultValue = "";
+    }
+  });
+
+  // 2. Reset password visibility toggles back to masked state
+  resetPasswordToggles();
+
+  // 3. Clear auth messages
+  clearAuthMessage("loginMsg");
+  clearAuthMessage("registerMsg");
+  clearAuthMessage("forgotMsg");
+  clearAuthMessage("resetMsg");
+
+  // 4. Invalidate application and session state
   currentUser = null;
   authToken = null;
   studentId = null;
 
   if (typeof localStorage !== "undefined" && localStorage.removeItem) {
     localStorage.removeItem("learnai_auth_token");
+    localStorage.removeItem("learnai_session_active");
     localStorage.removeItem("learnai_student_id");
     localStorage.removeItem("learnai_user_name");
+    localStorage.removeItem("learnai_active_quiz");
     localStorage.removeItem("learnai_session_state");
+  }
+
+  clearSessionState();
+  if (typeof document !== "undefined" && document.documentElement) {
+    document.documentElement.classList.add("unauthenticated");
   }
 
   showScreen("loginSection");
@@ -5679,6 +5939,7 @@ async function handleLogout() {
 }
 
 function initAuthEventListeners() {
+  initPasswordToggles();
   $("loginForm")?.addEventListener("submit", handleLoginSubmit);
   $("registerForm")?.addEventListener("submit", handleRegisterSubmit);
   $("forgotPasswordForm")?.addEventListener("submit", handleForgotPasswordSubmit);
@@ -5749,15 +6010,18 @@ async function initApp() {
     });
   }
 
-  // Pre-check: if no stored auth token or token expired, immediately show login screen without verification delay
+  // Pre-check: if no stored auth indicator or cookie, immediately show login screen without verification delay
   const storedToken = typeof localStorage !== "undefined" ? localStorage.getItem("learnai_auth_token") : null;
-  if (!storedToken || isTokenExpired(storedToken)) {
+  const sessionActive = typeof localStorage !== "undefined" ? localStorage.getItem("learnai_session_active") : null;
+  const hasPossibleCookie = typeof document !== "undefined" && (document.cookie || "").includes("learnai_session");
+
+  if (!storedToken && !sessionActive && !hasPossibleCookie) {
     showScreen("loginSection");
     loadCourses().catch(() => {});
     return;
   }
 
-  // Token is present: display session verification state
+  // Session present or checking: display session verification state
   showScreen("authCheckingSection");
   $("authCheckingSpinner")?.classList.remove("hidden");
   $("authCheckingErrorBox")?.classList.add("hidden");
@@ -5766,7 +6030,7 @@ async function initApp() {
 
   if (sessionResult.status === "authenticated") {
     await loadCourses();
-    const restored = restoreSessionState();
+    const restored = await restoreSessionState();
 
     // Initialize base history state if not already present
     if (typeof window !== "undefined" && window.history && !window.history.state) {
@@ -5861,6 +6125,13 @@ if (typeof module !== "undefined" && module.exports) {
     setLastExtractionResult: (r) => { lastExtractionResult = r; },
     getLastExtractionResult: () => lastExtractionResult,
     checkSessionStatus,
+    hasActiveQuiz,
+    restoreSessionState,
+    saveSessionState,
+    clearSessionState,
+    handlePracticeNav,
+    initPasswordToggles,
+    resetPasswordToggles,
     initApp
   };
 }

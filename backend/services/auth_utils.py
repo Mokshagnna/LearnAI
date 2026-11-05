@@ -436,6 +436,16 @@ def get_token_from_request(
 
 
 
+    if request is not None and hasattr(request, "cookies"):
+
+        cookie_token = request.cookies.get("learnai_session")
+
+        if cookie_token and isinstance(cookie_token, str) and cookie_token.strip():
+
+            return cookie_token.strip()
+
+
+
     if request is not None and hasattr(request, "query_params"):
 
         query_token = request.query_params.get("token")

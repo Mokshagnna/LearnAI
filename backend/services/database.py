@@ -865,6 +865,37 @@ def get_quiz_session(
     return session
 
 
+def get_active_quiz_session_for_student(
+    student_id: str,
+    conn: Optional[sqlite3.Connection] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve the most recent unexpired in-progress quiz session for a student.
+    Returns None if no active session exists.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+
+    try:
+        cursor = conn.cursor()
+        now_iso = get_utc_now_iso()
+        cursor.execute("""
+            SELECT id FROM quiz_sessions
+            WHERE student_id = ? AND status = 'in_progress' AND expires_at > ?
+            ORDER BY created_at DESC LIMIT 1
+        """, (student_id, now_iso))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        session_id = row[0] if isinstance(row, (tuple, list)) else row["id"]
+        return get_quiz_session(session_id, student_id=student_id, auto_expire=True, conn=conn)
+    finally:
+        if close_conn:
+            conn.close()
+
+
 def complete_quiz_session(
     session_id: str,
     student_id: str,
