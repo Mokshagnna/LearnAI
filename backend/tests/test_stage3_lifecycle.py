@@ -603,3 +603,99 @@ class TestFrontendWiringAndElements:
         # Must verify activeStudentId against quiz ownership and purge on mismatch
         assert "data.currentQuiz.student_id !== activeStudentId" in js
         assert "clearSessionState();" in js
+
+    def test_frontend_assets_exist_and_are_versioned(self):
+        """Verify that style.css and app.js physically exist and are referenced with cache-busting version query parameters in index.html."""
+        import re
+        assert INDEX_HTML.exists(), "frontend/index.html does not exist"
+        assert STYLE_CSS.exists(), "frontend/css/style.css does not exist"
+        assert APP_JS.exists(), "frontend/js/app.js does not exist"
+
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        css_match = re.search(r'href=["\']css/style\.css\?v=([a-zA-Z0-9._-]+)["\']', html)
+        js_match = re.search(r'src=["\']js/app\.js\?v=([a-zA-Z0-9._-]+)["\']', html)
+
+        assert css_match is not None, "frontend/index.html must reference css/style.css with ?v= parameter"
+        assert js_match is not None, "frontend/index.html must reference js/app.js with ?v= parameter"
+
+        css_ver = css_match.group(1).strip()
+        js_ver = js_match.group(1).strip()
+        assert len(css_ver) > 0, "CSS version parameter cannot be empty"
+        assert len(js_ver) > 0, "JS version parameter cannot be empty"
+
+    def test_git_asset_cache_busting_on_modifications(self):
+        """
+        Verify that whenever frontend/js/app.js or frontend/css/style.css changes,
+        its version in frontend/index.html must also change to bust immutable 1-year browser cache.
+        Compares relevant Git revisions.
+        """
+        import subprocess
+        import re
+
+        # Extract current versions from working tree index.html
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        current_css_match = re.search(r'href=["\']css/style\.css\?v=([a-zA-Z0-9._-]+)["\']', html)
+        current_js_match = re.search(r'src=["\']js/app\.js\?v=([a-zA-Z0-9._-]+)["\']', html)
+        assert current_css_match and current_js_match
+
+        current_css_ver = current_css_match.group(1)
+        current_js_ver = current_js_match.group(1)
+
+        # 1. Check against HEAD if working tree has changes
+        head_html_cmd = subprocess.run(
+            ["git", "show", "HEAD:frontend/index.html"],
+            capture_output=True, text=True, cwd=str(ROOT_DIR)
+        )
+        if head_html_cmd.returncode == 0:
+            head_html = head_html_cmd.stdout
+            head_css_m = re.search(r'href=["\']css/style\.css\?v=([a-zA-Z0-9._-]+)["\']', head_html)
+            head_js_m = re.search(r'src=["\']js/app\.js\?v=([a-zA-Z0-9._-]+)["\']', head_html)
+            head_css_ver = head_css_m.group(1) if head_css_m else None
+            head_js_ver = head_js_m.group(1) if head_js_m else None
+
+            # If app.js was modified in working copy vs HEAD, index.html must have incremented version
+            diff_js = subprocess.run(
+                ["git", "diff", "HEAD", "--", "frontend/js/app.js"],
+                capture_output=True, text=True, cwd=str(ROOT_DIR)
+            ).stdout.strip()
+            if diff_js:
+                assert current_js_ver != head_js_ver, (
+                    f"frontend/js/app.js was modified vs HEAD, but frontend/index.html version "
+                    f"was not incremented (still {head_js_ver})"
+                )
+
+            # If style.css was modified in working copy vs HEAD, index.html must have incremented version
+            diff_css = subprocess.run(
+                ["git", "diff", "HEAD", "--", "frontend/css/style.css"],
+                capture_output=True, text=True, cwd=str(ROOT_DIR)
+            ).stdout.strip()
+            if diff_css:
+                assert current_css_ver != head_css_ver, (
+                    f"frontend/css/style.css was modified vs HEAD, but frontend/index.html version "
+                    f"was not incremented (still {head_css_ver})"
+                )
+
+        # 2. Check Git history across commits: find the commit that last changed app.js and style.css
+        # Verify that commit or subsequent commits updated the asset query tag in index.html
+        last_js_commit = subprocess.run(
+            ["git", "log", "-n", "1", "--format=%H", "--", "frontend/js/app.js"],
+            capture_output=True, text=True, cwd=str(ROOT_DIR)
+        ).stdout.strip()
+
+        if last_js_commit:
+            # Check the version in the commit immediately prior to the last JS change
+            parent_js_commit = f"{last_js_commit}~1"
+            parent_html_cmd = subprocess.run(
+                ["git", "show", f"{parent_js_commit}:frontend/index.html"],
+                capture_output=True, text=True, cwd=str(ROOT_DIR)
+            )
+            if parent_html_cmd.returncode == 0:
+                parent_html = parent_html_cmd.stdout
+                parent_js_m = re.search(r'src=["\']js/app\.js\?v=([a-zA-Z0-9._-]+)["\']', parent_html)
+                if parent_js_m:
+                    parent_js_ver = parent_js_m.group(1)
+                    # The current working version must be strictly different from the version before the last app.js modification
+                    assert current_js_ver != parent_js_ver, (
+                        f"frontend/js/app.js was modified in {last_js_commit[:7]}, but index.html "
+                        f"asset version remained {parent_js_ver} (must be incremented for cache invalidation)"
+                    )
