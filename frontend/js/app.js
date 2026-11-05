@@ -1611,30 +1611,6 @@ async function loadActiveQuizState() {
       try { data = JSON.parse(raw); } catch (e) {}
     }
 
-    // 2. Authoritative backend check if storage snapshot is missing
-    if (!data || !data.currentQuiz || !Array.isArray(data.currentQuiz.questions) || data.currentQuiz.questions.length === 0) {
-      if (typeof fetch === "function") {
-        try {
-          const res = await authenticatedFetch("/api/quiz/active");
-          if (res.ok && res.status === 200) {
-            const activeBackendQuiz = await res.json();
-            if (activeBackendQuiz && Array.isArray(activeBackendQuiz.questions) && activeBackendQuiz.questions.length > 0) {
-              data = {
-                currentQuiz: activeBackendQuiz,
-                currentIndex: 0,
-                answers: Array(activeBackendQuiz.questions.length).fill(""),
-                activeCourseCode: activeBackendQuiz.course_code,
-                activeTopicName: activeBackendQuiz.topic,
-                activeTopicId: activeBackendQuiz.topic_id || ""
-              };
-            }
-          }
-        } catch (beErr) {
-          console.debug("[QUIZ] Backend active session check skipped:", beErr);
-        }
-      }
-    }
-
     if (data && data.currentQuiz && Array.isArray(data.currentQuiz.questions) && data.currentQuiz.questions.length > 0) {
       // Validate student ownership
       const activeStudentId = (currentUser && currentUser.student_id) || studentId;
@@ -2195,14 +2171,6 @@ async function startQuizGeneration(courseCode, topic, isRetake = false, topicId 
         abandonSessionIds = sId ? [sId] : null;
         abandonSessionId = sId;
       }
-    }
-  } else if (!isRetake) {
-    // Local state shows no active quiz, but frontend state may have been lost
-    // (timeout, refresh, navigation). Check the backend as a fallback before
-    // creating a new session. Restore the existing session if one is found.
-    const restored = await restoreSessionState();
-    if (restored) {
-      return;
     }
   }
   isGenerating = true;

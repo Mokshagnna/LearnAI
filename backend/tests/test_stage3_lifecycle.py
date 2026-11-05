@@ -622,15 +622,59 @@ class TestFrontendWiringAndElements:
             "409 single-session discard path does not reset isGenerating before recursive startQuizGeneration()"
         )
 
-    def test_start_quiz_generation_checks_backend_when_local_state_empty(self):
-        """Verify startQuizGeneration falls back to /api/quiz/active via restoreSessionState()
-        when local frontend state shows no active quiz, preventing duplicate session creation."""
+    def test_start_quiz_generation_no_backend_fallback_when_local_state_empty(self):
+        """Verify startQuizGeneration does NOT consult the backend when local state is empty.
+        Orphaned backend sessions must not hijack quiz initiation; they surface via the 409
+        conflict dialog instead, requiring explicit user confirmation."""
         js = APP_JS.read_text(encoding="utf-8")
-        # The else-if branch that checks backend when hasActiveQuiz() is false
-        assert "} else if (!isRetake) {" in js
-        assert "const restored = await restoreSessionState();" in js
-        assert "if (restored) {" in js
-        assert "return;" in js
+        sg_start = js.index("async function startQuizGeneration")
+        sg_end = js.index("// ── Dedicated Quiz Header Renderer", sg_start)
+        sg_body = js[sg_start:sg_end]
+        # The exact backend fallback pattern that was removed:
+        #   } else if (!isRetake) {
+        #     const restored = await restoreSessionState();
+        #     if (restored) { return; }
+        #   }
+        assert "const restored = await restoreSessionState();" not in sg_body, (
+            "startQuizGeneration must not automatically restore backend sessions without user consent"
+        )
+        # No bare else-if branch that skips quiz generation to restore from backend
+        assert "else if (!isRetake) {\n      const restored" not in sg_body, (
+            "startQuizGeneration must not have a backend-aware fallback branch"
+        )
+
+    def test_load_active_quiz_state_no_backend_fallback(self):
+        """Verify loadActiveQuizState restores only from frontend state (memory / storage),
+        never by querying the backend for orphaned in_progress sessions."""
+        js = APP_JS.read_text(encoding="utf-8")
+        # /api/quiz/active must not appear anywhere in app.js (backend fallback fully removed)
+        assert "/api/quiz/active" not in js, (
+            "loadActiveQuizState must not consult the backend; /api/quiz/active must not "
+            "be referenced in app.js"
+        )
+        # authenticatedFetch must not be used inside loadActiveQuizState
+        laqs_start = js.index("async function loadActiveQuizState")
+        laqs_end = js.index("function resumeActiveQuiz", laqs_start)
+        laqs_body = js[laqs_start:laqs_end]
+        assert "authenticatedFetch" not in laqs_body, (
+            "loadActiveQuizState must not call authenticatedFetch"
+        )
+
+    def test_has_active_quiz_checks_frontend_state_only(self):
+        """Verify hasActiveQuiz() only checks frontend state (currentQuiz, localStorage, sessionStorage),
+        never the backend."""
+        js = APP_JS.read_text(encoding="utf-8")
+        hs_start = js.index("function hasActiveQuiz")
+        hs_end = js.index("function updateActiveQuizBanner", hs_start)
+        hs_body = js[hs_start:hs_end]
+        assert "currentQuiz" in hs_body, "hasActiveQuiz must check currentQuiz"
+        assert "localStorage" in hs_body or "sessionStorage" in hs_body, (
+            "hasActiveQuiz must check browser storage"
+        )
+        assert "fetch" not in hs_body, "hasActiveQuiz must not use fetch"
+        assert "/api/quiz/active" not in hs_body, (
+            "hasActiveQuiz must not query the backend"
+        )
 
     def test_start_quiz_generation_prevents_reentry_while_generating(self):
         """Verify startQuizGeneration blocks re-entry while a generation is in flight."""
