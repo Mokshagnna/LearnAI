@@ -4,7 +4,7 @@ Syllabus-grounded adaptive quiz platform powered by multi-provider AI inference.
 
 **Live:** [https://learnai-fzgd.onrender.com](https://learnai-fzgd.onrender.com)
 
-[![CI](https://github.com/Mokshagnna/LearnAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Mokshagnna/LearnAI/actions/workflows/ci.yml)
+[![CI](https://github.com/Mokshagnna/LearnAI/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Mokshagnna/LearnAI/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-latest-009688)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -19,14 +19,7 @@ LearnAI generates 10-question multiple-choice quizzes from a structured universi
 
 ## Screenshots
 
-<!-- Add screenshots to docs/screenshots/ and update links below -->
-| Practice Quiz | Notes & Slides Upload |
-| :---: | :---: |
-| ![Practice Quiz](docs/screenshots/practice-quiz.png) | ![Notes Upload](docs/screenshots/notes-upload.png) |
-
-| Quiz Results & Analysis | Student Dashboard |
-| :---: | :---: |
-| ![Results](docs/screenshots/quiz-results.png) | ![Dashboard](docs/screenshots/dashboard.png) |
+Screenshots coming soon. The application includes a practice quiz screen, notes upload panel, results and analysis view, and a student progress dashboard.
 
 ---
 

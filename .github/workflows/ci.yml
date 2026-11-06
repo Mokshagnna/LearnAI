@@ -51,4 +51,4 @@ jobs:
         RATE_LIMIT_QUIZ_GEN_PER_MIN: "10"
         RATE_LIMIT_QUIZ_SUBMIT_PER_MIN: "30"
       run: |
-        pytest backend -v
+        pytest backend/tests -v
