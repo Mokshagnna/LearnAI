@@ -332,6 +332,12 @@ Frontend assets are served by FastAPI via a `StaticFiles` mount. `backend/main.p
 
 ---
 
-## Author
+## Contributors
 
-**Mokshagnna** — [github.com/Mokshagnna](https://github.com/Mokshagnna)
+ **Mokshagnna** — [GitHub](https://github.com/Mokshagnna)
+
+ **Irshad Vali** — [GitHub](https://github.com/shaikirshadvali2-alt)
+
+ **Ganapathi** — [GitHub](https://github.com/gana465)
+
+ **Mallikharjuna** — [GitHub](https://github.com/Mallikharjuna0725)
