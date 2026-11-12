@@ -45,3 +45,21 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Agent tools & workspace skills
+.agent/
+.gemini/
+.impeccable/
+
+# Scratch & temporary investigation harnesses
+scratch/
+
+# Generated audit dumps and benchmark test outputs
+audit_50_questions.json
+audit_50_review.txt
+benchmark_results_summary.json
+diverse_3_results.json
+live_quiz_22MT103_matrices.json
+live_quiz_result_verification.json
+production_sub_10s_benchmark_results.json
+backend/data/module6_benchmark_results.json
